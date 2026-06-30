@@ -1,0 +1,25 @@
+{
+  "name": "pearlist",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared household lists (groceries, to-dos, chores) over P2P. Part of the PeerLoom suite, built on @peerloom/core.",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@peerloom/core": "file:../peerloom-core",
+    "autobase": "^7.25.1",
+    "b4a": "^1.8.0",
+    "compact-encoding": "^2.19.2",
+    "corestore": "^7.8.0",
+    "hyperbee": "^2.27.3",
+    "hyperdht": "^6.29.0",
+    "hyperswarm": "^4.17.0",
+    "protomux": "^3.10.3",
+    "sodium-universal": "^5.0.1"
+  },
+  "devDependencies": {
+    "@hyperswarm/testnet": "^3.1.4"
+  }
+}
