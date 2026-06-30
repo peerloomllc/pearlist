@@ -1,0 +1,23 @@
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Build artifacts
+assets/bare-universal.bundle
+assets/bare-ios.bundle
+assets/bare-ios-sim.bundle
+assets/app-ui.bundle
+*.apk
+*.aab
+*.ipa
+*.dmg
+*.exe
+
+# Local-only docs (per CLAUDE.md)
+TODO.md
+DONE.md
+
+# Local env / release
+scripts/.env
+.env
