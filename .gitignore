@@ -8,6 +8,7 @@ assets/bare-universal.bundle
 assets/bare-ios.bundle
 assets/bare-ios-sim.bundle
 assets/app-ui.bundle
+assets/index.html
 *.apk
 *.aab
 *.ipa

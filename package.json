@@ -4,7 +4,8 @@
   "private": true,
   "description": "Shared household lists (groceries, to-dos, chores) over P2P. Part of the PeerLoom suite, built on @peerloom/core.",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "build:ui": "esbuild src/ui/main.jsx --bundle --format=iife --jsx=automatic --define:process.env.NODE_ENV=\\\"production\\\" --outfile=assets/app-ui.bundle && cp src/ui/index.html assets/index.html"
   },
   "license": "MIT",
   "dependencies": {
@@ -17,9 +18,12 @@
     "hyperdht": "^6.29.0",
     "hyperswarm": "^4.17.0",
     "protomux": "^3.10.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "sodium-universal": "^5.0.1"
   },
   "devDependencies": {
-    "@hyperswarm/testnet": "^3.1.4"
+    "@hyperswarm/testnet": "^3.1.4",
+    "esbuild": "^0.27.3"
   }
 }
