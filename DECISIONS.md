@@ -2,6 +2,24 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-06-30 - Items use shared content-keyed rows, not writer-scoped rows
+Tier: T3
+Context: the original proposal sketched items as item:{listId}:{pubkey}:{seqPad}
+(writer-scoped, like PearCircle trips). That would let only the author edit or
+check an item. A shared shopping/chore list needs ANY household member to check
+or edit ANY item.
+Choice: items are keyed item:{listId}:{itemId} (itemId = newEntityId). Any
+admitted writer may write any item; the value's `pubkey` records the LAST editor
+and the signature proves it; concurrent edits resolve last-writer-wins by
+updatedAt with a signature tie-break. Same shape for list:{listId} rows. Delete
+is a { deleted: true } tombstone with no-resurrection. Implemented in
+src/listWire.js (rowApplyDecision) + src/listMethods.js.
+Alternatives: writer-scoped item keys (rejected, blocks shared check-off);
+CRDT per-field merge (overkill for a list).
+Consequences: no per-writer integrity on rows, which is fine inside a trusted
+admitted-writer household. Supersedes the item-key shape in proposal
+2026-06-30-pearlist-core-extraction.md.
+
 ## 2026-06-30 - PearList is the @peerloom/core extraction vehicle
 Tier: T3
 Context: suite needs a reusable P2P core; substrate already proven by three
