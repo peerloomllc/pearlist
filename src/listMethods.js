@@ -6,6 +6,7 @@
 
 const { signValue } = require('@peerloom/core/records')
 const { newEntityId } = require('@peerloom/core/ids')
+const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 
 const { listKey, itemKey, LIST_RANGE, itemRange } = require('./listWire')
@@ -38,6 +39,21 @@ async function readRow (base, key) {
 }
 
 const methods = {
+  // --- household ----------------------------------------------------------
+  // The first joined group is "the household". Lets the UI restore on launch
+  // and re-show the invite without the creator having stashed it.
+  'household:get': async (_args, ctx) => {
+    for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
+      if (!value || !value.groupId) continue
+      const inviteKey = defaultEncodeInvite({
+        groupId: value.groupId, groupKey: value.groupKey, encryptionKey: value.encryptionKey,
+        bootstrap: value.bootstrap, name: value.name,
+      })
+      return { groupId: value.groupId, name: value.name || 'Household', inviteKey }
+    }
+    return null
+  },
+
   // --- lists --------------------------------------------------------------
   'list:create': async ({ groupId, name }, ctx) => {
     const listId = newEntityId()
