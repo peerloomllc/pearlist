@@ -119,6 +119,27 @@ test('item note + link: stored, sanitized, and clearable', async () => {
   await engine.close()
 })
 
+test('item suggestions: learns added items, ranks by frequency, matches word prefix', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'G' })
+  await call('item:add', { groupId, listId, text: 'Oat milk' })
+  await call('item:add', { groupId, listId, text: 'Milk' })
+  await call('item:add', { groupId, listId, text: 'Milk' }) // added twice -> ranks higher
+  await call('item:add', { groupId, listId, text: 'Bread' })
+
+  // Word-prefix match: "mi" surfaces both "Milk" and "Oat milk".
+  const s = await call('item:suggest', { prefix: 'mi' })
+  assert.ok(s.includes('Milk') && s.includes('Oat milk'))
+  assert.ok(s.indexOf('Milk') < s.indexOf('Oat milk'), 'more frequent item ranks first')
+  // The exact current text is excluded (nothing to autocomplete).
+  assert.ok(!(await call('item:suggest', { prefix: 'milk' })).includes('Milk'))
+  // No prefix returns the top recents.
+  assert.ok((await call('item:suggest', {})).includes('Milk'))
+  await engine.close()
+})
+
 test('deleting an item hides it and survives no-resurrection', async () => {
   const { engine, call } = driver()
   await call('init', {})
