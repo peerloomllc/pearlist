@@ -148,7 +148,9 @@ const methods = {
     } else if (existing.avatar) {
       profile.avatar = existing.avatar
     }
-    if (profile.avatar && profile.avatar.length > 400000) throw new Error('avatar too large')
+    // ~2 MB raw file as a base64 data URL (gif/webp kept animated). Static photos
+    // land far under this after downscaling in the UI.
+    if (profile.avatar && profile.avatar.length > 3000000) throw new Error('avatar too large')
     await ctx.localDb.put('profile', profile)
     // Push the updated name/avatar to the household roster.
     await publishMember(ctx)

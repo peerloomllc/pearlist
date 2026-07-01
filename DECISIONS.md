@@ -2,6 +2,28 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-01 - Menu tidy, contrast, animated avatars
+Tier: T1 (UI) plus a stored-value cap bump (mildly wire-relevant).
+Context: on-device UX pass. Four asks.
+Choice:
+- **Delete space** moved from the Profile bottomsheet to the **Spaces switcher**:
+  a trash affordance per row, shown only for spaces this device owns
+  (`space.owner`). deleteSpace(groupId) now targets any owned space, not just
+  the active one; a joiner sees no trash. Reasoning: delete belongs with the
+  space list, not personal settings.
+- **Invite peers** removed from the Profile bottomsheet: redundant with the
+  share button already on the Space page. Menu is now profile + About only.
+- **Contrast** bumped in both themes (border, divider, text-muted) and the
+  Toggle gained a dedicated `--color-track` off-state + knob shadow, so the
+  dark-mode switch is legible in light mode (was near-invisible white-on-white).
+- **Animated avatars**: gif/webp are stored as their raw base64 data URL (no
+  canvas re-encode, which flattened them to one frame); static images still
+  downscale + re-encode to jpeg. Cap the raw file at 2 MB; the worklet's
+  profile.avatar stored-value cap rises 400 KB -> 3 MB chars to clear a 2 MB
+  file's base64. Cost: an animated avatar replicates inline in each member row
+  across every joined group. Acceptable behind the 2 MB cap; revisit if member
+  rows get heavy (a blob-core for avatars is the later fix).
+
 ## 2026-07-01 - Space delete (owner-only) + members view + join banner
 Tier: T3 (new `space` singleton wire key) for delete; T1 for the UI-only bits.
 Context: owner should be able to delete a space and notify members; users want to

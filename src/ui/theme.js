@@ -16,7 +16,7 @@ export const colors = {
   error: v('error'), warn: v('warn'), success: v('success'),
   text: { primary: v('text-primary'), secondary: v('text-secondary'), muted: v('text-muted'), onPrimary: v('text-on-primary') },
   surface: { base: v('surface-base'), card: v('surface-card'), elevated: v('surface-elevated'), input: v('surface-input') },
-  border: v('border'), divider: v('divider'),
+  border: v('border'), divider: v('divider'), track: v('track'),
 }
 
 // Dark is the default (plain :root), matching the suite.
@@ -24,16 +24,16 @@ const THEME_VARS = `
 :root, :root[data-theme="dark"]{
   --color-primary:#9FE15A; --color-primary-dark:#5BAF3A; --color-accent:#7ec4cf;
   --color-error:#ef5350; --color-warn:#ffb74d; --color-success:#7ec77a;
-  --color-text-primary:#f0f0f0; --color-text-secondary:#a0a0a0; --color-text-muted:#666666; --color-text-on-primary:#0a1f23;
+  --color-text-primary:#f0f0f0; --color-text-secondary:#b0b0b0; --color-text-muted:#808080; --color-text-on-primary:#0a1f23;
   --color-surface-base:#0d0d0d; --color-surface-card:#1a1a1a; --color-surface-elevated:#252525; --color-surface-input:#1c1c1c;
-  --color-border:#2a2a2a; --color-divider:#222222;
+  --color-border:#3a3a3a; --color-divider:#333333; --color-track:#4a4a4a;
 }
 :root[data-theme="light"]{
   --color-primary:#5BAF3A; --color-primary-dark:#3F8A26; --color-accent:#3a8a99;
   --color-error:#c62828; --color-warn:#b8730f; --color-success:#2e7d32;
-  --color-text-primary:#1a1916; --color-text-secondary:#5a5a5a; --color-text-muted:#999999; --color-text-on-primary:#ffffff;
-  --color-surface-base:#f7f5f0; --color-surface-card:#ffffff; --color-surface-elevated:#fafafa; --color-surface-input:#f0ede8;
-  --color-border:#e0ddd5; --color-divider:#ececec;
+  --color-text-primary:#1a1916; --color-text-secondary:#4a4a4a; --color-text-muted:#7a7568; --color-text-on-primary:#ffffff;
+  --color-surface-base:#f7f5f0; --color-surface-card:#ffffff; --color-surface-elevated:#efece4; --color-surface-input:#f0ede8;
+  --color-border:#cbc6b8; --color-divider:#dcd8cc; --color-track:#c2bdaf;
 }`
 
 const RESET = `

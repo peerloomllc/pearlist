@@ -27,6 +27,10 @@ function initialsFor (label) {
   const parts = s.split(/\s+/)
   return (parts.length > 1 ? parts[0][0] + parts[1][0] : s.slice(0, 2)).toUpperCase()
 }
+// Cap for an animated (gif/webp) avatar kept as raw base64. Static photos are
+// downscaled far below this. Base64 inflates ~4/3, so the worklet's stored-value
+// cap must clear this * 1.4.
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024
 function avatarSrc (avatar) {
   if (typeof avatar !== 'string' || !avatar) return null
   return avatar.startsWith('data:') ? avatar : 'data:image/jpeg;base64,' + avatar
@@ -120,8 +124,8 @@ function BottomSheet ({ open, onClose, title, children }) {
 
 function Toggle ({ on: isOn, onChange }) {
   return (
-    <button onClick={() => onChange(!isOn)} aria-label='toggle' style={{ width: 44, height: 26, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.surface.elevated, position: 'relative', transition: 'background 160ms', padding: 0 }}>
-      <span style={{ position: 'absolute', top: 3, left: isOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 160ms' }} />
+    <button onClick={() => onChange(!isOn)} aria-label='toggle' style={{ width: 44, height: 26, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
+      <span style={{ position: 'absolute', top: 3, left: isOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.35)', transition: 'left 160ms' }} />
     </button>
   )
 }
@@ -354,6 +358,17 @@ function ShareIcon ({ size = 20 }) {
   )
 }
 
+function TrashIcon ({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
+      <path d='M3 6h18' />
+      <path d='M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2' />
+      <path d='M6 6v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6' />
+      <path d='M10 11v6M14 11v6' />
+    </svg>
+  )
+}
+
 // Overlapping member avatars on the space page; tap to see the full roster.
 function MembersBar ({ members, onOpen }) {
   if (!members || members.length === 0) return null
@@ -391,6 +406,7 @@ export default function App () {
   const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
   const prevMembersRef = useRef({})              // groupId -> Set(pubkey) for join detection
   const [listPicker, setListPicker] = useState(null) // { listId, current } for assigning a whole list
+  const [deleteTarget, setDeleteTarget] = useState(null) // space {groupId,name} pending delete confirm
   const [draft, setDraft] = useState('')       // add-item composer (list detail)
   const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
   const composer = useRef(null)
@@ -518,12 +534,13 @@ export default function App () {
   function switchSpace (groupId) {
     setActiveSpaceId(groupId); setOpenListId(null); setSheet(null)
   }
-  async function deleteSpace () {
-    const id = activeSpaceId; if (!id) return
-    setSheet(null)
+  async function deleteSpace (targetId) {
+    const id = targetId || activeSpaceId; if (!id) return
+    setSheet(null); setDeleteTarget(null)
     try { await call('space:delete', { groupId: id }) } catch (e) { alert('Could not delete space: ' + e.message); return }
     const sp = await loadSpaces()
-    setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null)
+    // Only move off if we deleted the space we were viewing.
+    if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
     if (sp.length === 0) setPhase('onboarding')
     setBanner('Space deleted.')
   }
@@ -609,7 +626,8 @@ export default function App () {
 
       <InviteSheet open={sheet === 'invite'} onClose={() => setSheet(null)} inviteKey={activeSpace?.inviteKey} spaceName={activeSpace?.name} />
       <SpaceSwitcherSheet open={sheet === 'spaces'} onClose={() => setSheet(null)} spaces={spaces} activeId={activeSpaceId}
-        onPick={switchSpace} onCreate={() => setSheet('start')} onJoin={() => setSheet('join')} />
+        onPick={switchSpace} onCreate={() => setSheet('start')} onJoin={() => setSheet('join')}
+        onDelete={(s) => { setDeleteTarget(s); setSheet('deleteSpace') }} />
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} onClose={() => setSheet(null)}
@@ -618,13 +636,10 @@ export default function App () {
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
-        spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner}
         onProfile={() => { setSheet(null); setView('profile') }}
-        onInvite={() => setSheet('invite')}
-        onAbout={() => { setSheet(null); setView('about') }}
-        onDeleteSpace={() => setSheet('deleteSpace')} />
+        onAbout={() => { setSheet(null); setView('about') }} />
       <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} />
-      <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => setSheet(null)} spaceName={activeSpace?.name} onConfirm={deleteSpace} />
+      <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => { setSheet(null); setDeleteTarget(null) }} spaceName={deleteTarget?.name} onConfirm={() => deleteSpace(deleteTarget?.groupId)} />
       <ProfileView open={view === 'profile'} onBack={() => setView(null)} profile={profile} theme={theme} onTheme={applyTheme}
         onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
       <AboutView open={view === 'about'} onBack={() => setView(null)} onWallet={() => setSheet('wallet')} />
@@ -658,15 +673,24 @@ function StartSheet ({ open, onClose, onCreate }) {
 }
 
 // Switch between spaces (each a separate private group), or make/join another.
-function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate, onJoin }) {
+function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate, onJoin, onDelete }) {
   return (
     <BottomSheet open={open} onClose={onClose} title='Spaces'>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: sp.base }}>
-        {spaces.map((s) => (
-          <button key={s.groupId} onClick={() => onPick(s.groupId)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px ${sp.sm}px`, background: s.groupId === activeId ? c.surface.elevated : 'none', border: 'none', borderRadius: r.md, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: s.groupId === activeId ? 400 : 300 }}>
-            <span>{s.name}</span>{s.groupId === activeId ? <span style={{ color: c.primary }}>✓</span> : null}
-          </button>
-        ))}
+        {spaces.map((s) => {
+          const active = s.groupId === activeId
+          return (
+            <div key={s.groupId} style={{ display: 'flex', alignItems: 'center', background: active ? c.surface.elevated : 'none', borderRadius: r.md }}>
+              <button onClick={() => onPick(s.groupId)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: sp.sm, padding: `${sp.md}px ${sp.sm}px`, background: 'none', border: 'none', borderRadius: r.md, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: active ? 400 : 300, textAlign: 'left' }}>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                {active ? <span style={{ color: c.primary }}>✓</span> : null}
+              </button>
+              {s.owner ? (
+                <button onClick={() => onDelete(s)} aria-label={`Delete ${s.name}`} style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><TrashIcon size={17} /></button>
+              ) : null}
+            </div>
+          )
+        })}
       </div>
       <Button variant='secondary' onClick={onCreate}>Create a space</Button>
       <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onJoin}>Join a space</Button>
@@ -814,9 +838,9 @@ function DeleteSpaceSheet ({ open, onClose, spaceName, onConfirm }) {
   )
 }
 
-function MenuSheet ({ open, onClose, profile, spaceName, isOwner, onProfile, onAbout, onInvite, onDeleteSpace }) {
-  const Row = ({ onClick, danger, children }) => (
-    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
+function MenuSheet ({ open, onClose, profile, onProfile, onAbout }) {
+  const Row = ({ onClick, children }) => (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
   )
   return (
     <BottomSheet open={open} onClose={onClose}>
@@ -827,9 +851,7 @@ function MenuSheet ({ open, onClose, profile, spaceName, isOwner, onProfile, onA
           <span style={{ color: c.text.muted, fontSize: 13 }}>Name and photo</span>
         </span>
       </button>
-      <Row onClick={onInvite}><span style={{ flex: 1 }}>Invite peers</span><ShareIcon size={16} /></Row>
       <Row onClick={onAbout}><span style={{ flex: 1 }}>About PearList</span><span style={{ color: c.text.muted }}>›</span></Row>
-      {isOwner ? <Row onClick={onDeleteSpace} danger><span style={{ flex: 1 }}>Delete {spaceName || 'space'}</span></Row> : null}
     </BottomSheet>
   )
 }
@@ -848,8 +870,19 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   async function onPickFile (e) {
     const file = e.target.files?.[0]; e.target.value = ''
     if (!file) return
-    try { const small = await compressToAvatar(await readFileDataUrl(file)); await commitAvatar(small) }
-    catch { alert('Could not read that image') }
+    // GIF / WebP can be animated: store the raw data URL so the motion survives
+    // (re-encoding through a canvas would flatten it to a single frame). Cap the
+    // size since it is stored inline and replicated to every member. Static
+    // images are downscaled + re-encoded to stay tiny.
+    const animated = file.type === 'image/gif' || file.type === 'image/webp'
+    try {
+      if (animated) {
+        if (file.size > AVATAR_MAX_BYTES) { alert(`That ${file.type === 'image/gif' ? 'GIF' : 'image'} is too large. Keep it under ${Math.round(AVATAR_MAX_BYTES / 1024 / 1024)} MB to keep the animation.`); return }
+        await commitAvatar(await readFileDataUrl(file))
+      } else {
+        await commitAvatar(await compressToAvatar(await readFileDataUrl(file)))
+      }
+    } catch { alert('Could not read that image') }
   }
   async function saveName () {
     const trimmed = name.trim(); if (!trimmed) return
