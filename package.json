@@ -16,12 +16,15 @@
     "verify": "node --test test/*.test.js && npm run build:bare && npm run build:bare:ios && npm run build:ui"
   },
   "license": "MIT",
-  "engines": { "node": ">=20.0.0" },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@peerloom/core": "file:../peerloom-core",
     "@react-native-async-storage/async-storage": "2.2.0",
     "autobase": "^7.25.1",
     "b4a": "^1.8.0",
+    "babel-preset-expo": "~54.0.10",
     "compact-encoding": "^2.19.2",
     "corestore": "^7.8.0",
     "expo": "^54.0.10",
