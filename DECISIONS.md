@@ -2,6 +2,31 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-01 - iOS bring-up (first iPhone build)
+Tier: T1 (build/infra; no wire-format or app-behavior change).
+Context: iOS was the last unproven leg of the three-layer stack. Android deploy
+was already live; the iPhone had never run the app.
+Choice:
+- **Native project**: generated with `expo prebuild -p ios` (NOT committed - ios/
+  stays gitignored per the existing "regenerate native from app.json + plugins"
+  convention). app.json already carried the iOS bits (bundleId com.pearlist, and
+  the P2P-critical Info.plist keys NSLocalNetworkUsageDescription +
+  NSBonjourServices `_hyperswarm._udp` + NSCameraUsageDescription for QR scan).
+  Generated entitlements are empty (`<dict/>`) so Xcode's cached wildcard team
+  profile covers com.pearlist with no Apple-portal trip - same approach as
+  PearCircle.
+- **Pipeline**: `scripts/ios-dev-install.sh`, ported from PearCircle's proven
+  dev-install (rsync -> pod install -> Release archive -> export dev IPA ->
+  install + launch via `xcrun devicectl`). Same Mac mini host, team G79ALD29NA,
+  and paired iPhone SE. Made self-contained: it runs prebuild if ios/ is absent.
+- **One-time Mac setup** (rsync excludes node_modules; pod install resolves
+  expo/react-native from it, and PearList's `file:../peerloom-core` dep needs the
+  sibling present): rsync peerloom-core to the Mac + `npm install` in pearlist.
+  Documented in the script header; node_modules then survives future rsync runs.
+Consequences: first iOS build installed + launched on the iPhone SE. Still open:
+the cross-platform sync smoke (iPhone joins a Pixel/TCL space) to prove iOS
+local-network P2P end to end.
+
 ## 2026-07-01 - Item notes + hyperlink
 Tier: T1 (additive item fields; no wire-format break - item rows already carry
 arbitrary signed fields).
