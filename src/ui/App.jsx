@@ -621,17 +621,14 @@ export default function App () {
     await call('list:assign', { groupId: gid, listId, assignee })
     await loadLists(gid)
   }
-  async function addItemText (text, keepFocus) {
+  async function addItemText (text) {
     const t = String(text || '').trim(); if (!t || !gid || !openListId) return
     setDraft(''); setSuggestions([])
     await call('item:add', { groupId: gid, listId: openListId, text: t })
     await loadItems(gid, openListId)
-    // Composer add (+/Enter) dismisses the keyboard to show the full list; a
-    // suggestion-chip tap keeps focus so you can quickly add several in a row.
-    if (keepFocus) composer.current?.focus?.()
-    else composer.current?.blur?.()
+    composer.current?.blur?.() // dismiss the keyboard; show the full list
   }
-  const addItem = () => addItemText(draft, false)
+  const addItem = () => addItemText(draft)
 
   // Item autocomplete: suggest previously-added items as you type (device-local).
   useEffect(() => {
@@ -711,7 +708,7 @@ export default function App () {
               : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
           </div>
           <div style={{ position: 'sticky', bottom: 0, background: c.surface.base }}>
-            {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t, true)} /> : null}
+            {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
           </div>
         </>
@@ -1112,7 +1109,7 @@ function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete
     <>
       <BottomSheet open={open} onClose={onClose} title='Edit item'>
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
-          <Field value={text} onChange={setText} placeholder='Item' autoFocus />
+          <Field value={text} onChange={setText} placeholder='Item' />
           <div style={{ display: 'flex', alignItems: 'center', gap: sp.md }}>
             <span style={{ color: c.text.secondary, fontSize: 14, width: 70 }}>Quantity</span>
             <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>−</button>
