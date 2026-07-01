@@ -413,13 +413,15 @@ export default function App () {
     loadLists(gid)
   }, [phase, gid, loadLists])
 
-  // Poll the active list + roster so a peer's changes show up. Cheap for a list app.
+  // Poll lists + the open list's items + roster so a peer's changes show up.
+  // Lists must be in here too, else a peer's list rename/delete/add only lands
+  // when the local user switches spaces. Cheap for a list app.
   useEffect(() => {
     if (phase !== 'home' || !gid) return
-    const refresh = () => { loadItems(gid, openListId); loadMembers(gid, selfPubkey) }
+    const refresh = () => { loadLists(gid); loadItems(gid, openListId); loadMembers(gid, selfPubkey) }
     refresh()
     const t = setInterval(refresh, 2500)
-    const off = on('peer:connected', () => { loadLists(gid); refresh() })
+    const off = on('peer:connected', () => refresh())
     return () => { clearInterval(t); off() }
   }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers])
 
