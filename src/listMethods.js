@@ -8,8 +8,52 @@ const { signValue } = require('@peerloom/core/records')
 const { newEntityId } = require('@peerloom/core/ids')
 const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
+const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = require('./listWire')
+
+// --- avatars: stored in the content blob store, not inline in member rows -----
+// A member row carries a tiny { avatarBlob:{key,id}, avatarHash, avatarType }
+// reference instead of a multi-MB data URL, so the append-only log stays small
+// and avatars are not re-appended on every name change. Resolved back to a data
+// URL for the UI, cached by content hash so a poll does not refetch. Legacy rows
+// with an inline `avatar` data URL are still honored.
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024
+const avatarCache = new Map()   // contentHash -> data URL
+const avatarPending = new Set()  // contentHash currently being fetched
+
+function blobHash (buf) { const out = b4a.alloc(32); sodium.crypto_generichash(out, buf); return b4a.toString(out, 'hex') }
+function parseDataUrl (s) {
+  const m = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(String(s))
+  if (!m) return null
+  return { mime: m[1] || 'application/octet-stream', base64: !!m[2], data: m[3] }
+}
+async function resolveAvatarAwait (ctx, row) {
+  if (row?.avatar) return row.avatar // legacy inline data URL
+  if (row?.avatarBlob && row?.avatarHash) {
+    if (avatarCache.has(row.avatarHash)) return avatarCache.get(row.avatarHash)
+    const bytes = await ctx.blobs.get(row.avatarBlob)
+    if (!bytes) return null
+    const url = `data:${row.avatarType || 'image/png'};base64,${b4a.toString(bytes, 'base64')}`
+    avatarCache.set(row.avatarHash, url)
+    return url
+  }
+  return null
+}
+// Non-blocking: returns the cached data URL or null, kicking off a background
+// fetch so a remote avatar "pops in" on the next poll instead of stalling this one.
+function resolveAvatarCached (ctx, row) {
+  if (row?.avatar) return row.avatar
+  if (row?.avatarBlob && row?.avatarHash) {
+    if (avatarCache.has(row.avatarHash)) return avatarCache.get(row.avatarHash)
+    if (!avatarPending.has(row.avatarHash)) {
+      avatarPending.add(row.avatarHash)
+      resolveAvatarAwait(ctx, row).catch(() => {}).finally(() => avatarPending.delete(row.avatarHash))
+    }
+    return null
+  }
+  return null
+}
 
 function pubkeyHex (ctx) { return b4a.toString(ctx.identity.publicKey, 'hex') }
 
@@ -38,7 +82,8 @@ function isFounder (base) {
 async function publishMember (ctx, onlyGroupId) {
   const prof = (await ctx.localDb.get('profile'))?.value
   const value = { displayName: prof?.displayName || 'Member' }
-  if (prof?.avatar) value.avatar = prof.avatar
+  if (prof?.avatarBlob) { value.avatarBlob = prof.avatarBlob; value.avatarHash = prof.avatarHash; value.avatarType = prof.avatarType || 'image/png' }
+  else if (prof?.avatar) value.avatar = prof.avatar // legacy inline (pre-blob profiles)
   const key = memberKey(pubkeyHex(ctx))
   let published = false
   for (const [groupId, base] of ctx.bases) {
@@ -141,12 +186,17 @@ const methods = {
   },
 
   // --- profile (device-local) --------------------------------------------
-  // Stored in localDb, matching the suite: { displayName, avatar?, updatedAt, v }.
-  // avatar is an inline base64 data URL. Kept local for now (member-name
-  // broadcast to the group is a later enhancement).
+  // Stored in localDb as { displayName, avatarBlob?, avatarHash?, avatarType?,
+  // updatedAt, v }. The avatar bytes live in the content blob store (not inline);
+  // get/set resolve them back to a data URL so the UI is unchanged.
   'profile:get': async (_args, ctx) => {
     const row = await ctx.localDb.get('profile')
-    return row ? row.value : null
+    if (!row) return null
+    const p = row.value
+    const out = { displayName: p.displayName, updatedAt: p.updatedAt, v: p.v }
+    const avatar = await resolveAvatarAwait(ctx, p) // own blob is local -> fast
+    if (avatar) out.avatar = avatar
+    return out
   },
 
   'profile:set': async (args = {}, ctx) => {
@@ -154,19 +204,33 @@ const methods = {
     if (typeof displayName !== 'string' || !displayName.trim()) throw new Error('displayName required')
     const existing = (await ctx.localDb.get('profile'))?.value || {}
     const profile = { displayName: displayName.trim().slice(0, 64), updatedAt: Date.now(), v: 1 }
-    // avatar: key absent -> preserve; null -> clear; string -> set.
+    // avatar: key absent -> preserve; null -> clear; data URL -> store in the
+    // blob store (deduped by content hash so re-saving the same image, or a
+    // name-only edit, does not append new bytes).
     if (Object.prototype.hasOwnProperty.call(args, 'avatar')) {
-      if (args.avatar) profile.avatar = String(args.avatar)
+      if (args.avatar) {
+        const parsed = parseDataUrl(args.avatar)
+        if (!parsed || !parsed.base64) throw new Error('avatar must be a base64 data URL')
+        const bytes = b4a.from(parsed.data, 'base64')
+        if (bytes.length > AVATAR_MAX_BYTES) throw new Error('avatar too large')
+        const hash = blobHash(bytes)
+        let ref = (await ctx.localDb.get('blobref:' + hash))?.value
+        if (!ref) { const put = await ctx.blobs.put(bytes); ref = { key: put.key, id: put.id, type: parsed.mime }; await ctx.localDb.put('blobref:' + hash, ref) }
+        profile.avatarBlob = { key: ref.key, id: ref.id }; profile.avatarHash = hash; profile.avatarType = ref.type
+        avatarCache.set(hash, String(args.avatar)) // warm cache with the exact bytes we were handed
+      }
+      // else (avatar null): leave the avatar fields off -> cleared.
+    } else if (existing.avatarBlob) {
+      profile.avatarBlob = existing.avatarBlob; profile.avatarHash = existing.avatarHash; profile.avatarType = existing.avatarType
     } else if (existing.avatar) {
-      profile.avatar = existing.avatar
+      profile.avatar = existing.avatar // legacy inline passthrough
     }
-    // ~2 MB raw file as a base64 data URL (gif/webp kept animated). Static photos
-    // land far under this after downscaling in the UI.
-    if (profile.avatar && profile.avatar.length > 3000000) throw new Error('avatar too large')
     await ctx.localDb.put('profile', profile)
-    // Push the updated name/avatar to the household roster.
-    await publishMember(ctx)
-    return profile
+    await publishMember(ctx) // push updated name/avatar-ref to the roster
+    const out = { displayName: profile.displayName, updatedAt: profile.updatedAt, v: 1 }
+    const avatar = await resolveAvatarAwait(ctx, profile)
+    if (avatar) out.avatar = avatar
+    return out
   },
 
   // --- identity + members -------------------------------------------------
@@ -181,7 +245,7 @@ const methods = {
     await base.update()
     const out = []
     for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
-      if (value && value.pubkey) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: value.avatar || null })
+      if (value && value.pubkey) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: resolveAvatarCached(ctx, value) })
     }
     return out
   },
