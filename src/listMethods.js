@@ -219,6 +219,15 @@ const methods = {
     return { ok: true }
   },
 
+  // Retention (roadmap #4, P1): prune old already-applied input blocks to bound
+  // append-only growth. Background maintenance - the UI calls it, throttled, for
+  // the active space. keepRecent is generous so small spaces are untouched and
+  // only long-churned ones shrink. Safe: the view is persisted and lagging/new
+  // peers re-download or fast-forward (see @peerloom/core engine.retain).
+  'space:retain': async ({ groupId, keepRecent }, ctx) => {
+    return ctx.retain(groupId, { keepRecent: Number.isFinite(keepRecent) ? keepRecent : 512 })
+  },
+
   // --- profile (device-local) --------------------------------------------
   // Stored in localDb as { displayName, avatarBlob?, avatarHash?, avatarType?,
   // updatedAt, v }. The avatar bytes live in the content blob store (not inline);

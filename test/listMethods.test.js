@@ -343,3 +343,23 @@ test('deleting a list hides it from list:getAll', async () => {
   assert.equal((await call('list:getAll', { groupId })).length, 0)
   await engine.close()
 })
+
+test('space:retain prunes old blocks but items stay intact and writable', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Churny' })
+  const { listId } = await call('list:create', { groupId, name: 'L' })
+  for (let i = 0; i < 200; i++) await call('item:add', { groupId, listId, text: 'i' + i })
+  const base = engine.bases.get(groupId); await base.update()
+
+  const res = await call('space:retain', { groupId, keepRecent: 20 })
+  assert.equal(res.ok, true)
+  assert.ok(res.cleared > 0, 'pruned some blocks')
+  assert.equal(await base.local.has(0), false, 'oldest block pruned')
+
+  // No data loss: all 200 items still readable, and the list is still writable.
+  assert.equal((await call('item:getAll', { groupId, listId })).length, 200)
+  await call('item:add', { groupId, listId, text: 'after' })
+  assert.equal((await call('item:getAll', { groupId, listId })).length, 201)
+  await engine.close()
+})

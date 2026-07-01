@@ -90,6 +90,7 @@ const mockMethods = {
   },
   'spaces:list': async () => [...mock.groups.values()].map((g) => ({ groupId: g.groupId, name: g.name, inviteKey: g.inviteKey, owner: g.owner })),
   'space:init': async () => ({ ok: true }),
+  'space:retain': async () => ({ ok: true, cleared: 0, cores: 0 }),
   'space:delete': async ({ groupId }) => { mock.groups.delete(groupId); return { ok: true } },
   'space:forget': async ({ groupId }) => { mock.groups.delete(groupId); return { ok: true } },
   'member:publish': async ({ groupId }) => {
