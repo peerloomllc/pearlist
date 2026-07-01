@@ -87,24 +87,21 @@ function Spinner ({ size = 22 }) {
   return <div style={{ width: size, height: size, border: `2px solid ${c.border}`, borderTopColor: c.primary, borderRadius: '50%', animation: 'pearlist-spin 0.7s linear infinite' }} />
 }
 
-// Wrap a click handler so it fires a haptic tap first (device only; no-op in
-// preview). `kind` lets destructive/confirm actions buzz harder.
-function tap (onClick, kind = 'light') {
-  return (e) => { haptic(kind); return onClick?.(e) }
-}
-
-function Button ({ variant = 'primary', children, style, onClick, ...rest }) {
+// Haptics are applied globally by a delegated click listener (see App), so
+// individual controls need no per-onClick wiring. `data-haptic` opts an element
+// into a stronger cue ('warn' for destructive, 'success' for completing).
+function Button ({ variant = 'primary', children, style, ...rest }) {
   const base = { width: '100%', padding: '14px 16px', borderRadius: r.lg, fontSize: 16, fontWeight: 400, cursor: 'pointer', fontFamily: FONT }
   const variants = {
     primary: { background: c.primary, color: c.text.onPrimary, border: 'none' },
     secondary: { background: c.surface.input, color: c.text.primary, border: `1px solid ${c.text.muted}` },
     danger: { background: 'transparent', color: c.error, border: `1px solid ${c.error}` },
   }
-  return <button onClick={onClick ? tap(onClick, variant === 'danger' ? 'warn' : 'light') : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
+  return <button data-haptic={variant === 'danger' ? 'warn' : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
 }
 
-function IconButton ({ children, label, style, onClick, ...rest }) {
-  return <button aria-label={label} onClick={onClick ? tap(onClick) : undefined} style={{ width: 36, height: 36, padding: 0, background: 'none', color: c.text.secondary, border: 'none', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', ...style }} {...rest}>{children}</button>
+function IconButton ({ children, label, style, ...rest }) {
+  return <button aria-label={label} style={{ width: 36, height: 36, padding: 0, background: 'none', color: c.text.secondary, border: 'none', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', ...style }} {...rest}>{children}</button>
 }
 
 function TopBar ({ title, left, right }) {
@@ -149,7 +146,7 @@ function BottomSheet ({ open, onClose, title, children }) {
 
 function Toggle ({ on: isOn, onChange }) {
   return (
-    <button onClick={() => { haptic(); onChange(!isOn) }} aria-label='toggle' style={{ width: 44, height: 26, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
+    <button onClick={() => onChange(!isOn)} aria-label='toggle' style={{ width: 44, height: 26, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
       <span style={{ position: 'absolute', top: 3, left: isOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.35)', transition: 'left 160ms' }} />
     </button>
   )
@@ -384,7 +381,7 @@ function UndoToast ({ onUndo }) {
   return (
     <div style={{ position: 'fixed', left: '50%', bottom: 'calc(var(--pear-safe-bottom) + 84px)', transform: 'translateX(-50%)', zIndex: 80, maxWidth: 560, width: 'calc(100% - 24px)', background: c.surface.elevated, color: c.text.primary, padding: '10px 8px 10px 16px', borderRadius: r.lg, fontSize: 14, display: 'flex', alignItems: 'center', gap: sp.sm, boxShadow: '0 6px 20px rgba(0,0,0,0.45)', border: `1px solid ${c.border}` }}>
       <span style={{ flex: 1 }}>Item deleted</span>
-      <button onClick={() => { haptic(); onUndo() }} style={{ background: 'none', border: 'none', color: c.primary, fontSize: 14, fontWeight: 500, cursor: 'pointer', padding: '4px 14px' }}>Undo</button>
+      <button onClick={onUndo} style={{ background: 'none', border: 'none', color: c.primary, fontSize: 14, fontWeight: 500, cursor: 'pointer', padding: '4px 14px' }}>Undo</button>
     </div>
   )
 }
@@ -393,7 +390,7 @@ function ItemRow ({ item, members, onToggle, onOpen }) {
   const checked = !!item.checked
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}` }}>
-      <button onClick={() => { haptic(checked ? 'light' : 'success'); onToggle(item) }} aria-label={checked ? 'uncheck' : 'check'} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', border: `2px solid ${checked ? c.primary : c.text.muted}`, background: checked ? c.primary : 'transparent', color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 0, animation: checked ? 'pearlist-pop 240ms ease' : 'none' }}>{checked ? '✓' : ''}</button>
+      <button onClick={() => onToggle(item)} data-haptic={checked ? 'light' : 'success'} aria-label={checked ? 'uncheck' : 'check'} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', border: `2px solid ${checked ? c.primary : c.text.muted}`, background: checked ? c.primary : 'transparent', color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 0, animation: checked ? 'pearlist-pop 240ms ease' : 'none' }}>{checked ? '✓' : ''}</button>
       <button onClick={() => onOpen(item)} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, maxWidth: '100%' }}>
           <span style={{ position: 'relative', color: checked ? c.text.muted : c.text.primary, fontSize: 16, fontWeight: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -404,7 +401,7 @@ function ItemRow ({ item, members, onToggle, onOpen }) {
         </span>
         {item.note ? <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{item.note}</span> : null}
       </button>
-      {item.url ? <button onClick={(e) => { e.stopPropagation(); haptic(); openUrl(item.url) }} aria-label='Open link' style={{ width: 34, height: 34, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
+      {item.url ? <button onClick={(e) => { e.stopPropagation(); openUrl(item.url) }} aria-label='Open link' style={{ width: 34, height: 34, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
       <AssigneeAvatar pubkey={item.assignee} members={members} size={24} />
     </div>
   )
@@ -558,6 +555,20 @@ export default function App () {
     })().catch((e) => { console.error(e); setPhase('onboarding') })
   }, [loadSpaces])
 
+  // Global haptics: one delegated listener buzzes on every tap of any button or
+  // tappable (and any future one), so controls need no per-onClick wiring. Click
+  // phase means it fires on a real tap, not on scroll/swipe. `data-haptic` opts
+  // an element into a stronger cue ('warn' destructive, 'success' completing).
+  useEffect(() => {
+    const onTap = (e) => {
+      const el = e.target?.closest?.('button, a, [role="button"], label, summary, input[type="checkbox"], input[type="radio"]')
+      if (!el || el.disabled) return
+      haptic(el.dataset?.haptic || 'light')
+    }
+    document.addEventListener('click', onTap, true)
+    return () => document.removeEventListener('click', onTap, true)
+  }, [])
+
   // Load the active space's lists whenever the space changes.
   useEffect(() => {
     if (phase !== 'home' || !gid) { setLists([]); setOpenListId(null); return }
@@ -640,10 +651,10 @@ export default function App () {
     return () => clearTimeout(t)
   }, [banner])
 
-  // The undo window: after 5s the delete stands. Also cleared when leaving the list.
+  // The undo window: after 3s the delete stands. Also cleared when leaving the list.
   useEffect(() => {
     if (!pendingUndo) return
-    const t = setTimeout(() => setPendingUndo(null), 5000)
+    const t = setTimeout(() => setPendingUndo(null), 3000)
     return () => clearTimeout(t)
   }, [pendingUndo])
   useEffect(() => { setPendingUndo(null) }, [openListId])
@@ -709,7 +720,7 @@ export default function App () {
     await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: !item.checked })
     loadItems(gid, openListId)
   }
-  // Swipe-delete: remove the item, then offer a 5s undo. Undo re-creates it with
+  // Swipe-delete: remove the item, then offer a 3s undo. Undo re-creates it with
   // its fields (a new row, since the delete is a no-resurrection tombstone).
   async function swipeDeleteItem (item) {
     const snap = { text: item.text, qty: item.qty, note: item.note, url: item.url, assignee: item.assignee, checked: !!item.checked }
@@ -937,7 +948,7 @@ function SuggestionBar ({ items, onPick }) {
   return (
     <div style={{ display: 'flex', gap: sp.sm, overflowX: 'auto', padding: `${sp.sm}px ${sp.base}px ${sp.md}px`, WebkitOverflowScrolling: 'touch' }}>
       {items.map((t) => (
-        <button key={t} onClick={() => { haptic(); onPick(t) }} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: r.full, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.secondary, fontSize: 14, fontWeight: 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>{t}</button>
+        <button key={t} onClick={() => onPick(t)} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: r.full, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.secondary, fontSize: 14, fontWeight: 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>{t}</button>
       ))}
     </div>
   )
@@ -949,7 +960,7 @@ function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef }) {
   return (
     <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base, borderTop: `1px solid ${c.border}` }}>
       <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onSubmit() }} placeholder={placeholder} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-      <button onClick={() => { haptic(); onSubmit() }} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer' }}>+</button>
+      <button onClick={onSubmit} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer' }}>+</button>
     </div>
   )
 }
@@ -1035,9 +1046,9 @@ function MenuSheet ({ open, onClose, profile, onProfile, onAbout }) {
   )
   return (
     <BottomSheet open={open} onClose={onClose}>
-      <button onClick={onProfile} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.xs}px ${sp.xs}px ${sp.base}px`, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-        <Avatar name={profile?.displayName} avatar={profile?.avatar} size={48} />
-        <span style={{ display: 'flex', flexDirection: 'column' }}>
+      <button onClick={onProfile} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.sm, width: '100%', padding: `${sp.xs}px ${sp.xs}px ${sp.base}px`, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'center' }}>
+        <Avatar name={profile?.displayName} avatar={profile?.avatar} size={64} />
+        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <span style={{ color: c.text.primary, fontSize: 17, fontWeight: 400 }}>{profile?.displayName || 'Set up profile'}</span>
           <span style={{ color: c.text.muted, fontSize: 13 }}>Name and photo</span>
         </span>
@@ -1217,7 +1228,7 @@ function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete
           <div style={{ display: 'flex', gap: sp.sm }}>
             <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder='Link (optional, e.g. store page)' inputMode='url' autoCapitalize='none' autoCorrect='off'
               style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
-            {url.trim() ? <button onClick={() => { haptic(); openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim()) }} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
+            {url.trim() ? <button onClick={() => openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim())} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
           </div>
           <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim() })}>Save</Button>
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
