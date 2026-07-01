@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { View, Platform, Share, StatusBar } from 'react-native'
 import { WebView } from 'react-native-webview'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Worklet } from 'react-native-bare-kit'
 import b4a from 'b4a'
 import { Asset } from 'expo-asset'
@@ -90,8 +91,23 @@ export default function Shell () {
   const [statusBarStyle, setStatusBarStyle] = useState<'light-content' | 'dark-content'>('light-content')
   const webViewLoaded = useRef(false)
   const pendingDeeplink = useRef<string | null>(null)
+  const insets = useSafeAreaInsets()
 
   useEffect(() => { _webViewRef = webViewRef })
+
+  // Feed the real device safe-area insets to the WebView as CSS vars. Android
+  // WebView reports env(safe-area-inset-*) as 0, so without this the top bar
+  // hides under the status bar / notch.
+  const injectInsets = () => {
+    webViewRef.current?.injectJavaScript(
+      `(function(){var d=document.documentElement.style;` +
+      `d.setProperty('--pear-safe-top','${insets.top}px');` +
+      `d.setProperty('--pear-safe-bottom','${insets.bottom}px');` +
+      `d.setProperty('--pear-safe-left','${insets.left}px');` +
+      `d.setProperty('--pear-safe-right','${insets.right}px');})(); true;`
+    )
+  }
+  useEffect(() => { if (webViewLoaded.current) injectInsets() }, [insets.top, insets.bottom, insets.left, insets.right])
 
   useEffect(() => {
     (async () => {
@@ -174,6 +190,7 @@ export default function Shell () {
 
   const onLoad = () => {
     webViewLoaded.current = true
+    injectInsets()
     if (pendingDeeplink.current) {
       emitEvent('deeplink:invite', { url: pendingDeeplink.current })
       pendingDeeplink.current = null
