@@ -6,11 +6,28 @@
 
 const { signValue } = require('@peerloom/core/records')
 const { newEntityId } = require('@peerloom/core/ids')
+const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 
-const { listKey, itemKey, LIST_RANGE, itemRange } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = require('./listWire')
 
 function pubkeyHex (ctx) { return b4a.toString(ctx.identity.publicKey, 'hex') }
+
+// Publish this device's profile as its member:{pubkey} roster row to every group
+// it can write to, so peers can resolve assignee pubkeys to a name + avatar.
+async function publishMember (ctx, onlyGroupId) {
+  const prof = (await ctx.localDb.get('profile'))?.value
+  const value = { displayName: prof?.displayName || 'Member' }
+  if (prof?.avatar) value.avatar = prof.avatar
+  const key = memberKey(pubkeyHex(ctx))
+  let published = false
+  for (const [groupId, base] of ctx.bases) {
+    if (onlyGroupId && groupId !== onlyGroupId) continue
+    if (!base.writable) continue
+    try { await ctx.append(groupId, { type: 'put', key, value: signRow(ctx, value) }); published = true } catch {}
+  }
+  return published
+}
 
 // Stamp authorship + a fresh updatedAt, then sign. Every write records the
 // CURRENT editor as pubkey (proves who made this edit; createdBy is preserved
@@ -38,11 +55,86 @@ async function readRow (base, key) {
 }
 
 const methods = {
+  // --- household ----------------------------------------------------------
+  // The first joined group is "the household". Lets the UI restore on launch
+  // and re-show the invite without the creator having stashed it.
+  'household:get': async (_args, ctx) => {
+    for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
+      if (!value || !value.groupId) continue
+      const inviteKey = defaultEncodeInvite({
+        groupId: value.groupId, groupKey: value.groupKey, encryptionKey: value.encryptionKey,
+        bootstrap: value.bootstrap, name: value.name,
+      })
+      return { groupId: value.groupId, name: value.name || 'Household', inviteKey }
+    }
+    return null
+  },
+
+  // --- profile (device-local) --------------------------------------------
+  // Stored in localDb, matching the suite: { displayName, avatar?, updatedAt, v }.
+  // avatar is an inline base64 data URL. Kept local for now (member-name
+  // broadcast to the group is a later enhancement).
+  'profile:get': async (_args, ctx) => {
+    const row = await ctx.localDb.get('profile')
+    return row ? row.value : null
+  },
+
+  'profile:set': async (args = {}, ctx) => {
+    const { displayName } = args
+    if (typeof displayName !== 'string' || !displayName.trim()) throw new Error('displayName required')
+    const existing = (await ctx.localDb.get('profile'))?.value || {}
+    const profile = { displayName: displayName.trim().slice(0, 64), updatedAt: Date.now(), v: 1 }
+    // avatar: key absent -> preserve; null -> clear; string -> set.
+    if (Object.prototype.hasOwnProperty.call(args, 'avatar')) {
+      if (args.avatar) profile.avatar = String(args.avatar)
+    } else if (existing.avatar) {
+      profile.avatar = existing.avatar
+    }
+    if (profile.avatar && profile.avatar.length > 400000) throw new Error('avatar too large')
+    await ctx.localDb.put('profile', profile)
+    // Push the updated name/avatar to the household roster.
+    await publishMember(ctx)
+    return profile
+  },
+
+  // --- identity + members -------------------------------------------------
+  'identity:get': async (_args, ctx) => ({ pubkey: pubkeyHex(ctx) }),
+
+  // Publish our roster row to a group (call after join once writable; the UI
+  // retries until it lands). Returns whether the base was writable.
+  'member:publish': async ({ groupId }, ctx) => ({ published: await publishMember(ctx, groupId) }),
+
+  'member:getAll': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    await base.update()
+    const out = []
+    for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
+      if (value && value.pubkey) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: value.avatar || null })
+    }
+    return out
+  },
+
+  // --- donation reminder (device-local) ----------------------------------
+  // Suite pattern: nudge once after 2 weeks of use. Tracks first use + whether
+  // shown. The UI additionally gates this off on iOS (App Store 3.1.1).
+  'donation:status': async (_args, ctx) => {
+    let row = (await ctx.localDb.get('donateReminder'))?.value
+    if (!row) { row = { firstUseAt: Date.now(), shown: false }; await ctx.localDb.put('donateReminder', row) }
+    const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000
+    return { due: !row.shown && (Date.now() - row.firstUseAt >= FOURTEEN_DAYS), shown: !!row.shown, firstUseAt: row.firstUseAt }
+  },
+  'donation:dismiss': async (_args, ctx) => {
+    const row = (await ctx.localDb.get('donateReminder'))?.value || { firstUseAt: Date.now() }
+    row.shown = true
+    await ctx.localDb.put('donateReminder', row)
+    return { ok: true }
+  },
+
   // --- lists --------------------------------------------------------------
   'list:create': async ({ groupId, name }, ctx) => {
     const listId = newEntityId()
     await putRow(ctx, groupId, listKey(listId), {
-      id: listId, name: String(name ?? ''), createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+      id: listId, name: String(name ?? ''), assignee: null, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
     })
     return { listId }
   },
@@ -52,6 +144,15 @@ const methods = {
     const existing = await readRow(base, listKey(listId))
     if (!existing || existing.deleted) throw new Error('list not found')
     await putRow(ctx, groupId, listKey(listId), { ...existing, name: String(name ?? '') })
+    return { ok: true }
+  },
+
+  // Assign a whole list to a member (a "responsible person") by pubkey, or null.
+  'list:assign': async ({ groupId, listId, assignee }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, listKey(listId))
+    if (!existing || existing.deleted) throw new Error('list not found')
+    await putRow(ctx, groupId, listKey(listId), { ...existing, assignee: assignee ? String(assignee) : null })
     return { ok: true }
   },
 

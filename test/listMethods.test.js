@@ -107,6 +107,76 @@ test('deleting an item hides it and survives no-resurrection', async () => {
   await engine.close()
 })
 
+test('household:get returns the joined household with a re-encodable invite', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const created = await call('group:create', { name: 'The Nest' })
+  const household = await call('household:get', {})
+  assert.equal(household.groupId, created.groupId)
+  assert.equal(household.name, 'The Nest')
+  assert.equal(typeof household.inviteKey, 'string')
+  await engine.close()
+})
+
+test('profile:set / profile:get round-trip, preserving avatar on a name-only update', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  assert.equal(await call('profile:get', {}), null)
+
+  await call('profile:set', { displayName: 'Sam', avatar: 'data:image/png;base64,AAAA' })
+  let p = await call('profile:get', {})
+  assert.equal(p.displayName, 'Sam')
+  assert.equal(p.avatar, 'data:image/png;base64,AAAA')
+
+  // Name-only update keeps the avatar; clearing with null removes it.
+  await call('profile:set', { displayName: 'Samantha' })
+  p = await call('profile:get', {})
+  assert.equal(p.displayName, 'Samantha')
+  assert.equal(p.avatar, 'data:image/png;base64,AAAA')
+
+  await call('profile:set', { displayName: 'Samantha', avatar: null })
+  p = await call('profile:get', {})
+  assert.equal(p.avatar, undefined)
+
+  await assert.rejects(() => call('profile:set', { displayName: '' }))
+  await engine.close()
+})
+
+test('donation reminder: fresh is not due, dismiss marks it shown', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const s1 = await call('donation:status', {})
+  assert.equal(s1.due, false) // first use just now, 14 days not elapsed
+  assert.equal(s1.shown, false)
+  assert.equal(typeof s1.firstUseAt, 'number')
+  await call('donation:dismiss', {})
+  const s2 = await call('donation:status', {})
+  assert.equal(s2.shown, true)
+  assert.equal(s2.due, false)
+  await engine.close()
+})
+
+test('member roster: publish self, read it, and assign a list to a member', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  await call('profile:set', { displayName: 'Sam' }) // republishes the member row
+  const id = await call('identity:get', {})
+
+  const members = await call('member:getAll', { groupId })
+  assert.equal(members.length, 1)
+  assert.equal(members[0].pubkey, id.pubkey)
+  assert.equal(members[0].displayName, 'Sam')
+
+  const { listId } = await call('list:create', { groupId, name: 'Chores' })
+  await call('list:assign', { groupId, listId, assignee: id.pubkey })
+  assert.equal((await call('list:getAll', { groupId })).find(l => l.id === listId).assignee, id.pubkey)
+
+  await call('list:assign', { groupId, listId, assignee: null }) // unassign
+  assert.equal((await call('list:getAll', { groupId })).find(l => l.id === listId).assignee, null)
+  await engine.close()
+})
+
 test('deleting a list hides it from list:getAll', async () => {
   const { engine, call } = driver()
   await call('init', {})

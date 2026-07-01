@@ -57,6 +57,16 @@ test('no resurrection: a tombstone rejects all later writes', () => {
   assert.equal(rowApplyDecision(itemKey('L', 'I'), laterEdit, tombstone), 'reject')
 })
 
-test('rejects keys outside the list:/item: namespaces', () => {
+test('rejects keys outside the list:/item:/member: namespaces', () => {
   assert.equal(rowApplyDecision('other:1', row(), null), 'reject')
+})
+
+test('member row is owner-scoped: only the key-matching pubkey may write it', () => {
+  const kp = generateKeypair()
+  const pub = b4a.toString(kp.publicKey, 'hex')
+  const good = signValue({ pubkey: pub, updatedAt: 1000, displayName: 'Sam' }, kp.secretKey)
+  assert.equal(rowApplyDecision('member:' + pub, good, null), 'accept')
+  // A member row whose key names a different pubkey than the (validly signed)
+  // value is rejected, so nobody can overwrite another member's roster entry.
+  assert.equal(rowApplyDecision('member:' + '00'.repeat(32), good, null), 'reject')
 })
