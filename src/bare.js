@@ -12,6 +12,11 @@ const engine = createGroupEngine({
   appId: 'pearlist',
   applyOps: applyListOp,
   methods: listMethods,
+  // Storage retention (roadmap #4 P2): auto-prune old already-applied blocks
+  // across all mounted spaces every 30 min, keeping a generous recent buffer so
+  // small spaces are untouched and only long-churned ones shrink.
+  retentionInterval: 30 * 60 * 1000,
+  retentionKeepRecent: 512,
 })
 
 engine.start()

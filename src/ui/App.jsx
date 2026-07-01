@@ -575,14 +575,8 @@ export default function App () {
     loadLists(gid)
   }, [phase, gid, loadLists])
 
-  // Background storage maintenance: prune old already-applied blocks once per
-  // space per session (roadmap #4 P1). Fire-and-forget; small spaces are a no-op.
-  const retainedRef = useRef(new Set())
-  useEffect(() => {
-    if (phase !== 'home' || !gid || retainedRef.current.has(gid)) return
-    retainedRef.current.add(gid)
-    call('space:retain', { groupId: gid }).catch(() => {})
-  }, [phase, gid])
+  // Storage retention now runs in the worklet on a timer (roadmap #4 P2), so the
+  // UI no longer schedules it. space:retain remains available for manual use.
 
   // Poll lists + the open list's items + roster so a peer's changes show up.
   // Lists must be in here too, else a peer's list rename/delete/add only lands
