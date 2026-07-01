@@ -13,6 +13,18 @@ const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = req
 
 function pubkeyHex (ctx) { return b4a.toString(ctx.identity.publicKey, 'hex') }
 
+// Sanitize a user-entered product link to a safe http(s) URL (or '' to clear).
+// A bare domain like "kroger.com/p/123" is upgraded to https://. Anything that
+// is not a plausible web link (javascript:, data:, etc.) is dropped.
+function cleanUrl (u) {
+  if (typeof u !== 'string') return ''
+  const s = u.trim()
+  if (!s) return ''
+  if (/^https?:\/\/\S+$/i.test(s)) return s.slice(0, 2000)
+  if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(s)) return ('https://' + s).slice(0, 2000)
+  return ''
+}
+
 // The founder is the Autobase bootstrap writer: their own local writer core IS
 // the base key. A joiner mounts with the founder's bootstrap, so their local key
 // always differs. Used only to migrate legacy spaces (no signed `space` record);
@@ -252,13 +264,17 @@ const methods = {
     return { ok: true }
   },
 
-  'item:edit': async ({ groupId, listId, itemId, text, qty }, ctx) => {
+  'item:edit': async ({ groupId, listId, itemId, text, qty, note, url }, ctx) => {
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))
     if (!existing || existing.deleted) throw new Error('item not found')
     const patch = {}
     if (text !== undefined) patch.text = String(text)
     if (qty !== undefined && Number.isFinite(qty)) patch.qty = qty
+    // note: free-text, capped. url: sanitized to a safe http(s) link (or ''). An
+    // explicit undefined leaves the field untouched; '' clears it.
+    if (note !== undefined) patch.note = note ? String(note).slice(0, 2000) : ''
+    if (url !== undefined) patch.url = cleanUrl(url)
     await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, ...patch })
     return { ok: true }
   },
