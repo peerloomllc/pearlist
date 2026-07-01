@@ -24,8 +24,9 @@ after(() => { for (const d of _tmpDirs) { try { fs.rmSync(d, { recursive: true, 
 
 function fakeSwarm () {
   const ee = new EventEmitter()
+  ee.left = []
   ee.join = () => ({ flushed: async () => {} })
-  ee.leave = () => {}
+  ee.leave = (topic) => { ee.left.push(topic) }
   ee.destroy = async () => {}
   return ee
 }
@@ -300,12 +301,36 @@ test('space: legacy space with no owner record is migrated to the founder', asyn
   await engine.close()
 })
 
-test('space:forget drops a space from spaces:list', async () => {
+test('space:forget drops a space from spaces:list AND tears down its base + topic', async () => {
   const { engine, call } = driver()
   await call('init', {})
   const { groupId } = await call('group:create', { name: 'Temp' })
+  assert.ok(engine.bases.has(groupId), 'base mounted while joined')
+  const leftBefore = engine.swarm.left.length
+
   await call('space:forget', { groupId })
+
   assert.ok(!(await call('spaces:list', {})).some((s) => s.groupId === groupId))
+  assert.ok(!engine.bases.has(groupId), 'base unmounted so it stops replicating')
+  assert.equal(engine.swarm.left.length, leftBefore + 1, 'left the swarm topic')
+  await engine.close()
+})
+
+test('destroyGroup unmounts a group but leaves other groups intact', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const a = await call('group:create', { name: 'A' })
+  const b = await call('group:create', { name: 'B' })
+  const { listId } = await call('list:create', { groupId: b.groupId, name: 'L' })
+  await call('item:add', { groupId: b.groupId, listId, text: 'keep me' })
+
+  await engine.destroyGroup(a.groupId)
+  assert.ok(!engine.bases.has(a.groupId), 'A unmounted')
+  assert.ok(engine.bases.has(b.groupId), 'B still mounted')
+  // B still fully works after A is destroyed.
+  assert.equal((await call('item:getAll', { groupId: b.groupId, listId }))[0].text, 'keep me')
+  await call('item:add', { groupId: b.groupId, listId, text: 'still writable' })
+  assert.equal((await call('item:getAll', { groupId: b.groupId, listId })).length, 2)
   await engine.close()
 })
 
