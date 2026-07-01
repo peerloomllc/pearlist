@@ -348,18 +348,20 @@ export default function App () {
   const [spaces, setSpaces] = useState([])
   const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
-  const [activeListId, setActiveListId] = useState(null)
+  const [openListId, setOpenListId] = useState(null)
   const [items, setItems] = useState([])
   const [theme, setThemeMode] = useState('dark')
-  const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'lists'|'menu'|'wallet'|{type:'item',item}
+  const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'menu'|'wallet'|'spaces'|'listOptions'|'renameList'|{type:'item',item}
   const [view, setView] = useState(null) // full-screen: 'profile' | 'about'
   const [profile, setProfile] = useState(null)
   const [donateReminder, setDonateReminder] = useState(false)
   const [members, setMembers] = useState([])
   const [selfPubkey, setSelfPubkey] = useState(null)
   const [listPicker, setListPicker] = useState(null) // { listId, current } for assigning a whole list
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState('')       // add-item composer (list detail)
+  const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
   const composer = useRef(null)
+  const listComposer = useRef(null)
 
   const gid = activeSpaceId
   const activeSpace = spaces.find((s) => s.groupId === activeSpaceId) || null
@@ -373,7 +375,8 @@ export default function App () {
   const loadLists = useCallback(async (groupId) => {
     const ls = await call('list:getAll', { groupId })
     setLists(ls)
-    setActiveListId((cur) => cur && ls.some(l => l.id === cur) ? cur : (ls[0]?.id ?? null))
+    // Stay on the overview by default; only keep a list open if it still exists.
+    setOpenListId((cur) => (cur && ls.some(l => l.id === cur) ? cur : null))
     return ls
   }, [])
 
@@ -406,19 +409,21 @@ export default function App () {
 
   // Load the active space's lists whenever the space changes.
   useEffect(() => {
-    if (phase !== 'home' || !gid) { setLists([]); setActiveListId(null); return }
+    if (phase !== 'home' || !gid) { setLists([]); setOpenListId(null); return }
     loadLists(gid)
   }, [phase, gid, loadLists])
 
-  // Poll the active list + roster so a peer's changes show up. Cheap for a list app.
+  // Poll lists + the open list's items + roster so a peer's changes show up.
+  // Lists must be in here too, else a peer's list rename/delete/add only lands
+  // when the local user switches spaces. Cheap for a list app.
   useEffect(() => {
     if (phase !== 'home' || !gid) return
-    const refresh = () => { loadItems(gid, activeListId); loadMembers(gid, selfPubkey) }
+    const refresh = () => { loadLists(gid); loadItems(gid, openListId); loadMembers(gid, selfPubkey) }
     refresh()
     const t = setInterval(refresh, 2500)
-    const off = on('peer:connected', () => { loadLists(gid); refresh() })
+    const off = on('peer:connected', () => refresh())
     return () => { clearInterval(t); off() }
-  }, [phase, gid, activeListId, selfPubkey, loadItems, loadLists, loadMembers])
+  }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers])
 
   // Two-week donation nudge: check once on reaching home, skip on iOS, show only
   // once ever (mark shown as soon as it surfaces).
@@ -431,43 +436,56 @@ export default function App () {
     return () => { done = true }
   }, [phase])
 
-  const activeList = lists.find(l => l.id === activeListId) || null
+  const openList = lists.find(l => l.id === openListId) || null
 
   async function createSpace (name) {
     const { groupId } = await call('group:create', { name })
     call('member:publish', { groupId }).catch(() => {}) // owner is writable now
     await loadSpaces()
-    setActiveSpaceId(groupId); setActiveListId(null)
+    setActiveSpaceId(groupId); setOpenListId(null)
     setPhase('home'); setSheet('invite')
   }
   async function joinSpace (inviteKey) {
     const { groupId } = await call('group:join', { inviteKey })
     await loadSpaces()
-    setActiveSpaceId(groupId); setActiveListId(null); setPhase('home'); setSheet(null)
+    setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
     call('member:publish', { groupId }).catch(() => {}) // retried by the poll until writable
   }
   function switchSpace (groupId) {
-    setActiveSpaceId(groupId); setActiveListId(null); setSheet(null)
+    setActiveSpaceId(groupId); setOpenListId(null); setSheet(null)
   }
   async function assignList (listId, assignee) {
     await call('list:assign', { groupId: gid, listId, assignee })
     await loadLists(gid)
   }
   async function addItem () {
-    const text = draft.trim(); if (!text || !gid || !activeListId) return
+    const text = draft.trim(); if (!text || !gid || !openListId) return
     setDraft('')
-    await call('item:add', { groupId: gid, listId: activeListId, text })
-    await loadItems(gid, activeListId)
+    await call('item:add', { groupId: gid, listId: openListId, text })
+    await loadItems(gid, openListId)
     composer.current?.focus?.()
   }
   async function toggleItem (item) {
     setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: !item.checked } : i)) // optimistic
-    await call('item:toggle', { groupId: gid, listId: activeListId, itemId: item.id, checked: !item.checked })
-    loadItems(gid, activeListId)
+    await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: !item.checked })
+    loadItems(gid, openListId)
   }
-  async function addList (name) {
-    const { listId } = await call('list:create', { groupId: gid, name: name || 'New list' })
-    await loadLists(gid); setActiveListId(listId); setSheet(null)
+  async function addList () {
+    const name = listDraft.trim(); if (!name || !gid) return
+    setListDraft('')
+    await call('list:create', { groupId: gid, name })
+    await loadLists(gid)               // new list appears in the overview; do not auto-open
+    listComposer.current?.focus?.()
+  }
+  async function renameList (name) {
+    const n = (name || '').trim(); if (!n || !openListId) return
+    await call('list:rename', { groupId: gid, listId: openListId, name: n })
+    await loadLists(gid); setSheet(null)
+  }
+  async function deleteOpenList () {
+    if (!openListId) return
+    await call('list:delete', { groupId: gid, listId: openListId })
+    setOpenListId(null); setSheet(null); await loadLists(gid)
   }
   async function applyTheme (mode) { setTheme(mode); setThemeMode(mode) }
 
@@ -484,52 +502,46 @@ export default function App () {
     )
   }
 
-  const remaining = items.filter(i => !i.checked).length
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', maxWidth: 600, margin: '0 auto' }}>
-      <TopBar
-        title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><span style={{ color: c.text.muted, fontSize: 15 }}>▾</span></button>}
-        left={<button aria-label='Menu' onClick={() => setSheet('menu')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}><Avatar name={profile?.displayName} avatar={profile?.avatar} size={30} /></button>}
-        right={<IconButton label='Invite' onClick={() => setSheet('invite')}>↗</IconButton>}
-      />
-
-      {lists.length > 0 ? (
-        <button onClick={() => setSheet('lists')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm, padding: `${sp.md}px ${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer' }}>
-          <span style={{ display: 'flex', alignItems: 'baseline', gap: sp.sm }}>
-            <span style={{ fontSize: 17, fontWeight: 400, color: c.text.primary }}>{activeList?.name || 'No list'}</span>
-            <span style={{ fontSize: 13, color: c.text.muted }}>{remaining} left</span>
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
-            <AssigneeAvatar pubkey={activeList?.assignee} members={members} size={22} />
-            <span style={{ color: c.text.muted, fontSize: 16 }}>▾</span>
-          </span>
-        </button>
-      ) : null}
-
-      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
-        {lists.length === 0
-          ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.base }}>
-              <span>No lists in {activeSpace?.name || 'this space'} yet.</span>
-              <button onClick={() => setSheet('lists')} style={{ padding: '10px 18px', borderRadius: r.lg, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 15, cursor: 'pointer' }}>New list</button>
-            </div>
-          : items.length === 0
-            ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
-            : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
-      </div>
-
-      {activeList ? (
-        <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base, borderTop: `1px solid ${c.border}` }}>
-          <input ref={composer} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addItem() }} placeholder='Add an item' style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-          <button onClick={addItem} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer' }}>+</button>
-        </div>
-      ) : null}
+      {openListId === null ? (
+        // ===== Lists overview: all lists in the space + persistent add-list bar =====
+        <>
+          <TopBar
+            title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><span style={{ color: c.text.muted, fontSize: 15 }}>▾</span></button>}
+            left={<button aria-label='Menu' onClick={() => setSheet('menu')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}><Avatar name={profile?.displayName} avatar={profile?.avatar} size={30} /></button>}
+            right={<IconButton label='Invite' onClick={() => setSheet('invite')}>↗</IconButton>}
+          />
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+            {lists.length === 0
+              ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
+              : lists.map((l) => <ListRow key={l.id} list={l} members={members} onOpen={() => setOpenListId(l.id)} />)}
+          </div>
+          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={addList} placeholder='Add a list' />
+        </>
+      ) : (
+        // ===== List detail: the items of the open list + add-item bar =====
+        <>
+          <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+            {items.length === 0
+              ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
+              : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
+          </div>
+          <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
+        </>
+      )}
 
       <InviteSheet open={sheet === 'invite'} onClose={() => setSheet(null)} inviteKey={activeSpace?.inviteKey} spaceName={activeSpace?.name} />
       <SpaceSwitcherSheet open={sheet === 'spaces'} onClose={() => setSheet(null)} spaces={spaces} activeId={activeSpaceId}
         onPick={switchSpace} onCreate={() => setSheet('start')} onJoin={() => setSheet('join')} />
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
-      <ListsSheet open={sheet === 'lists'} onClose={() => setSheet(null)} lists={lists} activeId={activeListId} members={members} onPick={(id) => { setActiveListId(id); setSheet(null) }} onAdd={addList} onAssign={(listId, current) => setListPicker({ listId, current })} />
+      <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} onClose={() => setSheet(null)}
+        onRename={() => setSheet('renameList')}
+        onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
+        onDelete={deleteOpenList} />
+      <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
         onAbout={() => { setSheet(null); setView('about') }}
@@ -541,8 +553,8 @@ export default function App () {
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); setView('about') }} />
       <ItemSheet
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
-        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: activeListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty }); await call('item:assign', { groupId: gid, listId: activeListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, activeListId); setSheet(null) }}
-        onDelete={async () => { await call('item:delete', { groupId: gid, listId: activeListId, itemId: sheet.item.id }); await loadItems(gid, activeListId); setSheet(null) }}
+        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, openListId); setSheet(null) }}
+        onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
@@ -626,27 +638,65 @@ function InviteSheet ({ open, onClose, inviteKey, spaceName }) {
   )
 }
 
-function ListsSheet ({ open, onClose, lists, activeId, members, onPick, onAdd, onAssign }) {
-  const [name, setName] = useState('')
-  useEffect(() => { if (open) setName('') }, [open])
+// A list row on the space overview. Tapping opens the list's detail.
+function ListRow ({ list, members, onOpen }) {
   return (
-    <BottomSheet open={open} onClose={onClose} title='Lists'>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: sp.base }}>
-        {lists.map((l) => (
-          <div key={l.id} style={{ display: 'flex', alignItems: 'center', background: l.id === activeId ? c.surface.elevated : 'none', borderRadius: r.md }}>
-            <button onClick={() => onPick(l.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp.sm, padding: `${sp.md}px ${sp.sm}px`, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: l.id === activeId ? 400 : 300, textAlign: 'left' }}>
-              <span style={{ flex: 1 }}>{l.name}</span>
-              {l.id === activeId ? <span style={{ color: c.primary }}>✓</span> : null}
-            </button>
-            <button onClick={() => onAssign(l.id, l.assignee || null)} aria-label='Assign list' style={{ padding: `${sp.sm}px ${sp.md}px`, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-              {l.assignee ? <AssigneeAvatar pubkey={l.assignee} members={members} size={24} /> : <span style={{ width: 24, height: 24, borderRadius: '50%', border: `1px dashed ${c.text.muted}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted, fontSize: 15 }}>+</span>}
-            </button>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: sp.sm }}>
-        <Field value={name} onChange={setName} placeholder='New list' onEnter={() => name.trim() && onAdd(name.trim())} />
-        <button onClick={() => name.trim() && onAdd(name.trim())} aria-label='Add list' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer', flexShrink: 0 }}>+</button>
+    <button onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', textAlign: 'left' }}>
+      <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 17, fontWeight: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{list.name}</span>
+      <AssigneeAvatar pubkey={list.assignee} members={members} size={24} />
+      <span style={{ color: c.text.muted, fontSize: 20, lineHeight: 1 }}>›</span>
+    </button>
+  )
+}
+
+// Sticky bottom input + add button, reused for the add-list (overview) and
+// add-item (list detail) bars.
+function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef }) {
+  return (
+    <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base, borderTop: `1px solid ${c.border}` }}>
+      <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onSubmit() }} placeholder={placeholder} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
+      <button onClick={onSubmit} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer' }}>+</button>
+    </div>
+  )
+}
+
+// List-detail header: back to the overview, list name, and a list-options button.
+function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
+  return (
+    <header style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `calc(var(--pear-safe-top) + ${sp.md}px) ${sp.base}px ${sp.md}px`, borderBottom: `1px solid ${c.border}`, background: c.surface.base, position: 'sticky', top: 0, zIndex: 5 }}>
+      <button onClick={onBack} aria-label='Back to lists' style={{ width: 36, height: 36, background: 'none', border: 'none', color: c.text.secondary, fontSize: 28, cursor: 'pointer', lineHeight: 1 }}>‹</button>
+      <h1 style={{ flex: 1, textAlign: 'center', fontSize: 20, fontWeight: 400, margin: 0, color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h1>
+      <span style={{ display: 'flex', alignItems: 'center', gap: sp.xs }}>
+        <AssigneeAvatar pubkey={assignee} members={members} size={22} />
+        <IconButton label='List options' onClick={onOptions}>⋯</IconButton>
+      </span>
+    </header>
+  )
+}
+
+// List options (rename / assign / delete), opened from the detail header.
+function ListOptionsSheet ({ open, list, members, onClose, onRename, onAssign, onDelete }) {
+  if (!list) return null
+  const Row = ({ onClick, danger, children }) => (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
+  )
+  return (
+    <BottomSheet open={open} onClose={onClose} title={list.name}>
+      <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename list</span></Row>
+      <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
+      <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row>
+    </BottomSheet>
+  )
+}
+
+function RenameListSheet ({ open, current, onClose, onSave }) {
+  const [name, setName] = useState('')
+  useEffect(() => { if (open) setName(current || '') }, [open, current])
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Rename list'>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
+        <Field value={name} onChange={setName} autoFocus onEnter={() => name.trim() && onSave(name.trim())} />
+        <Button onClick={() => name.trim() && onSave(name.trim())}>Save</Button>
       </div>
     </BottomSheet>
   )
