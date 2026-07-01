@@ -575,6 +575,9 @@ export default function App () {
     loadLists(gid)
   }, [phase, gid, loadLists])
 
+  // Storage retention now runs in the worklet on a timer (roadmap #4 P2), so the
+  // UI no longer schedules it. space:retain remains available for manual use.
+
   // Poll lists + the open list's items + roster so a peer's changes show up.
   // Lists must be in here too, else a peer's list rename/delete/add only lands
   // when the local user switches spaces. Cheap for a list app.
