@@ -500,6 +500,7 @@ export default function App () {
   const [deleteTarget, setDeleteTarget] = useState(null) // space {groupId,name} pending delete confirm
   const [draft, setDraft] = useState('')       // add-item composer (list detail)
   const [pendingUndo, setPendingUndo] = useState(null) // { snap, listId } for swipe-delete undo
+  const [suggestions, setSuggestions] = useState([]) // item autocomplete from recents
   const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
   const composer = useRef(null)
   const listComposer = useRef(null)
@@ -682,13 +683,27 @@ export default function App () {
     await call('list:assign', { groupId: gid, listId, assignee })
     await loadLists(gid)
   }
-  async function addItem () {
-    const text = draft.trim(); if (!text || !gid || !openListId) return
-    setDraft('')
-    await call('item:add', { groupId: gid, listId: openListId, text })
+  async function addItemText (text) {
+    const t = String(text || '').trim(); if (!t || !gid || !openListId) return
+    setDraft(''); setSuggestions([])
+    await call('item:add', { groupId: gid, listId: openListId, text: t })
     await loadItems(gid, openListId)
     composer.current?.blur?.() // dismiss the keyboard; show the full list
   }
+  const addItem = () => addItemText(draft)
+
+  // Item autocomplete: suggest previously-added items as you type (device-local).
+  useEffect(() => {
+    const q = draft.trim()
+    if (!openListId || !q) { setSuggestions([]); return }
+    let live = true
+    const t = setTimeout(() => {
+      call('item:suggest', { prefix: q, limit: 4 })
+        .then((s) => { if (live) setSuggestions((s || []).filter((x) => x.toLowerCase() !== q.toLowerCase()).slice(0, 4)) })
+        .catch(() => {})
+    }, 120)
+    return () => { live = false; clearTimeout(t) }
+  }, [draft, openListId])
   async function toggleItem (item) {
     setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: !item.checked } : i)) // optimistic
     await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: !item.checked })
@@ -780,7 +795,10 @@ export default function App () {
               ))}
           </div>
           {pendingUndo ? <UndoToast onUndo={undoDelete} /> : null}
-          <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
+          <div style={{ position: 'sticky', bottom: 0, background: c.surface.base }}>
+            {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
+            <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
+          </div>
         </>
       )}
 
@@ -910,6 +928,18 @@ function ListRow ({ list, members, onOpen }) {
       <AssigneeAvatar pubkey={list.assignee} members={members} size={24} />
       <span style={{ color: c.text.muted, fontSize: 20, lineHeight: 1 }}>›</span>
     </button>
+  )
+}
+
+// Tap-to-add chips of previously-added items, shown above the add-item bar. The
+// bottom padding keeps a little buffer above the composer's divider line.
+function SuggestionBar ({ items, onPick }) {
+  return (
+    <div style={{ display: 'flex', gap: sp.sm, overflowX: 'auto', padding: `${sp.sm}px ${sp.base}px ${sp.md}px`, WebkitOverflowScrolling: 'touch' }}>
+      {items.map((t) => (
+        <button key={t} onClick={() => { haptic(); onPick(t) }} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: r.full, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.secondary, fontSize: 14, fontWeight: 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>{t}</button>
+      ))}
+    </div>
   )
 }
 
@@ -1167,7 +1197,7 @@ function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete
     <>
       <BottomSheet open={open} onClose={onClose} title='Edit item'>
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
-          <Field value={text} onChange={setText} placeholder='Item' autoFocus />
+          <Field value={text} onChange={setText} placeholder='Item' />
           <div style={{ display: 'flex', alignItems: 'center', gap: sp.md }}>
             <span style={{ color: c.text.secondary, fontSize: 14, width: 70 }}>Quantity</span>
             <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>−</button>
