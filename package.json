@@ -5,7 +5,7 @@
   "description": "Shared household lists (groceries, to-dos, chores) over P2P. Part of the PeerLoom suite, built on @peerloom/core.",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "build:ui": "esbuild src/ui/main.jsx --bundle --format=iife --jsx=automatic --define:process.env.NODE_ENV=\\\"production\\\" --outfile=assets/app-ui.bundle && cp src/ui/index.html assets/index.html"
+    "build:ui": "node scripts/build-ui.mjs"
   },
   "license": "MIT",
   "dependencies": {

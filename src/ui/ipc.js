@@ -83,15 +83,15 @@ const mockMethods = {
   'item:delete': async ({ groupId, listId, itemId }) => { mockGroup(groupId).items.get(itemId).deleted = true; return { ok: true } },
   'item:getAll': async ({ groupId, listId }) => [...mockGroup(groupId).items.values()].filter(i => i.listId === listId && !i.deleted),
 }
-async function mockCall (method, args) {
-  const fn = mockMethods[method]
-  if (!fn) throw new Error('unknown method: ' + method)
-  return fn(args || {})
-}
-
 // Browser design preview: open index.html?seed to land on a populated list
-// instead of onboarding. No effect in a real shell.
-if (typeof window !== 'undefined' && isMock && /(?:\?|&)seed/.test(window.location.search)) {
+// instead of onboarding. Seeds lazily on the first mock call (after all module
+// state is initialized), so it is order-independent. No effect in a real shell.
+let seeded = false
+function seedIfRequested () {
+  if (seeded) return
+  seeded = true
+  if (typeof window === 'undefined') return
+  if (!/(?:\?|&)seed/.test(window.location.search || '')) return
   const gid = rid(22)
   const g = { groupId: gid, name: 'The Nest', inviteKey: 'mock-' + gid, lists: new Map(), items: new Map() }
   const groceries = rid(); g.lists.set(groceries, { id: groceries, name: 'Groceries', deleted: false })
@@ -101,6 +101,13 @@ if (typeof window !== 'undefined' && isMock && /(?:\?|&)seed/.test(window.locati
   mk(groceries, 'Spinach', { assignee: 'sam' }); mk(groceries, 'Lemons', { qty: 6, checked: true })
   mk(chores, 'Water the plants', { assignee: 'alex' }); mk(chores, 'Take out recycling', { checked: true })
   mock.groups.set(gid, g)
+}
+
+async function mockCall (method, args) {
+  seedIfRequested()
+  const fn = mockMethods[method]
+  if (!fn) throw new Error('unknown method: ' + method)
+  return fn(args || {})
 }
 
 export const call = inShell ? realCall : mockCall
