@@ -141,6 +141,44 @@ function Avatar ({ name, avatar, size = 40 }) {
   return <div style={{ width: size, height: size, borderRadius: '50%', background: c.surface.elevated, color: c.text.secondary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.42, fontWeight: 400, flexShrink: 0 }}>{initialsFor(name)}</div>
 }
 
+// Resolve an assignee pubkey to that member's avatar (or a neutral ? if the
+// roster hasn't synced them yet).
+function AssigneeAvatar ({ pubkey, members, size = 22 }) {
+  if (!pubkey) return null
+  const m = members.find((x) => x.pubkey === pubkey)
+  return <Avatar name={m?.displayName || '?'} avatar={m?.avatar} size={size} />
+}
+function memberLabel (members, pubkey, selfPubkey) {
+  if (!pubkey) return 'Nobody'
+  const m = members.find((x) => x.pubkey === pubkey)
+  const base = m?.displayName || 'Unknown'
+  return pubkey === selfPubkey ? base + ' (You)' : base
+}
+
+// Pick a household member (or nobody) to assign an item or list to.
+function AssigneePickerSheet ({ open, onClose, members, selfPubkey, current, onPick }) {
+  const Row = ({ pubkey, children }) => (
+    <button onClick={() => { onPick(pubkey); onClose() }} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>
+      {children}
+      {current === pubkey ? <span style={{ color: c.primary }}>✓</span> : null}
+    </button>
+  )
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Assign to'>
+      <Row pubkey={null}>
+        <div style={{ width: 32, height: 32, borderRadius: '50%', border: `1px dashed ${c.text.muted}`, flexShrink: 0 }} />
+        <span style={{ flex: 1, textAlign: 'left' }}>Nobody</span>
+      </Row>
+      {members.map((m) => (
+        <Row key={m.pubkey} pubkey={m.pubkey}>
+          <Avatar name={m.displayName} avatar={m.avatar} size={32} />
+          <span style={{ flex: 1, textAlign: 'left' }}>{m.pubkey === selfPubkey ? m.displayName + ' (You)' : m.displayName}</span>
+        </Row>
+      ))}
+    </BottomSheet>
+  )
+}
+
 // Accordion card matching the suite (rotating chevron, max-height body).
 function Collapsible ({ title, open, onToggle, children }) {
   return (
@@ -269,7 +307,7 @@ function DonationReminderModal ({ open, onDonate, onDismiss }) {
 // text when checked (in the accent green), like crossing it off a paper list.
 // ---------------------------------------------------------------------------
 
-function ItemRow ({ item, onToggle, onOpen }) {
+function ItemRow ({ item, members, onToggle, onOpen }) {
   const checked = !!item.checked
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}` }}>
@@ -281,7 +319,7 @@ function ItemRow ({ item, onToggle, onOpen }) {
         </span>
         {item.qty > 1 ? <span style={{ fontFamily: MONO, fontSize: 12, color: c.text.secondary, background: c.surface.elevated, borderRadius: r.sm, padding: '1px 6px', flexShrink: 0 }}>×{item.qty}</span> : null}
       </button>
-      <AssigneeChip name={item.assignee} />
+      <AssigneeAvatar pubkey={item.assignee} members={members} size={24} />
     </div>
   )
 }
@@ -316,6 +354,9 @@ export default function App () {
   const [view, setView] = useState(null) // full-screen: 'profile' | 'about'
   const [profile, setProfile] = useState(null)
   const [donateReminder, setDonateReminder] = useState(false)
+  const [members, setMembers] = useState([])
+  const [selfPubkey, setSelfPubkey] = useState(null)
+  const [listPicker, setListPicker] = useState(null) // { listId, current } for assigning a whole list
   const [draft, setDraft] = useState('')
   const composer = useRef(null)
 
@@ -333,26 +374,37 @@ export default function App () {
     setItems(await call('item:getAll', { groupId, listId }))
   }, [])
 
+  // Refresh the household roster, and publish our own member row once we are a
+  // writable member and not yet listed (so peers can resolve our assignee pubkey).
+  const loadMembers = useCallback(async (groupId, self) => {
+    const ms = await call('member:getAll', { groupId }).catch(() => [])
+    setMembers(ms)
+    if (self && !ms.some((m) => m.pubkey === self)) call('member:publish', { groupId }).catch(() => {})
+    return ms
+  }, [])
+
   // Boot.
   useEffect(() => {
     setThemeMode(loadTheme())
     ;(async () => {
       await call('init', {})
       call('profile:get', {}).then(setProfile).catch(() => {})
+      call('identity:get', {}).then((r) => setSelfPubkey(r?.pubkey || null)).catch(() => {})
       const h = await call('household:get', {})
       if (h) { setHousehold(h); await loadLists(h.groupId); setPhase('home') }
       else setPhase('onboarding')
     })().catch((e) => { console.error(e); setPhase('onboarding') })
   }, [loadLists])
 
-  // Poll the active list so a peer's changes show up. Cheap for a list app.
+  // Poll the active list + roster so a peer's changes show up. Cheap for a list app.
   useEffect(() => {
-    if (phase !== 'home' || !gid || !activeListId) return
-    loadItems(gid, activeListId)
-    const t = setInterval(() => loadItems(gid, activeListId), 2500)
-    const off = on('peer:connected', () => { loadLists(gid); loadItems(gid, activeListId) })
+    if (phase !== 'home' || !gid) return
+    const refresh = () => { loadItems(gid, activeListId); loadMembers(gid, selfPubkey) }
+    refresh()
+    const t = setInterval(refresh, 2500)
+    const off = on('peer:connected', () => { loadLists(gid); refresh() })
     return () => { clearInterval(t); off() }
-  }, [phase, gid, activeListId, loadItems, loadLists])
+  }, [phase, gid, activeListId, selfPubkey, loadItems, loadLists, loadMembers])
 
   // Two-week donation nudge: check once on reaching home, skip on iOS, show only
   // once ever (mark shown as soon as it surfaces).
@@ -371,6 +423,7 @@ export default function App () {
     const { groupId, inviteKey } = await call('group:create', { name })
     const h = { groupId, name: name || 'Household', inviteKey }
     setHousehold(h)
+    call('member:publish', { groupId }).catch(() => {}) // owner is writable now
     // Seed a first list so the home screen is not empty.
     const { listId } = await call('list:create', { groupId, name: 'Groceries' })
     await loadLists(groupId); setActiveListId(listId)
@@ -380,6 +433,11 @@ export default function App () {
     const { groupId } = await call('group:join', { inviteKey })
     const h = await call('household:get', {}) || { groupId, name: 'Household', inviteKey }
     setHousehold(h); await loadLists(groupId); setPhase('home'); setSheet(null)
+    call('member:publish', { groupId }).catch(() => {}) // retried by the poll until writable
+  }
+  async function assignList (listId, assignee) {
+    await call('list:assign', { groupId: gid, listId, assignee })
+    await loadLists(gid)
   }
   async function addItem () {
     const text = draft.trim(); if (!text || !gid || !activeListId) return
@@ -426,13 +484,16 @@ export default function App () {
           <span style={{ fontSize: 17, fontWeight: 400, color: c.text.primary }}>{activeList?.name || 'No list'}</span>
           <span style={{ fontSize: 13, color: c.text.muted }}>{remaining} left</span>
         </span>
-        <span style={{ color: c.text.muted, fontSize: 16 }}>▾</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+          <AssigneeAvatar pubkey={activeList?.assignee} members={members} size={22} />
+          <span style={{ color: c.text.muted, fontSize: 16 }}>▾</span>
+        </span>
       </button>
 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
         {items.length === 0
           ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
-          : items.map((it) => <ItemRow key={it.id} item={it} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
+          : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
       </div>
 
       {activeList ? (
@@ -443,7 +504,7 @@ export default function App () {
       ) : null}
 
       <InviteSheet open={sheet === 'invite'} onClose={() => setSheet(null)} inviteKey={household?.inviteKey} />
-      <ListsSheet open={sheet === 'lists'} onClose={() => setSheet(null)} lists={lists} activeId={activeListId} onPick={(id) => { setActiveListId(id); setSheet(null) }} onAdd={addList} />
+      <ListsSheet open={sheet === 'lists'} onClose={() => setSheet(null)} lists={lists} activeId={activeListId} members={members} onPick={(id) => { setActiveListId(id); setSheet(null) }} onAdd={addList} onAssign={(listId, current) => setListPicker({ listId, current })} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
         onAbout={() => { setSheet(null); setView('about') }}
@@ -454,10 +515,12 @@ export default function App () {
       <LightningWalletSheet open={sheet === 'wallet'} onClose={() => setSheet(null)} />
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); setView('about') }} />
       <ItemSheet
-        open={!!sheet && sheet.type === 'item'} item={sheet?.item} onClose={() => setSheet(null)}
-        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: activeListId, itemId: sheet.item.id, ...patch }); if ('assignee' in patch) await call('item:assign', { groupId: gid, listId: activeListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, activeListId); setSheet(null) }}
+        open={!!sheet && sheet.type === 'item'} item={sheet?.item} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
+        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: activeListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty }); await call('item:assign', { groupId: gid, listId: activeListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, activeListId); setSheet(null) }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: activeListId, itemId: sheet.item.id }); await loadItems(gid, activeListId); setSheet(null) }}
       />
+      <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
+        onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
     </div>
   )
 }
@@ -520,16 +583,22 @@ function InviteSheet ({ open, onClose, inviteKey }) {
   )
 }
 
-function ListsSheet ({ open, onClose, lists, activeId, onPick, onAdd }) {
+function ListsSheet ({ open, onClose, lists, activeId, members, onPick, onAdd, onAssign }) {
   const [name, setName] = useState('')
   useEffect(() => { if (open) setName('') }, [open])
   return (
     <BottomSheet open={open} onClose={onClose} title='Lists'>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: sp.base }}>
         {lists.map((l) => (
-          <button key={l.id} onClick={() => onPick(l.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${sp.md}px ${sp.sm}px`, background: l.id === activeId ? c.surface.elevated : 'none', border: 'none', borderRadius: r.md, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: l.id === activeId ? 400 : 300 }}>
-            <span>{l.name}</span>{l.id === activeId ? <span style={{ color: c.primary }}>✓</span> : null}
-          </button>
+          <div key={l.id} style={{ display: 'flex', alignItems: 'center', background: l.id === activeId ? c.surface.elevated : 'none', borderRadius: r.md }}>
+            <button onClick={() => onPick(l.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp.sm, padding: `${sp.md}px ${sp.sm}px`, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: l.id === activeId ? 400 : 300, textAlign: 'left' }}>
+              <span style={{ flex: 1 }}>{l.name}</span>
+              {l.id === activeId ? <span style={{ color: c.primary }}>✓</span> : null}
+            </button>
+            <button onClick={() => onAssign(l.id, l.assignee || null)} aria-label='Assign list' style={{ padding: `${sp.sm}px ${sp.md}px`, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+              {l.assignee ? <AssigneeAvatar pubkey={l.assignee} members={members} size={24} /> : <span style={{ width: 24, height: 24, borderRadius: '50%', border: `1px dashed ${c.text.muted}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted, fontSize: 15 }}>+</span>}
+            </button>
+          </div>
         ))}
       </div>
       <div style={{ display: 'flex', gap: sp.sm }}>
@@ -685,29 +754,37 @@ function LightningWalletSheet ({ open, onClose }) {
   )
 }
 
-function ItemSheet ({ open, item, onClose, onSave, onDelete }) {
+function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
-  const [assignee, setAssignee] = useState('')
-  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || '') } }, [open, item])
+  const [assignee, setAssignee] = useState(null)
+  const [picking, setPicking] = useState(false)
+  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setPicking(false) } }, [open, item])
   if (!item) return null
   return (
-    <BottomSheet open={open} onClose={onClose} title='Edit item'>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
-        <Field value={text} onChange={setText} placeholder='Item' autoFocus />
-        <div style={{ display: 'flex', alignItems: 'center', gap: sp.md }}>
-          <span style={{ color: c.text.secondary, fontSize: 14, width: 70 }}>Quantity</span>
-          <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>−</button>
-          <span style={{ fontFamily: MONO, fontSize: 16, color: c.text.primary, minWidth: 24, textAlign: 'center' }}>{qty}</span>
-          <button onClick={() => setQty((q) => q + 1)} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>+</button>
+    <>
+      <BottomSheet open={open} onClose={onClose} title='Edit item'>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
+          <Field value={text} onChange={setText} placeholder='Item' autoFocus />
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp.md }}>
+            <span style={{ color: c.text.secondary, fontSize: 14, width: 70 }}>Quantity</span>
+            <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>−</button>
+            <span style={{ fontFamily: MONO, fontSize: 16, color: c.text.primary, minWidth: 24, textAlign: 'center' }}>{qty}</span>
+            <button onClick={() => setQty((q) => q + 1)} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>+</button>
+          </div>
+          <button onClick={() => setPicking(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, padding: '12px 14px', background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, cursor: 'pointer' }}>
+            <span style={{ color: c.text.secondary, fontSize: 14 }}>Assigned to</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, color: c.text.primary, fontSize: 15 }}>
+              {assignee ? <AssigneeAvatar pubkey={assignee} members={members} size={22} /> : null}
+              {memberLabel(members, assignee, selfPubkey)}
+              <span style={{ color: c.text.muted }}>›</span>
+            </span>
+          </button>
+          <Button onClick={() => onSave({ text: text.trim(), qty, assignee })}>Save</Button>
+          <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
-        <div>
-          <span style={{ color: c.text.secondary, fontSize: 14 }}>Assigned to</span>
-          <div style={{ marginTop: sp.sm }}><Field value={assignee} onChange={setAssignee} placeholder='Nobody' /></div>
-        </div>
-        <Button onClick={() => onSave({ text: text.trim(), qty, assignee: assignee.trim() || null })}>Save</Button>
-        <Button variant='danger' onClick={onDelete}>Delete item</Button>
-      </div>
-    </BottomSheet>
+      </BottomSheet>
+      <AssigneePickerSheet open={picking} onClose={() => setPicking(false)} members={members} selfPubkey={selfPubkey} current={assignee} onPick={(pk) => setAssignee(pk)} />
+    </>
   )
 }

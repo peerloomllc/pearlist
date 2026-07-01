@@ -9,9 +9,25 @@ const { newEntityId } = require('@peerloom/core/ids')
 const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 
-const { listKey, itemKey, LIST_RANGE, itemRange } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = require('./listWire')
 
 function pubkeyHex (ctx) { return b4a.toString(ctx.identity.publicKey, 'hex') }
+
+// Publish this device's profile as its member:{pubkey} roster row to every group
+// it can write to, so peers can resolve assignee pubkeys to a name + avatar.
+async function publishMember (ctx, onlyGroupId) {
+  const prof = (await ctx.localDb.get('profile'))?.value
+  const value = { displayName: prof?.displayName || 'Member' }
+  if (prof?.avatar) value.avatar = prof.avatar
+  const key = memberKey(pubkeyHex(ctx))
+  let published = false
+  for (const [groupId, base] of ctx.bases) {
+    if (onlyGroupId && groupId !== onlyGroupId) continue
+    if (!base.writable) continue
+    try { await ctx.append(groupId, { type: 'put', key, value: signRow(ctx, value) }); published = true } catch {}
+  }
+  return published
+}
 
 // Stamp authorship + a fresh updatedAt, then sign. Every write records the
 // CURRENT editor as pubkey (proves who made this edit; createdBy is preserved
@@ -76,7 +92,26 @@ const methods = {
     }
     if (profile.avatar && profile.avatar.length > 400000) throw new Error('avatar too large')
     await ctx.localDb.put('profile', profile)
+    // Push the updated name/avatar to the household roster.
+    await publishMember(ctx)
     return profile
+  },
+
+  // --- identity + members -------------------------------------------------
+  'identity:get': async (_args, ctx) => ({ pubkey: pubkeyHex(ctx) }),
+
+  // Publish our roster row to a group (call after join once writable; the UI
+  // retries until it lands). Returns whether the base was writable.
+  'member:publish': async ({ groupId }, ctx) => ({ published: await publishMember(ctx, groupId) }),
+
+  'member:getAll': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    await base.update()
+    const out = []
+    for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
+      if (value && value.pubkey) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: value.avatar || null })
+    }
+    return out
   },
 
   // --- donation reminder (device-local) ----------------------------------
@@ -99,7 +134,7 @@ const methods = {
   'list:create': async ({ groupId, name }, ctx) => {
     const listId = newEntityId()
     await putRow(ctx, groupId, listKey(listId), {
-      id: listId, name: String(name ?? ''), createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+      id: listId, name: String(name ?? ''), assignee: null, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
     })
     return { listId }
   },
@@ -109,6 +144,15 @@ const methods = {
     const existing = await readRow(base, listKey(listId))
     if (!existing || existing.deleted) throw new Error('list not found')
     await putRow(ctx, groupId, listKey(listId), { ...existing, name: String(name ?? '') })
+    return { ok: true }
+  },
+
+  // Assign a whole list to a member (a "responsible person") by pubkey, or null.
+  'list:assign': async ({ groupId, listId, assignee }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, listKey(listId))
+    if (!existing || existing.deleted) throw new Error('list not found')
+    await putRow(ctx, groupId, listKey(listId), { ...existing, assignee: assignee ? String(assignee) : null })
     return { ok: true }
   },
 

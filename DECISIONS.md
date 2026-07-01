@@ -2,6 +2,22 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-06-30 - Member roster + member-based assignment (items and lists)
+Tier: T3 (new wire namespace + persisted field)
+Context: assignment was free-text with no notion of who is in the household.
+Choice: add a shared member roster. Each device publishes its profile as a
+`member:{pubkey}` row (signed { pubkey, displayName, avatar?, updatedAt }),
+owner-scoped: rowApplyDecision requires the key's pubkey segment to equal the
+signed value's pubkey, so nobody can spoof another member's entry. Assignment is
+by pubkey: item.assignee and list.assignee hold a member pubkey (or null). The UI
+resolves pubkeys to name+avatar via the roster and offers a tap-to-pick member
+sheet. Lists are assignable too (a "responsible person"). New methods:
+identity:get, member:publish, member:getAll, list:assign.
+Alternatives: free-text names (rejected, no identity, can't drive notifications);
+storing name/avatar on each item (rejected, denormalized + stale on rename).
+Consequences: unblocks the assignment notification from the notifications
+decision. member:publish is retried by the UI poll until the base is writable.
+
 ## 2026-06-30 - Notifications: minimal, assignment-only, off by default (v1)
 Tier: T1 (product policy, no wire change)
 Context: deciding whether and what to notify in a shared-list app.

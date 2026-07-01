@@ -156,6 +156,27 @@ test('donation reminder: fresh is not due, dismiss marks it shown', async () => 
   await engine.close()
 })
 
+test('member roster: publish self, read it, and assign a list to a member', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  await call('profile:set', { displayName: 'Sam' }) // republishes the member row
+  const id = await call('identity:get', {})
+
+  const members = await call('member:getAll', { groupId })
+  assert.equal(members.length, 1)
+  assert.equal(members[0].pubkey, id.pubkey)
+  assert.equal(members[0].displayName, 'Sam')
+
+  const { listId } = await call('list:create', { groupId, name: 'Chores' })
+  await call('list:assign', { groupId, listId, assignee: id.pubkey })
+  assert.equal((await call('list:getAll', { groupId })).find(l => l.id === listId).assignee, id.pubkey)
+
+  await call('list:assign', { groupId, listId, assignee: null }) // unassign
+  assert.equal((await call('list:getAll', { groupId })).find(l => l.id === listId).assignee, null)
+  await engine.close()
+})
+
 test('deleting a list hides it from list:getAll', async () => {
   const { engine, call } = driver()
   await call('init', {})

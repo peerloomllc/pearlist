@@ -47,34 +47,43 @@ if (typeof window !== 'undefined' && !window.__pearPlatform && /(?:\?|&)ios/.tes
 }
 
 const rid = (n = 16) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+const MOCK_SELF = 'ab'.repeat(32) // this preview device's pubkey
 const mock = { groups: new Map(), profile: null }
 function mockGroup (groupId) {
   const g = mock.groups.get(groupId)
   if (!g) throw new Error('unknown group: ' + groupId)
   return g
 }
+const newGroup = (groupId, name, inviteKey) => ({ groupId, name, inviteKey, lists: new Map(), items: new Map(), members: new Map() })
 const mockMethods = {
   init: async () => ({ ok: true }),
+  'identity:get': async () => ({ pubkey: MOCK_SELF }),
   'group:create': async ({ name }) => {
     const groupId = rid(22)
     const inviteKey = 'mock-' + groupId
-    mock.groups.set(groupId, { groupId, name: name || 'Household', inviteKey, lists: new Map(), items: new Map() })
+    mock.groups.set(groupId, newGroup(groupId, name || 'Household', inviteKey))
     return { groupId, inviteKey }
   },
   'group:join': async ({ inviteKey }) => {
     const groupId = rid(22)
-    mock.groups.set(groupId, { groupId, name: 'Household', inviteKey, lists: new Map(), items: new Map() })
+    mock.groups.set(groupId, newGroup(groupId, 'Household', inviteKey))
     return { groupId }
   },
   'household:get': async () => {
     const g = mock.groups.values().next().value
     return g ? { groupId: g.groupId, name: g.name, inviteKey: g.inviteKey } : null
   },
+  'member:publish': async ({ groupId }) => {
+    mockGroup(groupId).members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: mock.profile?.displayName || 'You', avatar: mock.profile?.avatar || null })
+    return { published: true }
+  },
+  'member:getAll': async ({ groupId }) => [...mockGroup(groupId).members.values()],
   'list:create': async ({ groupId, name }) => {
-    const id = rid(); mockGroup(groupId).lists.set(id, { id, name: name || '', deleted: false }); return { listId: id }
+    const id = rid(); mockGroup(groupId).lists.set(id, { id, name: name || '', assignee: null, deleted: false }); return { listId: id }
   },
   'list:rename': async ({ groupId, listId, name }) => { mockGroup(groupId).lists.get(listId).name = name; return { ok: true } },
   'list:delete': async ({ groupId, listId }) => { mockGroup(groupId).lists.get(listId).deleted = true; return { ok: true } },
+  'list:assign': async ({ groupId, listId, assignee }) => { mockGroup(groupId).lists.get(listId).assignee = assignee || null; return { ok: true } },
   'list:getAll': async ({ groupId }) => [...mockGroup(groupId).lists.values()].filter(l => !l.deleted),
   'item:add': async ({ groupId, listId, text, qty }) => {
     const id = rid()
@@ -93,7 +102,9 @@ const mockMethods = {
     if (!displayName || !displayName.trim()) throw new Error('displayName required')
     const p = { ...(mock.profile || {}), displayName: displayName.trim().slice(0, 64), updatedAt: Date.now(), v: 1 }
     if ('avatar' in rest) { if (rest.avatar) p.avatar = rest.avatar; else delete p.avatar }
-    mock.profile = p; return p
+    mock.profile = p
+    for (const g of mock.groups.values()) if (g.members.has(MOCK_SELF)) g.members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: p.displayName, avatar: p.avatar || null })
+    return p
   },
   // Donation reminder: ?donate forces "due" so it can be previewed on demand.
   'donation:status': async () => ({ due: /(?:\?|&)donate/.test(window.location.search || ''), shown: false, firstUseAt: 0 }),
@@ -114,13 +125,17 @@ function seedIfRequested () {
   if (typeof window === 'undefined') return
   if (!/(?:\?|&)seed/.test(window.location.search || '')) return
   const gid = rid(22)
-  const g = { groupId: gid, name: 'The Nest', inviteKey: 'mock-' + gid, lists: new Map(), items: new Map() }
-  const groceries = rid(); g.lists.set(groceries, { id: groceries, name: 'Groceries', deleted: false })
-  const chores = rid(); g.lists.set(chores, { id: chores, name: 'Chores', deleted: false })
+  const g = newGroup(gid, 'The Nest', 'mock-' + gid)
+  const SAM = '5a'.repeat(32); const ALEX = 'a1'.repeat(32)
+  g.members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: mock.profile?.displayName || 'You', avatar: mock.profile?.avatar || null })
+  g.members.set(SAM, { pubkey: SAM, displayName: 'Sam', avatar: null })
+  g.members.set(ALEX, { pubkey: ALEX, displayName: 'Alex', avatar: null })
+  const groceries = rid(); g.lists.set(groceries, { id: groceries, name: 'Groceries', assignee: null, deleted: false })
+  const chores = rid(); g.lists.set(chores, { id: chores, name: 'Chores', assignee: ALEX, deleted: false })
   const mk = (listId, text, extra = {}) => { const id = rid(); g.items.set(id, { id, listId, text, qty: 1, checked: false, assignee: null, deleted: false, ...extra }) }
   mk(groceries, 'Oat milk', { qty: 2 }); mk(groceries, 'Sourdough'); mk(groceries, 'Coffee beans', { checked: true })
-  mk(groceries, 'Spinach', { assignee: 'sam' }); mk(groceries, 'Lemons', { qty: 6, checked: true })
-  mk(chores, 'Water the plants', { assignee: 'alex' }); mk(chores, 'Take out recycling', { checked: true })
+  mk(groceries, 'Spinach', { assignee: SAM }); mk(groceries, 'Lemons', { qty: 6, checked: true })
+  mk(chores, 'Water the plants', { assignee: ALEX }); mk(chores, 'Take out recycling', { checked: true })
   mock.groups.set(gid, g)
 }
 
