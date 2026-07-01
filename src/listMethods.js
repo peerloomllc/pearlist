@@ -12,6 +12,10 @@ const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = require('./listWire')
 
+// Grace before the owner tears down a just-deleted space, so the `space`
+// tombstone can replicate to connected members first.
+const SPACE_DELETE_GRACE_MS = 5000
+
 // --- avatars: stored in the content blob store, not inline in member rows -----
 // A member row carries a tiny { avatarBlob:{key,id}, avatarHash, avatarType }
 // reference instead of a multi-MB data URL, so the append-only log stays small
@@ -193,19 +197,25 @@ const methods = {
   // Delete a whole space. Owner only. Writes a `space` tombstone (only the owner's
   // signed update is accepted) that replicates to members (their apply emits
   // space:deleted so their UI tears the space down), then forgets it locally.
+  // The base is kept a short grace period so the tombstone can propagate to
+  // connected members, then torn down to free RAM/CPU/connections this session.
   'space:delete': async ({ groupId }, ctx) => {
     const base = viewFor(ctx, groupId)
     const meta = await readRow(base, 'space')
     if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can delete a space')
     await putRow(ctx, groupId, 'space', { ...meta, deleted: true, deletedAt: Date.now() })
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
+    setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
     return { ok: true }
   },
 
-  // Forget a space locally (drop the membership record so it does not remount).
-  // Called by a member's UI after it receives space:deleted.
+  // Forget a space locally (drop the membership record so it does not remount)
+  // and tear it down now to stop replicating a space we have left. Called by a
+  // member's UI after it receives space:deleted (it already has the tombstone,
+  // so no propagation grace is needed).
   'space:forget': async ({ groupId }, ctx) => {
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
+    await ctx.destroyGroup(groupId).catch(() => {})
     return { ok: true }
   },
 
