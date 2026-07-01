@@ -33,6 +33,30 @@ function isFounder (base) {
   try { return !!base.local && b4a.equals(base.local.key, base.key) } catch { return false }
 }
 
+// --- item suggestions (device-local, private) --------------------------------
+// A small recents tally of item texts this device has added, used to suggest
+// re-adds (groceries repeat). Kept in localDb, NOT synced, and independent of
+// item history retention - so purging old items never weakens suggestions.
+const RECENTS_CAP = 200
+function recentScore (x, now) {
+  const ageDays = (now - (x.lastAt || 0)) / 86400000
+  return (x.count || 1) * Math.pow(0.5, ageDays / 30) // frequency, 30-day recency half-life
+}
+const recentMatches = (norm, p) => norm.startsWith(p) || norm.split(/\s+/).some((w) => w.startsWith(p))
+async function recordRecent (ctx, text) {
+  const t = String(text || '').trim(); if (!t) return
+  const norm = t.toLowerCase()
+  const doc = (await ctx.localDb.get('itemRecents'))?.value || { items: [] }
+  const items = doc.items
+  const now = Date.now()
+  const ex = items.find((x) => x.norm === norm)
+  if (ex) { ex.count = (ex.count || 1) + 1; ex.lastAt = now; ex.text = t }
+  else items.push({ norm, text: t, count: 1, lastAt: now })
+  items.sort((a, b) => recentScore(b, now) - recentScore(a, now))
+  if (items.length > RECENTS_CAP) items.length = RECENTS_CAP
+  await ctx.localDb.put('itemRecents', { items })
+}
+
 // Publish this device's profile as its member:{pubkey} roster row to every group
 // it can write to, so peers can resolve assignee pubkeys to a name + avatar.
 async function publishMember (ctx, onlyGroupId) {
@@ -253,7 +277,21 @@ const methods = {
       id: itemId, listId, text: String(text ?? ''), qty: Number.isFinite(qty) ? qty : 1,
       checked: false, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
     })
+    await recordRecent(ctx, text).catch(() => {}) // learn this item for suggestions
     return { itemId }
+  },
+
+  // Suggest previously-added item texts for the add-item composer. Device-local
+  // and private; ranked by frequency + recency, matched on any word prefix.
+  'item:suggest': async ({ prefix, limit } = {}, ctx) => {
+    const doc = (await ctx.localDb.get('itemRecents'))?.value
+    if (!doc || !Array.isArray(doc.items)) return []
+    const p = String(prefix || '').trim().toLowerCase()
+    const now = Date.now()
+    let items = doc.items
+    if (p) items = items.filter((x) => x.norm !== p && recentMatches(x.norm, p))
+    return items.slice().sort((a, b) => recentScore(b, now) - recentScore(a, now))
+      .slice(0, Math.max(1, Math.min(limit || 5, 10))).map((x) => x.text)
   },
 
   'item:toggle': async ({ groupId, listId, itemId, checked }, ctx) => {

@@ -64,7 +64,10 @@ if (typeof window !== 'undefined' && !window.__pearPlatform && /(?:\?|&)ios/.tes
 
 const rid = (n = 16) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('')
 const MOCK_SELF = 'ab'.repeat(32) // this preview device's pubkey
-const mock = { groups: new Map(), profile: null }
+// A few common groceries so the preview shows suggestions before you add anything.
+const MOCK_RECENTS = ['Milk', 'Eggs', 'Bread', 'Bananas', 'Coffee beans', 'Butter', 'Chicken', 'Spinach']
+  .map((text, i) => ({ norm: text.toLowerCase(), text, count: 10 - i, lastAt: 0 }))
+const mock = { groups: new Map(), profile: null, recents: MOCK_RECENTS.slice() }
 function mockGroup (groupId) {
   const g = mock.groups.get(groupId)
   if (!g) throw new Error('unknown group: ' + groupId)
@@ -104,7 +107,15 @@ const mockMethods = {
   'item:add': async ({ groupId, listId, text, qty }) => {
     const id = rid()
     mockGroup(groupId).items.set(id, { id, listId, text: text || '', qty: qty || 1, checked: false, assignee: null, deleted: false })
+    const t = String(text || '').trim()
+    if (t) { const norm = t.toLowerCase(); const ex = mock.recents.find((x) => x.norm === norm); if (ex) { ex.count++; ex.text = t } else mock.recents.push({ norm, text: t, count: 1, lastAt: 0 }) }
     return { itemId: id }
+  },
+  'item:suggest': async ({ prefix, limit } = {}) => {
+    const p = String(prefix || '').trim().toLowerCase()
+    let items = mock.recents
+    if (p) items = items.filter((x) => x.norm !== p && (x.norm.startsWith(p) || x.norm.split(/\s+/).some((w) => w.startsWith(p))))
+    return items.slice().sort((a, b) => b.count - a.count).slice(0, Math.max(1, Math.min(limit || 5, 10))).map((x) => x.text)
   },
   'item:toggle': async ({ groupId, listId, itemId, checked }) => { mockGroup(groupId).items.get(itemId).checked = !!checked; return { ok: true } },
   'item:edit': async ({ groupId, listId, itemId, text, qty, note, url }) => {
