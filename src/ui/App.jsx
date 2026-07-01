@@ -1133,8 +1133,7 @@ function AboutView ({ open, onBack, onWallet }) {
   return (
     <FullScreen open={open} title='About' onBack={onBack}>
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
-        <div style={{ fontSize: 36 }}>🍐</div>
-        <h2 style={{ fontSize: 22, fontWeight: 400, margin: `${sp.xs}px 0 0`, color: c.text.primary }}>PearList</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 400, margin: 0, color: c.text.primary }}>PearList</h2>
         <p style={{ color: c.text.muted, fontSize: 14, marginTop: sp.xs }}>Private. Peer-to-Peer. No Servers.</p>
       </div>
 
