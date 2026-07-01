@@ -21,9 +21,15 @@ if (typeof window !== 'undefined') {
   }
   window.__pearEvent = (name, data) => {
     const set = listeners.get(name)
-    if (set) for (const fn of set) { try { fn(data) } catch {} }
+    if (set && set.size) { for (const fn of set) { try { fn(data) } catch {} } }
+    // No listener yet (e.g. a deep link delivered before React mounted): buffer
+    // it and replay when a listener for this event subscribes.
+    else earlyEvents.push([name, data])
   }
 }
+
+// Events that arrived before any listener was registered.
+const earlyEvents = []
 
 function realCall (method, args) {
   return new Promise((resolve, reject) => {
@@ -36,7 +42,17 @@ function realCall (method, args) {
 export function on (event, fn) {
   if (!listeners.has(event)) listeners.set(event, new Set())
   listeners.get(event).add(fn)
+  // Replay any events that arrived for this name before a listener existed.
+  for (let i = earlyEvents.length - 1; i >= 0; i--) {
+    if (earlyEvents[i][0] === event) { const [, data] = earlyEvents.splice(i, 1)[0]; try { fn(data) } catch {} }
+  }
   return () => listeners.get(event)?.delete(fn)
+}
+
+// Fire-and-forget haptic tap. The shell maps `kind` to expo-haptics; in the
+// browser preview it is a no-op. Never throws or blocks the UI.
+export function haptic (kind = 'light') {
+  try { const p = call('shell:haptic', { kind }); if (p && p.catch) p.catch(() => {}) } catch {}
 }
 
 // --- browser mock ---------------------------------------------------------
@@ -113,6 +129,8 @@ const mockMethods = {
   'shell:openUrl': async ({ url }) => { try { window.open(url, '_blank', 'noopener') } catch {} return { ok: true } },
   'shell:share': async ({ title, text }) => { try { if (navigator.share) await navigator.share({ title, text }); else alert('Share:\n\n' + text) } catch {} return { ok: true } },
   'shell:canOpenURL': async () => ({ can: false }),
+  'shell:haptic': async () => ({ ok: true }),
+  'shell:navState': async () => ({ ok: true }),
   'shell:scanQr': async () => { const code = window.prompt ? window.prompt('Paste an invite code (camera scan on device):') : null; return { code: code || null } },
 }
 // Browser design preview: open index.html?seed to land on a populated list

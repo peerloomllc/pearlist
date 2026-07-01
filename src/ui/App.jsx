@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
-import { call, on, isMock } from './ipc.js'
+import { call, on, isMock, haptic } from './ipc.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 
 // From app.json once the shell exists; hardcoded for now.
@@ -20,6 +20,25 @@ const LIGHTNING_WALLETS = [
 const isIOS = () => typeof window !== 'undefined' && window.__pearPlatform === 'ios'
 
 const openUrl = (url) => { try { call('shell:openUrl', { url }) } catch {} }
+
+// Invite links. The raw invite is an opaque base64url blob (from the core
+// encoder); we present it as a real https link so a plain text/QR share opens
+// the app via the deep-link intent filter (see app.json). The blob rides in the
+// URL fragment so it never reaches peerloomllc.com's server (it grants access).
+const INVITE_URL_BASE = 'https://peerloomllc.com/pearlist/join'
+function inviteUrl (key) { return key ? `${INVITE_URL_BASE}#${key}` : '' }
+// Accept a pasted/scanned/deep-linked invite in any shape: a full https/pear
+// URL (blob in the #fragment, an ?i= query, or after /join) or a bare blob.
+function parseInvite (text) {
+  const s = String(text || '').trim()
+  if (/^(https?:|pear:)/i.test(s)) {
+    const h = s.indexOf('#'); if (h !== -1) return s.slice(h + 1).trim()
+    const m = s.match(/[?&]i=([^&#]+)/); if (m) return decodeURIComponent(m[1]).trim()
+    const j = s.indexOf('/join'); if (j !== -1) return s.slice(j + 5).replace(/^[/?#]+/, '').trim()
+    return ''
+  }
+  return s
+}
 
 function initialsFor (label) {
   const s = (label || '').trim()
@@ -68,18 +87,24 @@ function Spinner ({ size = 22 }) {
   return <div style={{ width: size, height: size, border: `2px solid ${c.border}`, borderTopColor: c.primary, borderRadius: '50%', animation: 'pearlist-spin 0.7s linear infinite' }} />
 }
 
-function Button ({ variant = 'primary', children, style, ...rest }) {
+// Wrap a click handler so it fires a haptic tap first (device only; no-op in
+// preview). `kind` lets destructive/confirm actions buzz harder.
+function tap (onClick, kind = 'light') {
+  return (e) => { haptic(kind); return onClick?.(e) }
+}
+
+function Button ({ variant = 'primary', children, style, onClick, ...rest }) {
   const base = { width: '100%', padding: '14px 16px', borderRadius: r.lg, fontSize: 16, fontWeight: 400, cursor: 'pointer', fontFamily: FONT }
   const variants = {
     primary: { background: c.primary, color: c.text.onPrimary, border: 'none' },
     secondary: { background: c.surface.input, color: c.text.primary, border: `1px solid ${c.text.muted}` },
     danger: { background: 'transparent', color: c.error, border: `1px solid ${c.error}` },
   }
-  return <button style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
+  return <button onClick={onClick ? tap(onClick, variant === 'danger' ? 'warn' : 'light') : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
 }
 
-function IconButton ({ children, label, style, ...rest }) {
-  return <button aria-label={label} style={{ width: 36, height: 36, padding: 0, background: 'none', color: c.text.secondary, border: 'none', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', ...style }} {...rest}>{children}</button>
+function IconButton ({ children, label, style, onClick, ...rest }) {
+  return <button aria-label={label} onClick={onClick ? tap(onClick) : undefined} style={{ width: 36, height: 36, padding: 0, background: 'none', color: c.text.secondary, border: 'none', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', ...style }} {...rest}>{children}</button>
 }
 
 function TopBar ({ title, left, right }) {
@@ -124,7 +149,7 @@ function BottomSheet ({ open, onClose, title, children }) {
 
 function Toggle ({ on: isOn, onChange }) {
   return (
-    <button onClick={() => onChange(!isOn)} aria-label='toggle' style={{ width: 44, height: 26, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
+    <button onClick={() => { haptic(); onChange(!isOn) }} aria-label='toggle' style={{ width: 44, height: 26, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
       <span style={{ position: 'absolute', top: 3, left: isOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.35)', transition: 'left 160ms' }} />
     </button>
   )
@@ -315,7 +340,7 @@ function ItemRow ({ item, members, onToggle, onOpen }) {
   const checked = !!item.checked
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}` }}>
-      <button onClick={() => onToggle(item)} aria-label={checked ? 'uncheck' : 'check'} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', border: `2px solid ${checked ? c.primary : c.text.muted}`, background: checked ? c.primary : 'transparent', color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 0, animation: checked ? 'pearlist-pop 240ms ease' : 'none' }}>{checked ? '✓' : ''}</button>
+      <button onClick={() => { haptic(checked ? 'light' : 'success'); onToggle(item) }} aria-label={checked ? 'uncheck' : 'check'} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', border: `2px solid ${checked ? c.primary : c.text.muted}`, background: checked ? c.primary : 'transparent', color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 0, animation: checked ? 'pearlist-pop 240ms ease' : 'none' }}>{checked ? '✓' : ''}</button>
       <button onClick={() => onOpen(item)} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: sp.sm }}>
         <span style={{ position: 'relative', color: checked ? c.text.muted : c.text.primary, fontSize: 16, fontWeight: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {item.text}
@@ -411,6 +436,7 @@ export default function App () {
   const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
   const composer = useRef(null)
   const listComposer = useRef(null)
+  const navRef = useRef({}) // latest overlay state, for the shell's back handler
 
   const gid = activeSpaceId
   const activeSpace = spaces.find((s) => s.groupId === activeSpaceId) || null
@@ -508,6 +534,37 @@ export default function App () {
     return off
   }, [loadSpaces])
 
+  // Invite deep link: the shell forwards the opened URL
+  // (https://peerloomllc.com/pearlist/join#<blob> or pear://pearlist/join?...).
+  // Parse the blob and join. Registered once; joinSpace closes over stable setters.
+  useEffect(() => {
+    const off = on('deeplink:invite', ({ url }) => {
+      joinSpace(url).catch((e) => setBanner('Could not open that invite: ' + (e?.message || e)))
+    })
+    return off
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Android back button / gesture: tell the shell whether there is an in-app
+  // overlay to dismiss, so it consumes the press instead of exiting the app.
+  navRef.current = { donateReminder, listPicker, sheet, view, openListId }
+  useEffect(() => {
+    const canBack = !!(donateReminder || listPicker || sheet || view || openListId)
+    call('shell:navState', { canBack }).catch(() => {})
+  }, [donateReminder, listPicker, sheet, view, openListId])
+
+  // The shell forwards a hardware back press as a 'back' event when canBack was
+  // true; close the top-most layer (registered once, reads latest via navRef).
+  useEffect(() => on('back', () => {
+    const n = navRef.current
+    if (n.donateReminder) setDonateReminder(false)
+    else if (n.listPicker) setListPicker(null)
+    else if (n.sheet) { setSheet(null); setDeleteTarget(null) }
+    else if (n.view) setView(null)
+    else if (n.openListId) setOpenListId(null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [])
+
   // Auto-dismiss the transient banner.
   useEffect(() => {
     if (!banner) return
@@ -525,7 +582,9 @@ export default function App () {
     setActiveSpaceId(groupId); setOpenListId(null)
     setPhase('home'); setSheet('invite')
   }
-  async function joinSpace (inviteKey) {
+  async function joinSpace (inviteInput) {
+    const inviteKey = parseInvite(inviteInput)
+    if (!inviteKey) throw new Error('that does not look like an invite link')
     const { groupId } = await call('group:join', { inviteKey })
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
@@ -712,7 +771,7 @@ function JoinSheet ({ open, onClose, onJoin }) {
     <>
       <BottomSheet open={open} onClose={onClose} title='Join a space'>
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
-          <Field value={code} onChange={setCode} placeholder='Paste the invite code' autoFocus />
+          <Field value={code} onChange={setCode} placeholder='Paste the invite link' autoFocus />
           <Button disabled={busy || !code.trim()} style={{ opacity: busy || !code.trim() ? 0.5 : 1 }} onClick={() => join()}>{busy ? 'Joining…' : 'Join'}</Button>
           <Button variant='secondary' onClick={() => setScanning(true)}>Scan QR code</Button>
         </div>
@@ -725,16 +784,17 @@ function JoinSheet ({ open, onClose, onJoin }) {
 function InviteSheet ({ open, onClose, inviteKey, spaceName }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => { if (open) setCopied(false) }, [open])
-  const copy = async () => { try { await navigator.clipboard.writeText(inviteKey || '') } catch {} setCopied(true) }
-  const share = () => { try { call('shell:share', { title: 'PearList invite', text: `Join ${spaceName || 'my space'} on PearList:\n\n` + (inviteKey || '') }) } catch {} }
+  const link = inviteUrl(inviteKey)
+  const copy = async () => { try { await navigator.clipboard.writeText(link) } catch {} setCopied(true) }
+  const share = () => { try { call('shell:share', { title: 'PearList invite', text: `Join ${spaceName || 'my space'} on PearList:\n\n` + link }) } catch {} }
   return (
     <BottomSheet open={open} onClose={onClose} title={`Invite to ${spaceName || 'this space'}`}>
-      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>Anyone with this can join {spaceName || 'this space'} and edit its lists. They will not see your other spaces. Show the QR to scan, or copy or send the code.</p>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>Anyone with this link can join {spaceName || 'this space'} and edit its lists. They will not see your other spaces. Show the QR to scan, or copy or send the link.</p>
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: sp.base }}>
-        {inviteKey ? <QrImage text={inviteKey} size={200} /> : null}
+        {link ? <QrImage text={link} size={200} /> : null}
       </div>
       <div style={{ display: 'flex', gap: sp.sm }}>
-        <Button variant='secondary' onClick={copy}>{copied ? 'Copied' : 'Copy code'}</Button>
+        <Button variant='secondary' onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>
         <Button onClick={share}>Share</Button>
       </div>
     </BottomSheet>
@@ -758,7 +818,7 @@ function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef }) {
   return (
     <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base, borderTop: `1px solid ${c.border}` }}>
       <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onSubmit() }} placeholder={placeholder} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-      <button onClick={onSubmit} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer' }}>+</button>
+      <button onClick={() => { haptic(); onSubmit() }} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer' }}>+</button>
     </div>
   )
 }

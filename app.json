@@ -44,7 +44,8 @@
       ["expo-router"],
       ["expo-build-properties", { "android": { "minSdkVersion": 29 } }],
       ["expo-splash-screen", { "image": "./assets/images/icon.png", "imageWidth": 200, "backgroundColor": "#0d0d0d", "resizeMode": "contain" }],
-      "./plugins/with-android-abis"
+      "./plugins/with-android-abis",
+      "./plugins/with-android-queries"
     ],
     "assets": ["./assets/bare-universal.bundle", "./assets/bare-ios.bundle"]
   }
