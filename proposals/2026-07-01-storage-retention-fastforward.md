@@ -1,6 +1,10 @@
 # 2026-07-01 - Storage retention + fast-forward (@peerloom/core)
 
-**Status:** SCOPING (no code yet). Roadmap item #4 from the storage discussion.
+**Status:** APPROVED - P1 + P2 SHIPPED 2026-07-01. Roadmap item #4 from the
+storage discussion. P1 (manual `engine.retain()`): peerloom-core PR #7 + pearlist
+PR #19. P2 (auto scheduler, 30-min interval): peerloom-core PR #8 + pearlist PR
+#20. P3 (deleted-space disk reclaim) remains blocked on upstream `purge()`. The
+original scoping text below is kept as the design record.
 
 **Goal**
 
