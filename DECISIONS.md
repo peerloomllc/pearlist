@@ -2,6 +2,22 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-06-30 - Notifications: minimal, assignment-only, off by default (v1)
+Tier: T1 (product policy, no wire change)
+Context: deciding whether and what to notify in a shared-list app.
+Choice: keep notifications minimal. The ONLY notification is "someone assigned an
+item to you" (accountability), opt-in and OFF by default. No notifications for
+item add / check / edit - too frequent, the surest way to get an app muted or
+deleted. A quiet once-a-day digest is a possible later opt-in, not in v1.
+Notifications are LOCAL (no server, no push): generated on-device when the worklet
+syncs a change, same as the suite's background sync. First release may ship with
+notifications OFF entirely and add assignment alerts in a follow-up.
+Alternatives: notify on every change (rejected, spammy); none ever (viable, but
+assignment alerts add real value once assignees map to members).
+Consequences: the assignee feature should carry enough context to raise a local
+notification later; assignees are free-text today, so member-mapped assignees are
+a prerequisite. Revisit when the shell + background sync exist.
+
 ## 2026-06-30 - Items use shared content-keyed rows, not writer-scoped rows
 Tier: T3
 Context: the original proposal sketched items as item:{listId}:{pubkey}:{seqPad}

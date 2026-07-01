@@ -17,6 +17,7 @@
     "hyperbee": "^2.27.3",
     "hyperdht": "^6.29.0",
     "hyperswarm": "^4.17.0",
+    "jsqr": "^1.4.0",
     "protomux": "^3.10.3",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

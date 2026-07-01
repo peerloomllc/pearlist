@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import QRCode from 'qrcode'
+import jsQR from 'jsqr'
 import { call, on, isMock } from './ipc.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 
@@ -188,6 +189,60 @@ function QrImage ({ text, size = 200 }) {
   return (
     <div style={{ width: size, height: size, background: '#fff', borderRadius: r.md, padding: 8, boxSizing: 'content-box', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       {url ? <img src={url} width={size} height={size} alt='Invite QR code' /> : null}
+    </div>
+  )
+}
+
+// In-WebView QR scanner: camera stream -> canvas frames -> jsQR decode. Works in
+// a browser and in a WebView once the shell grants camera permission. (The suite
+// uses a native scanner; this keeps scanning working before the shell exists.)
+function ScannerView ({ open, onClose, onDecode }) {
+  const videoRef = useRef(null)
+  const [error, setError] = useState(null)
+  useEffect(() => {
+    if (!open) return
+    setError(null)
+    let stream = null; let raf = null; let cancelled = false
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    const stop = () => { cancelled = true; if (raf) cancelAnimationFrame(raf); if (stream) stream.getTracks().forEach((t) => t.stop()) }
+    ;(async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera not available on this device')
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
+        const v = videoRef.current
+        v.srcObject = stream; await v.play()
+        const tick = () => {
+          if (cancelled) return
+          if (v.readyState >= 2 && v.videoWidth) {
+            canvas.width = v.videoWidth; canvas.height = v.videoHeight
+            ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
+            let img = null
+            try { img = ctx.getImageData(0, 0, canvas.width, canvas.height) } catch {}
+            if (img) {
+              const found = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' })
+              if (found?.data) { stop(); onDecode(found.data); return }
+            }
+          }
+          raf = requestAnimationFrame(tick)
+        }
+        tick()
+      } catch (e) { setError(e?.message || 'Could not open the camera') }
+    })()
+    return stop
+  }, [open])
+  if (!open) return null
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: '#000' }}>
+      <video ref={videoRef} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+        <div style={{ width: 240, height: 240, border: `3px solid ${c.primary}`, borderRadius: r.lg }} />
+      </div>
+      <button onClick={onClose} aria-label='Close scanner' style={{ position: 'absolute', top: sp.base, right: sp.base, width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 20, cursor: 'pointer' }}>✕</button>
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, textAlign: 'center', color: '#fff', fontSize: 14, padding: `${sp.xl}px ${sp.base}px`, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
+        {error || 'Point the camera at an invite QR code'}
+      </div>
     </div>
   )
 }
@@ -425,21 +480,24 @@ function StartSheet ({ open, onClose, onCreate }) {
 function JoinSheet ({ open, onClose, onJoin }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
-  useEffect(() => { if (open) { setCode(''); setBusy(false) } }, [open])
+  const [scanning, setScanning] = useState(false)
+  useEffect(() => { if (open) { setCode(''); setBusy(false); setScanning(false) } }, [open])
   const join = async (value) => {
     const v = (value ?? code).trim(); if (!v) return
     setBusy(true)
     try { await onJoin(v) } catch (e) { setBusy(false); alert('Could not join: ' + e.message) }
   }
-  const scan = async () => { try { const res = await call('shell:scanQr', {}); if (res?.code) join(res.code) } catch {} }
   return (
-    <BottomSheet open={open} onClose={onClose} title='Join a household'>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
-        <Field value={code} onChange={setCode} placeholder='Paste the invite code' autoFocus />
-        <Button disabled={busy || !code.trim()} style={{ opacity: busy || !code.trim() ? 0.5 : 1 }} onClick={() => join()}>{busy ? 'Joining…' : 'Join'}</Button>
-        <Button variant='secondary' onClick={scan}>Scan QR code</Button>
-      </div>
-    </BottomSheet>
+    <>
+      <BottomSheet open={open} onClose={onClose} title='Join a household'>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
+          <Field value={code} onChange={setCode} placeholder='Paste the invite code' autoFocus />
+          <Button disabled={busy || !code.trim()} style={{ opacity: busy || !code.trim() ? 0.5 : 1 }} onClick={() => join()}>{busy ? 'Joining…' : 'Join'}</Button>
+          <Button variant='secondary' onClick={() => setScanning(true)}>Scan QR code</Button>
+        </div>
+      </BottomSheet>
+      <ScannerView open={scanning} onClose={() => setScanning(false)} onDecode={(txt) => { setScanning(false); join(txt) }} />
+    </>
   )
 }
 
