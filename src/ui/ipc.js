@@ -107,8 +107,13 @@ const mockMethods = {
     return { itemId: id }
   },
   'item:toggle': async ({ groupId, listId, itemId, checked }) => { mockGroup(groupId).items.get(itemId).checked = !!checked; return { ok: true } },
-  'item:edit': async ({ groupId, listId, itemId, text, qty }) => {
-    const it = mockGroup(groupId).items.get(itemId); if (text !== undefined) it.text = text; if (qty !== undefined) it.qty = qty; return { ok: true }
+  'item:edit': async ({ groupId, listId, itemId, text, qty, note, url }) => {
+    const it = mockGroup(groupId).items.get(itemId)
+    if (text !== undefined) it.text = text
+    if (qty !== undefined) it.qty = qty
+    if (note !== undefined) it.note = note ? String(note) : ''
+    if (url !== undefined) it.url = url ? (/^https?:\/\//i.test(url) ? url : 'https://' + url) : ''
+    return { ok: true }
   },
   'item:assign': async ({ groupId, listId, itemId, assignee }) => { mockGroup(groupId).items.get(itemId).assignee = assignee || null; return { ok: true } },
   'item:delete': async ({ groupId, listId, itemId }) => { mockGroup(groupId).items.get(itemId).deleted = true; return { ok: true } },

@@ -2,6 +2,24 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-01 - Item notes + hyperlink
+Tier: T1 (additive item fields; no wire-format break - item rows already carry
+arbitrary signed fields).
+Context: user wants a per-item note and the ability to link an item to an
+external product page (Shipt-style), tappable to open in the browser.
+Choice:
+- **note**: optional free-text on an item, capped at 2000 chars. Rendered as
+  small muted text directly under the item text in the list row, and editable in
+  the item detail sheet. In item:edit, `note: undefined` leaves it untouched,
+  `''` clears it.
+- **url**: optional link, sanitized by cleanUrl() in the worklet: full http(s)
+  kept as-is, a bare domain (kroger.com/p/x) upgraded to https://, anything else
+  (javascript:, data:, ...) dropped to ''. Shown as a link icon on the row and
+  in the editor; tapping opens it externally via the existing shell:openUrl.
+- Deferred the live price/catalog half of the Shipt idea: that needs a
+  centralized/third-party store API and cuts against the no-server ethos. This
+  ships the hyperlink half only (see [[project_pearlist_feature_backlog]]).
+
 ## 2026-07-01 - Invite links, wallet detection, haptics, back gesture
 Tier: T2 (invite presentation + new shell bridges); no wire-format change.
 Context: four polish items for the shell/UX.

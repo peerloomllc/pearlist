@@ -92,6 +92,33 @@ test('toggle, edit, and assign an item', async () => {
   await engine.close()
 })
 
+test('item note + link: stored, sanitized, and clearable', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Groceries' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'Oat milk' })
+
+  // Note is kept; a bare domain link is upgraded to https://.
+  await call('item:edit', { groupId, listId, itemId, note: 'the barista blend, 2%', url: 'kroger.com/p/oat-milk' })
+  let [it] = await call('item:getAll', { groupId, listId })
+  assert.equal(it.note, 'the barista blend, 2%')
+  assert.equal(it.url, 'https://kroger.com/p/oat-milk')
+
+  // A full https link is kept as-is; a dangerous scheme is dropped to ''.
+  await call('item:edit', { groupId, listId, itemId, url: 'https://shop.example.com/item/9' })
+  assert.equal((await call('item:getAll', { groupId, listId }))[0].url, 'https://shop.example.com/item/9')
+  await call('item:edit', { groupId, listId, itemId, url: 'javascript:alert(1)' })
+  assert.equal((await call('item:getAll', { groupId, listId }))[0].url, '')
+
+  // Editing text alone leaves the note untouched; '' clears the note.
+  await call('item:edit', { groupId, listId, itemId, text: 'Oat milk (2 ct)' })
+  assert.equal((await call('item:getAll', { groupId, listId }))[0].note, 'the barista blend, 2%')
+  await call('item:edit', { groupId, listId, itemId, note: '' })
+  assert.equal((await call('item:getAll', { groupId, listId }))[0].note, '')
+  await engine.close()
+})
+
 test('deleting an item hides it and survives no-resurrection', async () => {
   const { engine, call } = driver()
   await call('init', {})
