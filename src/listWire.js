@@ -15,7 +15,6 @@
 // proves it; concurrent edits resolve last-writer-wins.
 
 const { verifyValue } = require('@peerloom/core/records')
-const b4a = require('b4a')
 
 const FUTURE_TS_TOLERANCE_MS = 5 * 60 * 1000
 
@@ -64,21 +63,27 @@ function rowApplyDecision (key, incoming, existing) {
 // a { deleted: true } tombstone (kept in the view so no-resurrection holds), so
 // only 'put' ops exist.
 async function applyListOp (op, ctx) {
-  const { view, base, node, groupId, emit } = ctx
+  const { view, groupId, emit } = ctx
   if (!op || op.type !== 'put' || typeof op.key !== 'string') return
 
-  // `space` singleton: OWNER-ONLY meta / tombstone. The op is accepted only when
-  // it comes from the founder (the Autobase bootstrap writer), so only the space
-  // owner can delete the space. On a fresh delete we emit space:deleted so every
-  // member's UI can tear the space down.
+  // `space` singleton: the space's owner record + tombstone. Ownership is
+  // explicit and signed (robust across remounts, unlike an Autobase-internal
+  // key check). The FIRST signed write claims ownership (owner must equal the
+  // signer); after that only the owner may update/delete it. On a fresh delete
+  // we emit space:deleted so every member's UI can tear the space down.
   if (op.key === 'space') {
-    const fromKey = node?.from?.key
-    if (!fromKey || !base?.key || !b4a.equals(fromKey, base.key)) return
+    const v = op.value
+    if (!v || typeof v !== 'object' || typeof v.pubkey !== 'string' || typeof v.updatedAt !== 'number') return
+    if (!verifyValue(v)) return
     const existing = (await view.get('space'))?.value
-    if (existing && typeof existing.updatedAt === 'number' && typeof op.value?.updatedAt === 'number' && op.value.updatedAt <= existing.updatedAt) return
-    await view.put('space', op.value)
-    if (op.value?.deleted && !existing?.deleted && typeof emit === 'function') {
-      try { emit('space:deleted', { groupId }) } catch {}
+    if (!existing) {
+      if (v.owner !== v.pubkey) return // the claimant must name themselves owner
+      await view.put('space', v)
+    } else {
+      if (v.pubkey !== existing.owner) return // only the established owner
+      if (typeof existing.updatedAt === 'number' && v.updatedAt <= existing.updatedAt) return
+      await view.put('space', v)
+      if (v.deleted && !existing.deleted && typeof emit === 'function') { try { emit('space:deleted', { groupId }) } catch {} }
     }
     return
   }

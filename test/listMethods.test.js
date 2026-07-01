@@ -184,7 +184,8 @@ test('member roster: publish self, read it, and assign a list to a member', asyn
 test('space: owner flag, owner delete writes a tombstone + forgets it locally', async () => {
   const { engine, call } = driver()
   await call('init', {})
-  const { groupId } = await call('group:create', { name: 'Fam' }) // founder = owner
+  const { groupId } = await call('group:create', { name: 'Fam' })
+  await call('space:init', { groupId, name: 'Fam' }) // claim ownership
 
   const spaces = await call('spaces:list', {})
   assert.equal(spaces.find((s) => s.groupId === groupId).owner, true)
@@ -199,6 +200,26 @@ test('space: owner flag, owner delete writes a tombstone + forgets it locally', 
 
   // And it is forgotten locally (dropped from the space list).
   assert.ok(!(await call('spaces:list', {})).some((s) => s.groupId === groupId))
+  await engine.close()
+})
+
+test('space: legacy space with no owner record is migrated to the founder', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  // group:create does NOT write a `space` record (that is the UI's space:init),
+  // so this stands in for a space created before signed ownership existed.
+  const { groupId } = await call('group:create', { name: 'Legacy' })
+  const base = engine.bases.get(groupId)
+  await base.update()
+  assert.equal(await base.view.get('space'), null) // no owner record yet
+
+  // Listing migrates it: the founder claims ownership once.
+  assert.equal((await call('spaces:list', {})).find((s) => s.groupId === groupId).owner, true)
+  await base.update()
+  assert.equal((await base.view.get('space')).value.owner, (await call('identity:get', {})).pubkey)
+
+  // And the migrated owner can now delete it.
+  assert.deepEqual(await call('space:delete', { groupId }), { ok: true })
   await engine.close()
 })
 

@@ -7,21 +7,29 @@ Tier: T3 (new `space` singleton wire key) for delete; T1 for the UI-only bits.
 Context: owner should be able to delete a space and notify members; users want to
 see who is in a space and get told when someone joins.
 Choice:
-- **Owner** = the space founder = the Autobase bootstrap writer
-  (base.local.key === base.key). spaces:list returns an `owner` flag.
-- **Delete**: owner writes a `space` singleton tombstone
-  ({ deleted, deletedAt, updatedAt }) into the shared view. applyListOp accepts a
-  `space` write ONLY from the bootstrap writer (node.from.key === base.key), so
-  only the owner can delete. On a fresh delete the apply emits `space:deleted`;
-  each member's UI calls space:forget (drops groups:joined) and moves off it.
-  The owner also forgets locally on delete. New methods: space:delete,
-  space:forget.
-- **Members view**: MembersSheet lists member:getAll (already synced).
+- **Owner** = whoever claimed the space's signed `space` owner record first.
+  On create the founder calls space:init, which writes a signed
+  `space` = { owner:<self pubkey>, name, createdAt }. applyListOp accepts the
+  FIRST `space` write only if owner === signer, and every LATER write only from
+  that owner (v.pubkey === existing.owner). spaces:list derives its `owner` flag
+  by reading space.owner from the view.
+  NB: an earlier draft tied ownership to the Autobase bootstrap writer
+  (base.local.key === base.key). Rejected: that identity is only stable right
+  after create and flips after a remount, so Delete vanished on-device. The
+  signed record is durable across remounts.
+- **Delete**: owner writes a signed `space` tombstone ({ ...meta, deleted,
+  deletedAt }). Only the owner's signed update is accepted (see above). On a
+  fresh delete the apply emits `space:deleted`; each member's UI calls
+  space:forget (drops groups:joined) and moves off it. The owner also forgets
+  locally on delete. New methods: space:init, space:delete, space:forget.
+- **Members view**: lives on the Space page as a MembersBar (overlapping avatars
+  + count) that opens the members sheet, NOT in the Profile bottomsheet (moved
+  there for discoverability). Lists member:getAll (already synced).
 - **Join notification**: v1 is an IN-APP banner ("X joined"), detected by diffing
   the roster in the poll (skips initial load + self). True OS/push notifications
   need expo-notifications + background sync - deferred (see notifications policy).
-Alternatives: per-member ACL for delete (rejected, founder rule is simpler and
-matches PearCircle circle:delete); real OS notifications now (deferred, bigger).
+Alternatives: per-member ACL for delete (rejected, single-owner rule is simpler);
+real OS notifications now (deferred, bigger).
 Consequences: base stays mounted in-memory after delete until app restart (minor;
 groups:joined removal stops it next launch). Non-owner delete throws.
 

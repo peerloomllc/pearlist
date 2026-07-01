@@ -13,11 +13,12 @@ const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = req
 
 function pubkeyHex (ctx) { return b4a.toString(ctx.identity.publicKey, 'hex') }
 
-// The space owner is the founder = the Autobase bootstrap writer, i.e. the device
-// whose local writer core IS the bootstrap (base.local.key === base.key).
-function isSpaceOwner (ctx, groupId) {
-  const base = ctx.bases.get(groupId)
-  return !!(base && base.local && base.local.key && base.key && b4a.equals(base.local.key, base.key))
+// The founder is the Autobase bootstrap writer: their own local writer core IS
+// the base key. A joiner mounts with the founder's bootstrap, so their local key
+// always differs. Used only to migrate legacy spaces (no signed `space` record);
+// new spaces claim ownership explicitly at creation via space:init.
+function isFounder (base) {
+  try { return !!base.local && b4a.equals(base.local.key, base.key) } catch { return false }
 }
 
 // Publish this device's profile as its member:{pubkey} roster row to every group
@@ -75,21 +76,47 @@ const methods = {
         groupId: value.groupId, groupKey: value.groupKey, encryptionKey: value.encryptionKey,
         bootstrap: value.bootstrap, name: value.name,
       })
-      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0, owner: isSpaceOwner(ctx, value.groupId) })
+      let owner = false
+      const base = ctx.bases.get(value.groupId)
+      if (base) {
+        try {
+          await base.update()
+          let meta = (await base.view.get('space'))?.value
+          // Migrate spaces created before the signed `space` owner record existed:
+          // the founder (bootstrap writer) claims ownership once, on first list.
+          if (!meta && base.writable && isFounder(base)) {
+            await putRow(ctx, value.groupId, 'space', { owner: pubkeyHex(ctx), name: String(value.name || ''), createdAt: value.joinedAt || Date.now() })
+            await base.update()
+            meta = (await base.view.get('space'))?.value
+          }
+          owner = meta?.owner === pubkeyHex(ctx)
+        } catch {}
+      }
+      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0, owner })
     }
     out.sort((a, b) => a.joinedAt - b.joinedAt)
     return out
   },
 
-  // Delete a whole space. Owner only (founder = bootstrap writer). Writes a
-  // `space` tombstone that replicates to members (their apply emits space:deleted
-  // so their UI tears the space down), then forgets it locally.
+  // Establish ownership of a freshly created space: the founder writes the signed
+  // `space` owner record before anyone else can join (first-writer claims owner).
+  // Idempotent: a no-op if a `space` record already exists.
+  'space:init': async ({ groupId, name }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, 'space')
+    if (existing) return { ok: true, owner: existing.owner }
+    await putRow(ctx, groupId, 'space', { owner: pubkeyHex(ctx), name: String(name || ''), createdAt: Date.now() })
+    return { ok: true, owner: pubkeyHex(ctx) }
+  },
+
+  // Delete a whole space. Owner only. Writes a `space` tombstone (only the owner's
+  // signed update is accepted) that replicates to members (their apply emits
+  // space:deleted so their UI tears the space down), then forgets it locally.
   'space:delete': async ({ groupId }, ctx) => {
-    const base = ctx.bases.get(groupId)
-    if (!base) throw new Error('unknown space: ' + groupId)
-    if (!isSpaceOwner(ctx, groupId)) throw new Error('only the owner can delete a space')
-    const now = Date.now()
-    await ctx.append(groupId, { type: 'put', key: 'space', value: { deleted: true, deletedAt: now, updatedAt: now } })
+    const base = viewFor(ctx, groupId)
+    const meta = await readRow(base, 'space')
+    if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can delete a space')
+    await putRow(ctx, groupId, 'space', { ...meta, deleted: true, deletedAt: Date.now() })
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
     return { ok: true }
   },

@@ -343,6 +343,37 @@ function Onboarding ({ onStart, onJoin }) {
   )
 }
 
+// Standard share glyph (box with an up-arrow), replacing the plain ↗.
+function ShareIcon ({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
+      <path d='M12 15V3' />
+      <path d='M8 7l4-4 4 4' />
+      <path d='M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7' />
+    </svg>
+  )
+}
+
+// Overlapping member avatars on the space page; tap to see the full roster.
+function MembersBar ({ members, onOpen }) {
+  if (!members || members.length === 0) return null
+  const shown = members.slice(0, 5)
+  return (
+    <button onClick={onOpen} aria-label='Members' style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.sm}px ${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer' }}>
+      <span style={{ display: 'flex' }}>
+        {shown.map((m, i) => (
+          <span key={m.pubkey} style={{ marginLeft: i ? -8 : 0, borderRadius: '50%', border: `2px solid ${c.surface.base}`, display: 'flex' }}>
+            <Avatar name={m.displayName} avatar={m.avatar} size={26} />
+          </span>
+        ))}
+      </span>
+      <span style={{ color: c.text.secondary, fontSize: 13 }}>{members.length} {members.length === 1 ? 'member' : 'members'}</span>
+      <span style={{ flex: 1 }} />
+      <span style={{ color: c.text.muted, fontSize: 16 }}>›</span>
+    </button>
+  )
+}
+
 export default function App () {
   const [phase, setPhase] = useState('loading')
   const [spaces, setSpaces] = useState([])
@@ -472,6 +503,7 @@ export default function App () {
 
   async function createSpace (name) {
     const { groupId } = await call('group:create', { name })
+    await call('space:init', { groupId, name }).catch(() => {}) // claim ownership before anyone joins
     call('member:publish', { groupId }).catch(() => {}) // owner is writable now
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null)
@@ -504,7 +536,7 @@ export default function App () {
     setDraft('')
     await call('item:add', { groupId: gid, listId: openListId, text })
     await loadItems(gid, openListId)
-    composer.current?.focus?.()
+    composer.current?.blur?.() // dismiss the keyboard; show the full list
   }
   async function toggleItem (item) {
     setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: !item.checked } : i)) // optimistic
@@ -516,7 +548,7 @@ export default function App () {
     setListDraft('')
     await call('list:create', { groupId: gid, name })
     await loadLists(gid)               // new list appears in the overview; do not auto-open
-    listComposer.current?.focus?.()
+    listComposer.current?.blur?.()     // dismiss the keyboard; show the full lists page
   }
   async function renameList (name) {
     const n = (name || '').trim(); if (!n || !openListId) return
@@ -552,8 +584,9 @@ export default function App () {
           <TopBar
             title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><span style={{ color: c.text.muted, fontSize: 15 }}>▾</span></button>}
             left={<button aria-label='Menu' onClick={() => setSheet('menu')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}><Avatar name={profile?.displayName} avatar={profile?.avatar} size={30} /></button>}
-            right={<IconButton label='Invite' onClick={() => setSheet('invite')}>↗</IconButton>}
+            right={<IconButton label='Invite' onClick={() => setSheet('invite')}><ShareIcon /></IconButton>}
           />
+          <MembersBar members={members} onOpen={() => setSheet('members')} />
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
@@ -587,7 +620,6 @@ export default function App () {
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner}
         onProfile={() => { setSheet(null); setView('profile') }}
-        onMembers={() => setSheet('members')}
         onInvite={() => setSheet('invite')}
         onAbout={() => { setSheet(null); setView('about') }}
         onDeleteSpace={() => setSheet('deleteSpace')} />
@@ -782,7 +814,7 @@ function DeleteSpaceSheet ({ open, onClose, spaceName, onConfirm }) {
   )
 }
 
-function MenuSheet ({ open, onClose, profile, spaceName, isOwner, onProfile, onMembers, onAbout, onInvite, onDeleteSpace }) {
+function MenuSheet ({ open, onClose, profile, spaceName, isOwner, onProfile, onAbout, onInvite, onDeleteSpace }) {
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
   )
@@ -795,8 +827,7 @@ function MenuSheet ({ open, onClose, profile, spaceName, isOwner, onProfile, onM
           <span style={{ color: c.text.muted, fontSize: 13 }}>Name and photo</span>
         </span>
       </button>
-      <Row onClick={onMembers}><span style={{ flex: 1 }}>Members{spaceName ? ` of ${spaceName}` : ''}</span><span style={{ color: c.text.muted }}>›</span></Row>
-      <Row onClick={onInvite}><span style={{ flex: 1 }}>Invite peers</span><span style={{ color: c.text.muted }}>↗</span></Row>
+      <Row onClick={onInvite}><span style={{ flex: 1 }}>Invite peers</span><ShareIcon size={16} /></Row>
       <Row onClick={onAbout}><span style={{ flex: 1 }}>About PearList</span><span style={{ color: c.text.muted }}>›</span></Row>
       {isOwner ? <Row onClick={onDeleteSpace} danger><span style={{ flex: 1 }}>Delete {spaceName || 'space'}</span></Row> : null}
     </BottomSheet>
