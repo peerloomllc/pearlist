@@ -37,6 +37,7 @@ const THEME_VARS = `
 }`
 
 const RESET = `
+:root{--pear-safe-top:env(safe-area-inset-top,0px);--pear-safe-bottom:env(safe-area-inset-bottom,0px);--pear-safe-left:env(safe-area-inset-left,0px);--pear-safe-right:env(safe-area-inset-right,0px)}
 *,*::before,*::after{box-sizing:border-box}
 *{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
 html,body,#root{height:100%;margin:0}
