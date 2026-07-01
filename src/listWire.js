@@ -15,6 +15,7 @@
 // proves it; concurrent edits resolve last-writer-wins.
 
 const { verifyValue } = require('@peerloom/core/records')
+const b4a = require('b4a')
 
 const FUTURE_TS_TOLERANCE_MS = 5 * 60 * 1000
 
@@ -62,8 +63,27 @@ function rowApplyDecision (key, incoming, existing) {
 // engine applyOps: one op at a time, in linearized order. A delete is a put of
 // a { deleted: true } tombstone (kept in the view so no-resurrection holds), so
 // only 'put' ops exist.
-async function applyListOp (op, { view }) {
-  if (!op || op.type !== 'put' || !inNamespace(op.key)) return
+async function applyListOp (op, ctx) {
+  const { view, base, node, groupId, emit } = ctx
+  if (!op || op.type !== 'put' || typeof op.key !== 'string') return
+
+  // `space` singleton: OWNER-ONLY meta / tombstone. The op is accepted only when
+  // it comes from the founder (the Autobase bootstrap writer), so only the space
+  // owner can delete the space. On a fresh delete we emit space:deleted so every
+  // member's UI can tear the space down.
+  if (op.key === 'space') {
+    const fromKey = node?.from?.key
+    if (!fromKey || !base?.key || !b4a.equals(fromKey, base.key)) return
+    const existing = (await view.get('space'))?.value
+    if (existing && typeof existing.updatedAt === 'number' && typeof op.value?.updatedAt === 'number' && op.value.updatedAt <= existing.updatedAt) return
+    await view.put('space', op.value)
+    if (op.value?.deleted && !existing?.deleted && typeof emit === 'function') {
+      try { emit('space:deleted', { groupId }) } catch {}
+    }
+    return
+  }
+
+  if (!inNamespace(op.key)) return
   const existing = (await view.get(op.key))?.value
   if (rowApplyDecision(op.key, op.value, existing) === 'accept') {
     await view.put(op.key, op.value)

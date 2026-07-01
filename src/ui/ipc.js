@@ -54,22 +54,24 @@ function mockGroup (groupId) {
   if (!g) throw new Error('unknown group: ' + groupId)
   return g
 }
-const newGroup = (groupId, name, inviteKey) => ({ groupId, name, inviteKey, lists: new Map(), items: new Map(), members: new Map() })
+const newGroup = (groupId, name, inviteKey, owner = true) => ({ groupId, name, inviteKey, owner, lists: new Map(), items: new Map(), members: new Map() })
 const mockMethods = {
   init: async () => ({ ok: true }),
   'identity:get': async () => ({ pubkey: MOCK_SELF }),
   'group:create': async ({ name }) => {
     const groupId = rid(22)
     const inviteKey = 'mock-' + groupId
-    mock.groups.set(groupId, newGroup(groupId, name || 'Household', inviteKey))
+    mock.groups.set(groupId, newGroup(groupId, name || 'Household', inviteKey, true))
     return { groupId, inviteKey }
   },
   'group:join': async ({ inviteKey }) => {
     const groupId = rid(22)
-    mock.groups.set(groupId, newGroup(groupId, 'Household', inviteKey))
+    mock.groups.set(groupId, newGroup(groupId, 'Household', inviteKey, false))
     return { groupId }
   },
-  'spaces:list': async () => [...mock.groups.values()].map((g) => ({ groupId: g.groupId, name: g.name, inviteKey: g.inviteKey })),
+  'spaces:list': async () => [...mock.groups.values()].map((g) => ({ groupId: g.groupId, name: g.name, inviteKey: g.inviteKey, owner: g.owner })),
+  'space:delete': async ({ groupId }) => { mock.groups.delete(groupId); return { ok: true } },
+  'space:forget': async ({ groupId }) => { mock.groups.delete(groupId); return { ok: true } },
   'member:publish': async ({ groupId }) => {
     mockGroup(groupId).members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: mock.profile?.displayName || 'You', avatar: mock.profile?.avatar || null })
     return { published: true }

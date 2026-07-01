@@ -357,6 +357,8 @@ export default function App () {
   const [donateReminder, setDonateReminder] = useState(false)
   const [members, setMembers] = useState([])
   const [selfPubkey, setSelfPubkey] = useState(null)
+  const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
+  const prevMembersRef = useRef({})              // groupId -> Set(pubkey) for join detection
   const [listPicker, setListPicker] = useState(null) // { listId, current } for assigning a whole list
   const [draft, setDraft] = useState('')       // add-item composer (list detail)
   const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
@@ -391,6 +393,14 @@ export default function App () {
     const ms = await call('member:getAll', { groupId }).catch(() => [])
     setMembers(ms)
     if (self && !ms.some((m) => m.pubkey === self)) call('member:publish', { groupId }).catch(() => {})
+    // "Someone joined" banner: fire only for a member that appears after we have
+    // already seen this space's roster once (skips the initial load and self).
+    const prev = prevMembersRef.current[groupId]
+    if (prev) {
+      const added = ms.find((m) => !prev.has(m.pubkey) && m.pubkey !== self)
+      if (added) setBanner(`${added.displayName || 'Someone'} joined`)
+    }
+    prevMembersRef.current[groupId] = new Set(ms.map((m) => m.pubkey))
     return ms
   }, [])
 
@@ -436,6 +446,28 @@ export default function App () {
     return () => { done = true }
   }, [phase])
 
+  // A space we're in was deleted by its owner: forget it and move off it.
+  useEffect(() => {
+    const off = on('space:deleted', ({ groupId }) => {
+      (async () => {
+        await call('space:forget', { groupId }).catch(() => {})
+        const sp = await loadSpaces()
+        setOpenListId(null)
+        setActiveSpaceId((cur) => (cur === groupId ? (sp[0]?.groupId || null) : cur))
+        if (sp.length === 0) setPhase('onboarding')
+        setBanner('That space was deleted by its owner.')
+      })()
+    })
+    return off
+  }, [loadSpaces])
+
+  // Auto-dismiss the transient banner.
+  useEffect(() => {
+    if (!banner) return
+    const t = setTimeout(() => setBanner(null), 4000)
+    return () => clearTimeout(t)
+  }, [banner])
+
   const openList = lists.find(l => l.id === openListId) || null
 
   async function createSpace (name) {
@@ -453,6 +485,15 @@ export default function App () {
   }
   function switchSpace (groupId) {
     setActiveSpaceId(groupId); setOpenListId(null); setSheet(null)
+  }
+  async function deleteSpace () {
+    const id = activeSpaceId; if (!id) return
+    setSheet(null)
+    try { await call('space:delete', { groupId: id }) } catch (e) { alert('Could not delete space: ' + e.message); return }
+    const sp = await loadSpaces()
+    setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null)
+    if (sp.length === 0) setPhase('onboarding')
+    setBanner('Space deleted.')
   }
   async function assignList (listId, assignee) {
     await call('list:assign', { groupId: gid, listId, assignee })
@@ -504,6 +545,7 @@ export default function App () {
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', maxWidth: 600, margin: '0 auto' }}>
+      {banner ? <Banner text={banner} onClose={() => setBanner(null)} /> : null}
       {openListId === null ? (
         // ===== Lists overview: all lists in the space + persistent add-list bar =====
         <>
@@ -543,9 +585,14 @@ export default function App () {
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
+        spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner}
         onProfile={() => { setSheet(null); setView('profile') }}
+        onMembers={() => setSheet('members')}
+        onInvite={() => setSheet('invite')}
         onAbout={() => { setSheet(null); setView('about') }}
-        onInvite={() => setSheet('invite')} />
+        onDeleteSpace={() => setSheet('deleteSpace')} />
+      <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} />
+      <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => setSheet(null)} spaceName={activeSpace?.name} onConfirm={deleteSpace} />
       <ProfileView open={view === 'profile'} onBack={() => setView(null)} profile={profile} theme={theme} onTheme={applyTheme}
         onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
       <AboutView open={view === 'about'} onBack={() => setView(null)} onWallet={() => setSheet('wallet')} />
@@ -702,9 +749,42 @@ function RenameListSheet ({ open, current, onClose, onSave }) {
   )
 }
 
-function MenuSheet ({ open, onClose, profile, onProfile, onAbout, onInvite }) {
-  const Row = ({ onClick, children }) => (
-    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
+// Transient toast (e.g. "Alex joined", "Space deleted"). Tap to dismiss.
+function Banner ({ text, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', top: 'calc(var(--pear-safe-top) + 8px)', left: '50%', transform: 'translateX(-50%)', zIndex: 80, maxWidth: 560, width: 'calc(100% - 24px)', background: c.primary, color: c.text.onPrimary, padding: '10px 16px', borderRadius: r.lg, fontSize: 14, fontWeight: 400, textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)', cursor: 'pointer' }}>{text}</div>
+  )
+}
+
+// Who's in the space.
+function MembersSheet ({ open, onClose, members, selfPubkey, spaceName }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title={`In ${spaceName || 'this space'}`}>
+      {members.length === 0
+        ? <p style={{ color: c.text.muted, fontSize: 14, textAlign: 'center', padding: `${sp.base}px 0` }}>Just you so far.</p>
+        : members.map((m) => (
+            <div key={m.pubkey} style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.xs}px`, borderTop: `1px solid ${c.divider}` }}>
+              <Avatar name={m.displayName} avatar={m.avatar} size={40} />
+              <span style={{ color: c.text.primary, fontSize: 16 }}>{m.displayName || 'Member'}{m.pubkey === selfPubkey ? ' (You)' : ''}</span>
+            </div>
+          ))}
+    </BottomSheet>
+  )
+}
+
+function DeleteSpaceSheet ({ open, onClose, spaceName, onConfirm }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title={`Delete ${spaceName || 'space'}?`}>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>This deletes the space and all its lists for everyone in it. This cannot be undone.</p>
+      <Button variant='danger' onClick={onConfirm}>Delete for everyone</Button>
+      <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onClose}>Cancel</Button>
+    </BottomSheet>
+  )
+}
+
+function MenuSheet ({ open, onClose, profile, spaceName, isOwner, onProfile, onMembers, onAbout, onInvite, onDeleteSpace }) {
+  const Row = ({ onClick, danger, children }) => (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
   )
   return (
     <BottomSheet open={open} onClose={onClose}>
@@ -715,8 +795,10 @@ function MenuSheet ({ open, onClose, profile, onProfile, onAbout, onInvite }) {
           <span style={{ color: c.text.muted, fontSize: 13 }}>Name and photo</span>
         </span>
       </button>
+      <Row onClick={onMembers}><span style={{ flex: 1 }}>Members{spaceName ? ` of ${spaceName}` : ''}</span><span style={{ color: c.text.muted }}>›</span></Row>
       <Row onClick={onInvite}><span style={{ flex: 1 }}>Invite peers</span><span style={{ color: c.text.muted }}>↗</span></Row>
       <Row onClick={onAbout}><span style={{ flex: 1 }}>About PearList</span><span style={{ color: c.text.muted }}>›</span></Row>
+      {isOwner ? <Row onClick={onDeleteSpace} danger><span style={{ flex: 1 }}>Delete {spaceName || 'space'}</span></Row> : null}
     </BottomSheet>
   )
 }

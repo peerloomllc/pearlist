@@ -181,6 +181,36 @@ test('member roster: publish self, read it, and assign a list to a member', asyn
   await engine.close()
 })
 
+test('space: owner flag, owner delete writes a tombstone + forgets it locally', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Fam' }) // founder = owner
+
+  const spaces = await call('spaces:list', {})
+  assert.equal(spaces.find((s) => s.groupId === groupId).owner, true)
+
+  const res = await call('space:delete', { groupId })
+  assert.deepEqual(res, { ok: true })
+
+  // The owner's tombstone is accepted into the shared view (founder-write rule).
+  const base = engine.bases.get(groupId)
+  await base.update()
+  assert.equal((await base.view.get('space')).value.deleted, true)
+
+  // And it is forgotten locally (dropped from the space list).
+  assert.ok(!(await call('spaces:list', {})).some((s) => s.groupId === groupId))
+  await engine.close()
+})
+
+test('space:forget drops a space from spaces:list', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Temp' })
+  await call('space:forget', { groupId })
+  assert.ok(!(await call('spaces:list', {})).some((s) => s.groupId === groupId))
+  await engine.close()
+})
+
 test('deleting a list hides it from list:getAll', async () => {
   const { engine, call } = driver()
   await call('init', {})

@@ -2,6 +2,29 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-01 - Space delete (owner-only) + members view + join banner
+Tier: T3 (new `space` singleton wire key) for delete; T1 for the UI-only bits.
+Context: owner should be able to delete a space and notify members; users want to
+see who is in a space and get told when someone joins.
+Choice:
+- **Owner** = the space founder = the Autobase bootstrap writer
+  (base.local.key === base.key). spaces:list returns an `owner` flag.
+- **Delete**: owner writes a `space` singleton tombstone
+  ({ deleted, deletedAt, updatedAt }) into the shared view. applyListOp accepts a
+  `space` write ONLY from the bootstrap writer (node.from.key === base.key), so
+  only the owner can delete. On a fresh delete the apply emits `space:deleted`;
+  each member's UI calls space:forget (drops groups:joined) and moves off it.
+  The owner also forgets locally on delete. New methods: space:delete,
+  space:forget.
+- **Members view**: MembersSheet lists member:getAll (already synced).
+- **Join notification**: v1 is an IN-APP banner ("X joined"), detected by diffing
+  the roster in the poll (skips initial load + self). True OS/push notifications
+  need expo-notifications + background sync - deferred (see notifications policy).
+Alternatives: per-member ACL for delete (rejected, founder rule is simpler and
+matches PearCircle circle:delete); real OS notifications now (deferred, bigger).
+Consequences: base stays mounted in-memory after delete until app restart (minor;
+groups:joined removal stops it next launch). Non-owner delete throws.
+
 ## 2026-06-30 - Model: multiple "spaces", not one household
 Tier: T2 (app model + new method; no wire-format change)
 Context: users need lists shared with different people (family vs a friend group)

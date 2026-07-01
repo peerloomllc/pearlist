@@ -13,6 +13,13 @@ const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = req
 
 function pubkeyHex (ctx) { return b4a.toString(ctx.identity.publicKey, 'hex') }
 
+// The space owner is the founder = the Autobase bootstrap writer, i.e. the device
+// whose local writer core IS the bootstrap (base.local.key === base.key).
+function isSpaceOwner (ctx, groupId) {
+  const base = ctx.bases.get(groupId)
+  return !!(base && base.local && base.local.key && base.key && b4a.equals(base.local.key, base.key))
+}
+
 // Publish this device's profile as its member:{pubkey} roster row to every group
 // it can write to, so peers can resolve assignee pubkeys to a name + avatar.
 async function publishMember (ctx, onlyGroupId) {
@@ -68,10 +75,30 @@ const methods = {
         groupId: value.groupId, groupKey: value.groupKey, encryptionKey: value.encryptionKey,
         bootstrap: value.bootstrap, name: value.name,
       })
-      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0 })
+      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0, owner: isSpaceOwner(ctx, value.groupId) })
     }
     out.sort((a, b) => a.joinedAt - b.joinedAt)
     return out
+  },
+
+  // Delete a whole space. Owner only (founder = bootstrap writer). Writes a
+  // `space` tombstone that replicates to members (their apply emits space:deleted
+  // so their UI tears the space down), then forgets it locally.
+  'space:delete': async ({ groupId }, ctx) => {
+    const base = ctx.bases.get(groupId)
+    if (!base) throw new Error('unknown space: ' + groupId)
+    if (!isSpaceOwner(ctx, groupId)) throw new Error('only the owner can delete a space')
+    const now = Date.now()
+    await ctx.append(groupId, { type: 'put', key: 'space', value: { deleted: true, deletedAt: now, updatedAt: now } })
+    await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
+    return { ok: true }
+  },
+
+  // Forget a space locally (drop the membership record so it does not remount).
+  // Called by a member's UI after it receives space:deleted.
+  'space:forget': async ({ groupId }, ctx) => {
+    await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
+    return { ok: true }
   },
 
   // --- profile (device-local) --------------------------------------------
