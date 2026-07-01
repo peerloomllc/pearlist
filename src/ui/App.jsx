@@ -621,13 +621,17 @@ export default function App () {
     await call('list:assign', { groupId: gid, listId, assignee })
     await loadLists(gid)
   }
-  async function addItem () {
-    const text = draft.trim(); if (!text || !gid || !openListId) return
+  async function addItemText (text, keepFocus) {
+    const t = String(text || '').trim(); if (!t || !gid || !openListId) return
     setDraft(''); setSuggestions([])
-    await call('item:add', { groupId: gid, listId: openListId, text })
+    await call('item:add', { groupId: gid, listId: openListId, text: t })
     await loadItems(gid, openListId)
-    composer.current?.blur?.() // dismiss the keyboard; show the full list
+    // Composer add (+/Enter) dismisses the keyboard to show the full list; a
+    // suggestion-chip tap keeps focus so you can quickly add several in a row.
+    if (keepFocus) composer.current?.focus?.()
+    else composer.current?.blur?.()
   }
+  const addItem = () => addItemText(draft, false)
 
   // Item autocomplete: suggest previously-added items as you type (device-local).
   useEffect(() => {
@@ -707,7 +711,7 @@ export default function App () {
               : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
           </div>
           <div style={{ position: 'sticky', bottom: 0, background: c.surface.base }}>
-            {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => { setDraft(t); setSuggestions([]); composer.current?.focus?.() }} /> : null}
+            {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t, true)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
           </div>
         </>
@@ -842,10 +846,11 @@ function ListRow ({ list, members, onOpen }) {
   )
 }
 
-// Tap-to-fill chips of previously-added items, shown above the add-item bar.
+// Tap-to-add chips of previously-added items, shown above the add-item bar. The
+// bottom padding keeps a little buffer above the composer's divider line.
 function SuggestionBar ({ items, onPick }) {
   return (
-    <div style={{ display: 'flex', gap: sp.sm, overflowX: 'auto', padding: `${sp.sm}px ${sp.base}px 0`, WebkitOverflowScrolling: 'touch' }}>
+    <div style={{ display: 'flex', gap: sp.sm, overflowX: 'auto', padding: `${sp.sm}px ${sp.base}px ${sp.md}px`, WebkitOverflowScrolling: 'touch' }}>
       {items.map((t) => (
         <button key={t} onClick={() => { haptic(); onPick(t) }} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: r.full, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.secondary, fontSize: 14, fontWeight: 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>{t}</button>
       ))}
