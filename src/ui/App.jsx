@@ -336,6 +336,59 @@ function DonationReminderModal ({ open, onDonate, onDismiss }) {
 // text when checked (in the accent green), like crossing it off a paper list.
 // ---------------------------------------------------------------------------
 
+// Swipe an item row left to delete it. `touch-action: pan-y` lets the browser
+// keep vertical scrolling while we own the horizontal drag, so no preventDefault
+// (and no passive-listener fight) is needed. Past the threshold it slides out
+// and calls onDelete; short drags snap back.
+function SwipeRow ({ children, onDelete }) {
+  const start = useRef(null)
+  const axis = useRef(null)
+  const dxRef = useRef(0)
+  const wrap = useRef(null)
+  const [dx, setDxState] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const THRESHOLD = 88
+  const setDx = (v) => { dxRef.current = v; setDxState(v) }
+  const reset = () => { start.current = null; axis.current = null; setDragging(false); setDx(0) }
+  const onStart = (e) => { const t = e.touches[0]; start.current = { x: t.clientX, y: t.clientY }; axis.current = null; setDragging(true) }
+  const onMove = (e) => {
+    if (!start.current) return
+    const t = e.touches[0]
+    const ddx = t.clientX - start.current.x
+    const ddy = t.clientY - start.current.y
+    if (axis.current === null && (Math.abs(ddx) > 6 || Math.abs(ddy) > 6)) axis.current = Math.abs(ddx) > Math.abs(ddy) ? 'h' : 'v'
+    if (axis.current === 'h') setDx(Math.max(-(window.innerWidth || 400), Math.min(0, ddx)))
+  }
+  const onEnd = () => {
+    setDragging(false)
+    if (dxRef.current <= -THRESHOLD) {
+      haptic('warn')
+      setDx(-(wrap.current?.offsetWidth || 400)) // slide the rest of the way out
+      setTimeout(() => onDelete(), 190)
+    } else setDx(0)
+    start.current = null; axis.current = null
+  }
+  return (
+    <div ref={wrap} style={{ position: 'relative', overflow: 'hidden' }}>
+      <div aria-hidden='true' style={{ position: 'absolute', inset: 0, background: c.error, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 22, color: '#fff' }}><TrashIcon /></div>
+      <div onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onTouchCancel={reset}
+        style={{ transform: `translateX(${dx}px)`, transition: dragging ? 'none' : 'transform 200ms cubic-bezier(0.32,0.72,0,1)', background: c.surface.base, touchAction: 'pan-y', position: 'relative', willChange: 'transform' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// Transient "Item deleted · Undo" toast, above the composer.
+function UndoToast ({ onUndo }) {
+  return (
+    <div style={{ position: 'fixed', left: '50%', bottom: 'calc(var(--pear-safe-bottom) + 84px)', transform: 'translateX(-50%)', zIndex: 80, maxWidth: 560, width: 'calc(100% - 24px)', background: c.surface.elevated, color: c.text.primary, padding: '10px 8px 10px 16px', borderRadius: r.lg, fontSize: 14, display: 'flex', alignItems: 'center', gap: sp.sm, boxShadow: '0 6px 20px rgba(0,0,0,0.45)', border: `1px solid ${c.border}` }}>
+      <span style={{ flex: 1 }}>Item deleted</span>
+      <button onClick={() => { haptic(); onUndo() }} style={{ background: 'none', border: 'none', color: c.primary, fontSize: 14, fontWeight: 500, cursor: 'pointer', padding: '4px 14px' }}>Undo</button>
+    </div>
+  )
+}
+
 function ItemRow ({ item, members, onToggle, onOpen }) {
   const checked = !!item.checked
   return (
@@ -446,6 +499,7 @@ export default function App () {
   const [listPicker, setListPicker] = useState(null) // { listId, current } for assigning a whole list
   const [deleteTarget, setDeleteTarget] = useState(null) // space {groupId,name} pending delete confirm
   const [draft, setDraft] = useState('')       // add-item composer (list detail)
+  const [pendingUndo, setPendingUndo] = useState(null) // { snap, listId } for swipe-delete undo
   const [suggestions, setSuggestions] = useState([]) // item autocomplete from recents
   const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
   const composer = useRef(null)
@@ -586,6 +640,14 @@ export default function App () {
     return () => clearTimeout(t)
   }, [banner])
 
+  // The undo window: after 5s the delete stands. Also cleared when leaving the list.
+  useEffect(() => {
+    if (!pendingUndo) return
+    const t = setTimeout(() => setPendingUndo(null), 5000)
+    return () => clearTimeout(t)
+  }, [pendingUndo])
+  useEffect(() => { setPendingUndo(null) }, [openListId])
+
   const openList = lists.find(l => l.id === openListId) || null
 
   async function createSpace (name) {
@@ -647,6 +709,27 @@ export default function App () {
     await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: !item.checked })
     loadItems(gid, openListId)
   }
+  // Swipe-delete: remove the item, then offer a 5s undo. Undo re-creates it with
+  // its fields (a new row, since the delete is a no-resurrection tombstone).
+  async function swipeDeleteItem (item) {
+    const snap = { text: item.text, qty: item.qty, note: item.note, url: item.url, assignee: item.assignee, checked: !!item.checked }
+    setItems((cur) => cur.filter(i => i.id !== item.id)) // optimistic
+    await call('item:delete', { groupId: gid, listId: openListId, itemId: item.id })
+    await loadItems(gid, openListId)
+    setPendingUndo({ snap, listId: openListId })
+  }
+  async function undoDelete () {
+    const p = pendingUndo; if (!p) return
+    setPendingUndo(null)
+    try {
+      const s = p.snap
+      const { itemId } = await call('item:add', { groupId: gid, listId: p.listId, text: s.text, qty: s.qty })
+      if (s.note || s.url) await call('item:edit', { groupId: gid, listId: p.listId, itemId, note: s.note || '', url: s.url || '' })
+      if (s.assignee) await call('item:assign', { groupId: gid, listId: p.listId, itemId, assignee: s.assignee })
+      if (s.checked) await call('item:toggle', { groupId: gid, listId: p.listId, itemId, checked: true })
+      await loadItems(gid, openListId)
+    } catch {}
+  }
   async function addList () {
     const name = listDraft.trim(); if (!name || !gid) return
     setListDraft('')
@@ -705,8 +788,13 @@ export default function App () {
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
-              : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
+              : items.map((it) => (
+                <SwipeRow key={it.id} onDelete={() => swipeDeleteItem(it)}>
+                  <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />
+                </SwipeRow>
+              ))}
           </div>
+          {pendingUndo ? <UndoToast onUndo={undoDelete} /> : null}
           <div style={{ position: 'sticky', bottom: 0, background: c.surface.base }}>
             {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
