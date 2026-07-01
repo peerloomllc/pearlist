@@ -55,19 +55,23 @@ async function readRow (base, key) {
 }
 
 const methods = {
-  // --- household ----------------------------------------------------------
-  // The first joined group is "the household". Lets the UI restore on launch
-  // and re-show the invite without the creator having stashed it.
-  'household:get': async (_args, ctx) => {
+  // --- spaces -------------------------------------------------------------
+  // Each joined group is a "space": its own members, lists, and invite, kept
+  // cryptographically separate (own encryption key + swarm topic). A device can
+  // be in many. The engine already tracks them in groups:joined; this lists them
+  // (re-encoding each invite so the UI can re-share without stashing it).
+  'spaces:list': async (_args, ctx) => {
+    const out = []
     for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
       if (!value || !value.groupId) continue
       const inviteKey = defaultEncodeInvite({
         groupId: value.groupId, groupKey: value.groupKey, encryptionKey: value.encryptionKey,
         bootstrap: value.bootstrap, name: value.name,
       })
-      return { groupId: value.groupId, name: value.name || 'Household', inviteKey }
+      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0 })
     }
-    return null
+    out.sort((a, b) => a.joinedAt - b.joinedAt)
+    return out
   },
 
   // --- profile (device-local) --------------------------------------------
