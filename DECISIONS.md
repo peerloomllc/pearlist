@@ -2,6 +2,59 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-01 - Menu tidy, contrast, animated avatars
+Tier: T1 (UI) plus a stored-value cap bump (mildly wire-relevant).
+Context: on-device UX pass. Four asks.
+Choice:
+- **Delete space** moved from the Profile bottomsheet to the **Spaces switcher**:
+  a trash affordance per row, shown only for spaces this device owns
+  (`space.owner`). deleteSpace(groupId) now targets any owned space, not just
+  the active one; a joiner sees no trash. Reasoning: delete belongs with the
+  space list, not personal settings.
+- **Invite peers** removed from the Profile bottomsheet: redundant with the
+  share button already on the Space page. Menu is now profile + About only.
+- **Contrast** bumped in both themes (border, divider, text-muted) and the
+  Toggle gained a dedicated `--color-track` off-state + knob shadow, so the
+  dark-mode switch is legible in light mode (was near-invisible white-on-white).
+- **Animated avatars**: gif/webp are stored as their raw base64 data URL (no
+  canvas re-encode, which flattened them to one frame); static images still
+  downscale + re-encode to jpeg. Cap the raw file at 2 MB; the worklet's
+  profile.avatar stored-value cap rises 400 KB -> 3 MB chars to clear a 2 MB
+  file's base64. Cost: an animated avatar replicates inline in each member row
+  across every joined group. Acceptable behind the 2 MB cap; revisit if member
+  rows get heavy (a blob-core for avatars is the later fix).
+
+## 2026-07-01 - Space delete (owner-only) + members view + join banner
+Tier: T3 (new `space` singleton wire key) for delete; T1 for the UI-only bits.
+Context: owner should be able to delete a space and notify members; users want to
+see who is in a space and get told when someone joins.
+Choice:
+- **Owner** = whoever claimed the space's signed `space` owner record first.
+  On create the founder calls space:init, which writes a signed
+  `space` = { owner:<self pubkey>, name, createdAt }. applyListOp accepts the
+  FIRST `space` write only if owner === signer, and every LATER write only from
+  that owner (v.pubkey === existing.owner). spaces:list derives its `owner` flag
+  by reading space.owner from the view.
+  NB: an earlier draft tied ownership to the Autobase bootstrap writer
+  (base.local.key === base.key). Rejected: that identity is only stable right
+  after create and flips after a remount, so Delete vanished on-device. The
+  signed record is durable across remounts.
+- **Delete**: owner writes a signed `space` tombstone ({ ...meta, deleted,
+  deletedAt }). Only the owner's signed update is accepted (see above). On a
+  fresh delete the apply emits `space:deleted`; each member's UI calls
+  space:forget (drops groups:joined) and moves off it. The owner also forgets
+  locally on delete. New methods: space:init, space:delete, space:forget.
+- **Members view**: lives on the Space page as a MembersBar (overlapping avatars
+  + count) that opens the members sheet, NOT in the Profile bottomsheet (moved
+  there for discoverability). Lists member:getAll (already synced).
+- **Join notification**: v1 is an IN-APP banner ("X joined"), detected by diffing
+  the roster in the poll (skips initial load + self). True OS/push notifications
+  need expo-notifications + background sync - deferred (see notifications policy).
+Alternatives: per-member ACL for delete (rejected, single-owner rule is simpler);
+real OS notifications now (deferred, bigger).
+Consequences: base stays mounted in-memory after delete until app restart (minor;
+groups:joined removal stops it next launch). Non-owner delete throws.
+
 ## 2026-06-30 - Model: multiple "spaces", not one household
 Tier: T2 (app model + new method; no wire-format change)
 Context: users need lists shared with different people (family vs a friend group)

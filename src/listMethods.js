@@ -13,6 +13,14 @@ const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = req
 
 function pubkeyHex (ctx) { return b4a.toString(ctx.identity.publicKey, 'hex') }
 
+// The founder is the Autobase bootstrap writer: their own local writer core IS
+// the base key. A joiner mounts with the founder's bootstrap, so their local key
+// always differs. Used only to migrate legacy spaces (no signed `space` record);
+// new spaces claim ownership explicitly at creation via space:init.
+function isFounder (base) {
+  try { return !!base.local && b4a.equals(base.local.key, base.key) } catch { return false }
+}
+
 // Publish this device's profile as its member:{pubkey} roster row to every group
 // it can write to, so peers can resolve assignee pubkeys to a name + avatar.
 async function publishMember (ctx, onlyGroupId) {
@@ -68,10 +76,56 @@ const methods = {
         groupId: value.groupId, groupKey: value.groupKey, encryptionKey: value.encryptionKey,
         bootstrap: value.bootstrap, name: value.name,
       })
-      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0 })
+      let owner = false
+      const base = ctx.bases.get(value.groupId)
+      if (base) {
+        try {
+          await base.update()
+          let meta = (await base.view.get('space'))?.value
+          // Migrate spaces created before the signed `space` owner record existed:
+          // the founder (bootstrap writer) claims ownership once, on first list.
+          if (!meta && base.writable && isFounder(base)) {
+            await putRow(ctx, value.groupId, 'space', { owner: pubkeyHex(ctx), name: String(value.name || ''), createdAt: value.joinedAt || Date.now() })
+            await base.update()
+            meta = (await base.view.get('space'))?.value
+          }
+          owner = meta?.owner === pubkeyHex(ctx)
+        } catch {}
+      }
+      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0, owner })
     }
     out.sort((a, b) => a.joinedAt - b.joinedAt)
     return out
+  },
+
+  // Establish ownership of a freshly created space: the founder writes the signed
+  // `space` owner record before anyone else can join (first-writer claims owner).
+  // Idempotent: a no-op if a `space` record already exists.
+  'space:init': async ({ groupId, name }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, 'space')
+    if (existing) return { ok: true, owner: existing.owner }
+    await putRow(ctx, groupId, 'space', { owner: pubkeyHex(ctx), name: String(name || ''), createdAt: Date.now() })
+    return { ok: true, owner: pubkeyHex(ctx) }
+  },
+
+  // Delete a whole space. Owner only. Writes a `space` tombstone (only the owner's
+  // signed update is accepted) that replicates to members (their apply emits
+  // space:deleted so their UI tears the space down), then forgets it locally.
+  'space:delete': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const meta = await readRow(base, 'space')
+    if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can delete a space')
+    await putRow(ctx, groupId, 'space', { ...meta, deleted: true, deletedAt: Date.now() })
+    await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
+    return { ok: true }
+  },
+
+  // Forget a space locally (drop the membership record so it does not remount).
+  // Called by a member's UI after it receives space:deleted.
+  'space:forget': async ({ groupId }, ctx) => {
+    await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
+    return { ok: true }
   },
 
   // --- profile (device-local) --------------------------------------------
@@ -94,7 +148,9 @@ const methods = {
     } else if (existing.avatar) {
       profile.avatar = existing.avatar
     }
-    if (profile.avatar && profile.avatar.length > 400000) throw new Error('avatar too large')
+    // ~2 MB raw file as a base64 data URL (gif/webp kept animated). Static photos
+    // land far under this after downscaling in the UI.
+    if (profile.avatar && profile.avatar.length > 3000000) throw new Error('avatar too large')
     await ctx.localDb.put('profile', profile)
     // Push the updated name/avatar to the household roster.
     await publishMember(ctx)

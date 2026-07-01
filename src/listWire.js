@@ -62,8 +62,33 @@ function rowApplyDecision (key, incoming, existing) {
 // engine applyOps: one op at a time, in linearized order. A delete is a put of
 // a { deleted: true } tombstone (kept in the view so no-resurrection holds), so
 // only 'put' ops exist.
-async function applyListOp (op, { view }) {
-  if (!op || op.type !== 'put' || !inNamespace(op.key)) return
+async function applyListOp (op, ctx) {
+  const { view, groupId, emit } = ctx
+  if (!op || op.type !== 'put' || typeof op.key !== 'string') return
+
+  // `space` singleton: the space's owner record + tombstone. Ownership is
+  // explicit and signed (robust across remounts, unlike an Autobase-internal
+  // key check). The FIRST signed write claims ownership (owner must equal the
+  // signer); after that only the owner may update/delete it. On a fresh delete
+  // we emit space:deleted so every member's UI can tear the space down.
+  if (op.key === 'space') {
+    const v = op.value
+    if (!v || typeof v !== 'object' || typeof v.pubkey !== 'string' || typeof v.updatedAt !== 'number') return
+    if (!verifyValue(v)) return
+    const existing = (await view.get('space'))?.value
+    if (!existing) {
+      if (v.owner !== v.pubkey) return // the claimant must name themselves owner
+      await view.put('space', v)
+    } else {
+      if (v.pubkey !== existing.owner) return // only the established owner
+      if (typeof existing.updatedAt === 'number' && v.updatedAt <= existing.updatedAt) return
+      await view.put('space', v)
+      if (v.deleted && !existing.deleted && typeof emit === 'function') { try { emit('space:deleted', { groupId }) } catch {} }
+    }
+    return
+  }
+
+  if (!inNamespace(op.key)) return
   const existing = (await view.get(op.key))?.value
   if (rowApplyDecision(op.key, op.value, existing) === 'accept') {
     await view.put(op.key, op.value)
