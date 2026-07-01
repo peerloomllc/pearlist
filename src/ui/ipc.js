@@ -69,10 +69,7 @@ const mockMethods = {
     mock.groups.set(groupId, newGroup(groupId, 'Household', inviteKey))
     return { groupId }
   },
-  'household:get': async () => {
-    const g = mock.groups.values().next().value
-    return g ? { groupId: g.groupId, name: g.name, inviteKey: g.inviteKey } : null
-  },
+  'spaces:list': async () => [...mock.groups.values()].map((g) => ({ groupId: g.groupId, name: g.name, inviteKey: g.inviteKey })),
   'member:publish': async ({ groupId }) => {
     mockGroup(groupId).members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: mock.profile?.displayName || 'You', avatar: mock.profile?.avatar || null })
     return { published: true }
@@ -124,19 +121,28 @@ function seedIfRequested () {
   seeded = true
   if (typeof window === 'undefined') return
   if (!/(?:\?|&)seed/.test(window.location.search || '')) return
-  const gid = rid(22)
-  const g = newGroup(gid, 'The Nest', 'mock-' + gid)
+  const me = (g) => g.members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: mock.profile?.displayName || 'You', avatar: mock.profile?.avatar || null })
+  const member = (g, pk, name) => g.members.set(pk, { pubkey: pk, displayName: name, avatar: null })
+  const list = (g, name, assignee = null) => { const id = rid(); g.lists.set(id, { id, name, assignee, deleted: false }); return id }
+  const item = (g, listId, text, extra = {}) => { const id = rid(); g.items.set(id, { id, listId, text, qty: 1, checked: false, assignee: null, deleted: false, ...extra }) }
+
+  // Space 1: Family
   const SAM = '5a'.repeat(32); const ALEX = 'a1'.repeat(32)
-  g.members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: mock.profile?.displayName || 'You', avatar: mock.profile?.avatar || null })
-  g.members.set(SAM, { pubkey: SAM, displayName: 'Sam', avatar: null })
-  g.members.set(ALEX, { pubkey: ALEX, displayName: 'Alex', avatar: null })
-  const groceries = rid(); g.lists.set(groceries, { id: groceries, name: 'Groceries', assignee: null, deleted: false })
-  const chores = rid(); g.lists.set(chores, { id: chores, name: 'Chores', assignee: ALEX, deleted: false })
-  const mk = (listId, text, extra = {}) => { const id = rid(); g.items.set(id, { id, listId, text, qty: 1, checked: false, assignee: null, deleted: false, ...extra }) }
-  mk(groceries, 'Oat milk', { qty: 2 }); mk(groceries, 'Sourdough'); mk(groceries, 'Coffee beans', { checked: true })
-  mk(groceries, 'Spinach', { assignee: SAM }); mk(groceries, 'Lemons', { qty: 6, checked: true })
-  mk(chores, 'Water the plants', { assignee: ALEX }); mk(chores, 'Take out recycling', { checked: true })
-  mock.groups.set(gid, g)
+  const fam = newGroup(rid(22), 'Family', 'mock-fam')
+  me(fam); member(fam, SAM, 'Sam'); member(fam, ALEX, 'Alex')
+  const groceries = list(fam, 'Groceries'); const chores = list(fam, 'Chores', ALEX)
+  item(fam, groceries, 'Oat milk', { qty: 2 }); item(fam, groceries, 'Sourdough'); item(fam, groceries, 'Coffee beans', { checked: true })
+  item(fam, groceries, 'Spinach', { assignee: SAM }); item(fam, groceries, 'Lemons', { qty: 6, checked: true })
+  item(fam, chores, 'Water the plants', { assignee: ALEX }); item(fam, chores, 'Take out recycling', { checked: true })
+  mock.groups.set(fam.groupId, fam)
+
+  // Space 2: Party Crew (different people, separate)
+  const JORDAN = 'c3'.repeat(32); const RILEY = 'd4'.repeat(32)
+  const party = newGroup(rid(22), 'Party Crew', 'mock-party')
+  me(party); member(party, JORDAN, 'Jordan'); member(party, RILEY, 'Riley')
+  const supplies = list(party, 'Supplies', JORDAN)
+  item(party, supplies, 'Cups + plates'); item(party, supplies, 'Ice', { qty: 3 }); item(party, supplies, 'Playlist', { assignee: RILEY, checked: true })
+  mock.groups.set(party.groupId, party)
 }
 
 async function mockCall (method, args) {

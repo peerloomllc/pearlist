@@ -334,9 +334,9 @@ function Onboarding ({ onStart, onJoin }) {
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
         <div style={{ fontSize: 40, marginBottom: sp.sm }}>🍐</div>
         <h1 style={{ fontSize: 28, fontWeight: 400, margin: 0, color: c.text.primary }}>PearList</h1>
-        <p style={{ color: c.text.secondary, fontSize: 15, fontWeight: 300, marginTop: sp.sm }}>Shared lists for your household. No account, no server.</p>
+        <p style={{ color: c.text.secondary, fontSize: 15, fontWeight: 300, marginTop: sp.sm }}>Shared lists, one private space per group. No account, no server.</p>
       </div>
-      <Button variant='primary' onClick={onStart}>Start a household</Button>
+      <Button variant='primary' onClick={onStart}>Create a space</Button>
       <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
       {isMock ? <p style={{ textAlign: 'center', color: c.text.muted, fontSize: 12, marginTop: sp.base }}>preview mode (no peer sync)</p> : null}
     </div>
@@ -345,7 +345,8 @@ function Onboarding ({ onStart, onJoin }) {
 
 export default function App () {
   const [phase, setPhase] = useState('loading')
-  const [household, setHousehold] = useState(null)
+  const [spaces, setSpaces] = useState([])
+  const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
   const [activeListId, setActiveListId] = useState(null)
   const [items, setItems] = useState([])
@@ -360,7 +361,14 @@ export default function App () {
   const [draft, setDraft] = useState('')
   const composer = useRef(null)
 
-  const gid = household?.groupId
+  const gid = activeSpaceId
+  const activeSpace = spaces.find((s) => s.groupId === activeSpaceId) || null
+
+  const loadSpaces = useCallback(async () => {
+    const sp = await call('spaces:list', {}).catch(() => [])
+    setSpaces(sp)
+    return sp
+  }, [])
 
   const loadLists = useCallback(async (groupId) => {
     const ls = await call('list:getAll', { groupId })
@@ -390,11 +398,17 @@ export default function App () {
       await call('init', {})
       call('profile:get', {}).then(setProfile).catch(() => {})
       call('identity:get', {}).then((r) => setSelfPubkey(r?.pubkey || null)).catch(() => {})
-      const h = await call('household:get', {})
-      if (h) { setHousehold(h); await loadLists(h.groupId); setPhase('home') }
+      const sp = await loadSpaces()
+      if (sp.length) { setActiveSpaceId(sp[0].groupId); setPhase('home') }
       else setPhase('onboarding')
     })().catch((e) => { console.error(e); setPhase('onboarding') })
-  }, [loadLists])
+  }, [loadSpaces])
+
+  // Load the active space's lists whenever the space changes.
+  useEffect(() => {
+    if (phase !== 'home' || !gid) { setLists([]); setActiveListId(null); return }
+    loadLists(gid)
+  }, [phase, gid, loadLists])
 
   // Poll the active list + roster so a peer's changes show up. Cheap for a list app.
   useEffect(() => {
@@ -419,21 +433,21 @@ export default function App () {
 
   const activeList = lists.find(l => l.id === activeListId) || null
 
-  async function createHousehold (name) {
-    const { groupId, inviteKey } = await call('group:create', { name })
-    const h = { groupId, name: name || 'Household', inviteKey }
-    setHousehold(h)
+  async function createSpace (name) {
+    const { groupId } = await call('group:create', { name })
     call('member:publish', { groupId }).catch(() => {}) // owner is writable now
-    // Seed a first list so the home screen is not empty.
-    const { listId } = await call('list:create', { groupId, name: 'Groceries' })
-    await loadLists(groupId); setActiveListId(listId)
+    await loadSpaces()
+    setActiveSpaceId(groupId); setActiveListId(null)
     setPhase('home'); setSheet('invite')
   }
-  async function joinHousehold (inviteKey) {
+  async function joinSpace (inviteKey) {
     const { groupId } = await call('group:join', { inviteKey })
-    const h = await call('household:get', {}) || { groupId, name: 'Household', inviteKey }
-    setHousehold(h); await loadLists(groupId); setPhase('home'); setSheet(null)
+    await loadSpaces()
+    setActiveSpaceId(groupId); setActiveListId(null); setPhase('home'); setSheet(null)
     call('member:publish', { groupId }).catch(() => {}) // retried by the poll until writable
+  }
+  function switchSpace (groupId) {
+    setActiveSpaceId(groupId); setActiveListId(null); setSheet(null)
   }
   async function assignList (listId, assignee) {
     await call('list:assign', { groupId: gid, listId, assignee })
@@ -464,8 +478,8 @@ export default function App () {
     return (
       <>
         <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} />
-        <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createHousehold} />
-        <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinHousehold} />
+        <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
+        <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       </>
     )
   }
@@ -474,26 +488,33 @@ export default function App () {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', maxWidth: 600, margin: '0 auto' }}>
       <TopBar
-        title={household?.name || 'Household'}
+        title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><span style={{ color: c.text.muted, fontSize: 15 }}>▾</span></button>}
         left={<button aria-label='Menu' onClick={() => setSheet('menu')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}><Avatar name={profile?.displayName} avatar={profile?.avatar} size={30} /></button>}
         right={<IconButton label='Invite' onClick={() => setSheet('invite')}>↗</IconButton>}
       />
 
-      <button onClick={() => setSheet('lists')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm, padding: `${sp.md}px ${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer' }}>
-        <span style={{ display: 'flex', alignItems: 'baseline', gap: sp.sm }}>
-          <span style={{ fontSize: 17, fontWeight: 400, color: c.text.primary }}>{activeList?.name || 'No list'}</span>
-          <span style={{ fontSize: 13, color: c.text.muted }}>{remaining} left</span>
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
-          <AssigneeAvatar pubkey={activeList?.assignee} members={members} size={22} />
-          <span style={{ color: c.text.muted, fontSize: 16 }}>▾</span>
-        </span>
-      </button>
+      {lists.length > 0 ? (
+        <button onClick={() => setSheet('lists')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm, padding: `${sp.md}px ${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer' }}>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: sp.sm }}>
+            <span style={{ fontSize: 17, fontWeight: 400, color: c.text.primary }}>{activeList?.name || 'No list'}</span>
+            <span style={{ fontSize: 13, color: c.text.muted }}>{remaining} left</span>
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+            <AssigneeAvatar pubkey={activeList?.assignee} members={members} size={22} />
+            <span style={{ color: c.text.muted, fontSize: 16 }}>▾</span>
+          </span>
+        </button>
+      ) : null}
 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
-        {items.length === 0
-          ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
-          : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
+        {lists.length === 0
+          ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.base }}>
+              <span>No lists in {activeSpace?.name || 'this space'} yet.</span>
+              <button onClick={() => setSheet('lists')} style={{ padding: '10px 18px', borderRadius: r.lg, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 15, cursor: 'pointer' }}>New list</button>
+            </div>
+          : items.length === 0
+            ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
+            : items.map((it) => <ItemRow key={it.id} item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />)}
       </div>
 
       {activeList ? (
@@ -503,7 +524,11 @@ export default function App () {
         </div>
       ) : null}
 
-      <InviteSheet open={sheet === 'invite'} onClose={() => setSheet(null)} inviteKey={household?.inviteKey} />
+      <InviteSheet open={sheet === 'invite'} onClose={() => setSheet(null)} inviteKey={activeSpace?.inviteKey} spaceName={activeSpace?.name} />
+      <SpaceSwitcherSheet open={sheet === 'spaces'} onClose={() => setSheet(null)} spaces={spaces} activeId={activeSpaceId}
+        onPick={switchSpace} onCreate={() => setSheet('start')} onJoin={() => setSheet('join')} />
+      <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
+      <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListsSheet open={sheet === 'lists'} onClose={() => setSheet(null)} lists={lists} activeId={activeListId} members={members} onPick={(id) => { setActiveListId(id); setSheet(null) }} onAdd={addList} onAssign={(listId, current) => setListPicker({ listId, current })} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
@@ -530,12 +555,30 @@ export default function App () {
 function StartSheet ({ open, onClose, onCreate }) {
   const [name, setName] = useState('')
   useEffect(() => { if (open) setName('') }, [open])
+  const create = () => onCreate(name.trim() || 'My space')
   return (
-    <BottomSheet open={open} onClose={onClose} title='Name your household'>
+    <BottomSheet open={open} onClose={onClose} title='Name your space'>
       <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
-        <Field value={name} onChange={setName} placeholder='e.g. The Nest' autoFocus onEnter={() => onCreate(name.trim() || 'Household')} />
-        <Button onClick={() => onCreate(name.trim() || 'Household')}>Create</Button>
+        <Field value={name} onChange={setName} placeholder='e.g. Family, Party Crew, Roommates' autoFocus onEnter={create} />
+        <Button onClick={create}>Create space</Button>
       </div>
+    </BottomSheet>
+  )
+}
+
+// Switch between spaces (each a separate private group), or make/join another.
+function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate, onJoin }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Spaces'>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: sp.base }}>
+        {spaces.map((s) => (
+          <button key={s.groupId} onClick={() => onPick(s.groupId)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px ${sp.sm}px`, background: s.groupId === activeId ? c.surface.elevated : 'none', border: 'none', borderRadius: r.md, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: s.groupId === activeId ? 400 : 300 }}>
+            <span>{s.name}</span>{s.groupId === activeId ? <span style={{ color: c.primary }}>✓</span> : null}
+          </button>
+        ))}
+      </div>
+      <Button variant='secondary' onClick={onCreate}>Create a space</Button>
+      <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onJoin}>Join a space</Button>
     </BottomSheet>
   )
 }
@@ -552,7 +595,7 @@ function JoinSheet ({ open, onClose, onJoin }) {
   }
   return (
     <>
-      <BottomSheet open={open} onClose={onClose} title='Join a household'>
+      <BottomSheet open={open} onClose={onClose} title='Join a space'>
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
           <Field value={code} onChange={setCode} placeholder='Paste the invite code' autoFocus />
           <Button disabled={busy || !code.trim()} style={{ opacity: busy || !code.trim() ? 0.5 : 1 }} onClick={() => join()}>{busy ? 'Joining…' : 'Join'}</Button>
@@ -564,14 +607,14 @@ function JoinSheet ({ open, onClose, onJoin }) {
   )
 }
 
-function InviteSheet ({ open, onClose, inviteKey }) {
+function InviteSheet ({ open, onClose, inviteKey, spaceName }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => { if (open) setCopied(false) }, [open])
   const copy = async () => { try { await navigator.clipboard.writeText(inviteKey || '') } catch {} setCopied(true) }
-  const share = () => { try { call('shell:share', { title: 'PearList invite', text: 'Join my PearList:\n\n' + (inviteKey || '') }) } catch {} }
+  const share = () => { try { call('shell:share', { title: 'PearList invite', text: `Join ${spaceName || 'my space'} on PearList:\n\n` + (inviteKey || '') }) } catch {} }
   return (
-    <BottomSheet open={open} onClose={onClose} title='Invite peers'>
-      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>Anyone with this can join and edit your lists. Show the QR to scan, or copy or send the code.</p>
+    <BottomSheet open={open} onClose={onClose} title={`Invite to ${spaceName || 'this space'}`}>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>Anyone with this can join {spaceName || 'this space'} and edit its lists. They will not see your other spaces. Show the QR to scan, or copy or send the code.</p>
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: sp.base }}>
         {inviteKey ? <QrImage text={inviteKey} size={200} /> : null}
       </div>

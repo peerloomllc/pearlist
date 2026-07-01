@@ -107,14 +107,18 @@ test('deleting an item hides it and survives no-resurrection', async () => {
   await engine.close()
 })
 
-test('household:get returns the joined household with a re-encodable invite', async () => {
+test('spaces:list returns each joined space with a re-encodable invite', async () => {
   const { engine, call } = driver()
   await call('init', {})
-  const created = await call('group:create', { name: 'The Nest' })
-  const household = await call('household:get', {})
-  assert.equal(household.groupId, created.groupId)
-  assert.equal(household.name, 'The Nest')
-  assert.equal(typeof household.inviteKey, 'string')
+  const fam = await call('group:create', { name: 'Family' })
+  const party = await call('group:create', { name: 'Party Crew' })
+  const spaces = await call('spaces:list', {})
+  assert.equal(spaces.length, 2)
+  const names = spaces.map((s) => s.name).sort()
+  assert.deepEqual(names, ['Family', 'Party Crew'])
+  const famSpace = spaces.find((s) => s.groupId === fam.groupId)
+  assert.equal(typeof famSpace.inviteKey, 'string')
+  assert.ok(spaces.find((s) => s.groupId === party.groupId))
   await engine.close()
 })
 

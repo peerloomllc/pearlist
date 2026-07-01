@@ -2,6 +2,22 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-06-30 - Model: multiple "spaces", not one household
+Tier: T2 (app model + new method; no wire-format change)
+Context: users need lists shared with different people (family vs a friend group)
+kept fully separate. Per-list ACLs inside one group are NOT real privacy - every
+group member replicates the whole Autobase, so hiding is cosmetic.
+Choice: each sharing circle is its own space = its own group / Autobase (own
+encryption key + swarm topic + members + invite). A device can be in many; the
+@peerloom/core engine already supports multiple groups, and every list/item/
+member method already takes groupId. UI reframed from "household" to "spaces"
+with a top-level space switcher; "household:get" became "spaces:list". Segregation
+is cryptographic: a friend-space peer never replicates family-space data.
+Alternatives: one group + per-list visibility flags (rejected, not real privacy);
+one Autobase per LIST (rejected, re-invite the same people for every list).
+Consequences: onboarding creates/joins a space; invite is per-space; members and
+assignment are per-space. Existing single-group data is just a space of one.
+
 ## 2026-06-30 - Member roster + member-based assignment (items and lists)
 Tier: T3 (new wire namespace + persisted field)
 Context: assignment was free-text with no notion of who is in the household.
