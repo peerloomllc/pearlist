@@ -22,3 +22,8 @@ DONE.md
 # Local env / release
 scripts/.env
 .env
+
+# Generated native projects (no custom native code; regenerate with expo prebuild)
+/android/
+/ios/
+expo-env.d.ts
