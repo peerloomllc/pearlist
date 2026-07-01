@@ -54,6 +54,31 @@ const methods = {
     return null
   },
 
+  // --- profile (device-local) --------------------------------------------
+  // Stored in localDb, matching the suite: { displayName, avatar?, updatedAt, v }.
+  // avatar is an inline base64 data URL. Kept local for now (member-name
+  // broadcast to the group is a later enhancement).
+  'profile:get': async (_args, ctx) => {
+    const row = await ctx.localDb.get('profile')
+    return row ? row.value : null
+  },
+
+  'profile:set': async (args = {}, ctx) => {
+    const { displayName } = args
+    if (typeof displayName !== 'string' || !displayName.trim()) throw new Error('displayName required')
+    const existing = (await ctx.localDb.get('profile'))?.value || {}
+    const profile = { displayName: displayName.trim().slice(0, 64), updatedAt: Date.now(), v: 1 }
+    // avatar: key absent -> preserve; null -> clear; string -> set.
+    if (Object.prototype.hasOwnProperty.call(args, 'avatar')) {
+      if (args.avatar) profile.avatar = String(args.avatar)
+    } else if (existing.avatar) {
+      profile.avatar = existing.avatar
+    }
+    if (profile.avatar && profile.avatar.length > 400000) throw new Error('avatar too large')
+    await ctx.localDb.put('profile', profile)
+    return profile
+  },
+
   // --- lists --------------------------------------------------------------
   'list:create': async ({ groupId, name }, ctx) => {
     const listId = newEntityId()

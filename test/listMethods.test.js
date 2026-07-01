@@ -118,6 +118,30 @@ test('household:get returns the joined household with a re-encodable invite', as
   await engine.close()
 })
 
+test('profile:set / profile:get round-trip, preserving avatar on a name-only update', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  assert.equal(await call('profile:get', {}), null)
+
+  await call('profile:set', { displayName: 'Sam', avatar: 'data:image/png;base64,AAAA' })
+  let p = await call('profile:get', {})
+  assert.equal(p.displayName, 'Sam')
+  assert.equal(p.avatar, 'data:image/png;base64,AAAA')
+
+  // Name-only update keeps the avatar; clearing with null removes it.
+  await call('profile:set', { displayName: 'Samantha' })
+  p = await call('profile:get', {})
+  assert.equal(p.displayName, 'Samantha')
+  assert.equal(p.avatar, 'data:image/png;base64,AAAA')
+
+  await call('profile:set', { displayName: 'Samantha', avatar: null })
+  p = await call('profile:get', {})
+  assert.equal(p.avatar, undefined)
+
+  await assert.rejects(() => call('profile:set', { displayName: '' }))
+  await engine.close()
+})
+
 test('deleting a list hides it from list:getAll', async () => {
   const { engine, call } = driver()
   await call('init', {})

@@ -40,8 +40,14 @@ export function on (event, fn) {
 }
 
 // --- browser mock ---------------------------------------------------------
+// Preview helper: index.html?ios simulates an iPhone so you can review the
+// iOS-hidden donation state. The real shell sets window.__pearPlatform itself.
+if (typeof window !== 'undefined' && !window.__pearPlatform && /(?:\?|&)ios/.test(window.location.search || '')) {
+  window.__pearPlatform = 'ios'
+}
+
 const rid = (n = 16) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('')
-const mock = { groups: new Map() }
+const mock = { groups: new Map(), profile: null }
 function mockGroup (groupId) {
   const g = mock.groups.get(groupId)
   if (!g) throw new Error('unknown group: ' + groupId)
@@ -82,6 +88,17 @@ const mockMethods = {
   'item:assign': async ({ groupId, listId, itemId, assignee }) => { mockGroup(groupId).items.get(itemId).assignee = assignee || null; return { ok: true } },
   'item:delete': async ({ groupId, listId, itemId }) => { mockGroup(groupId).items.get(itemId).deleted = true; return { ok: true } },
   'item:getAll': async ({ groupId, listId }) => [...mockGroup(groupId).items.values()].filter(i => i.listId === listId && !i.deleted),
+  'profile:get': async () => mock.profile,
+  'profile:set': async ({ displayName, ...rest }) => {
+    if (!displayName || !displayName.trim()) throw new Error('displayName required')
+    const p = { ...(mock.profile || {}), displayName: displayName.trim().slice(0, 64), updatedAt: Date.now(), v: 1 }
+    if ('avatar' in rest) { if (rest.avatar) p.avatar = rest.avatar; else delete p.avatar }
+    mock.profile = p; return p
+  },
+  // Shell actions (real shell intercepts these; here we approximate for preview).
+  'shell:openUrl': async ({ url }) => { try { window.open(url, '_blank', 'noopener') } catch {} return { ok: true } },
+  'shell:share': async ({ title, text }) => { try { if (navigator.share) await navigator.share({ title, text }) } catch {} return { ok: true } },
+  'shell:canOpenURL': async () => ({ can: false }),
 }
 // Browser design preview: open index.html?seed to land on a populated list
 // instead of onboarding. Seeds lazily on the first mock call (after all module
