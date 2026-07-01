@@ -38,6 +38,7 @@
     "expo-splash-screen": "~31.0.13",
     "expo-system-ui": "^6.0.7",
     "hyperbee": "^2.27.3",
+    "hyperblobs": "^2.12.1",
     "hyperdht": "^6.29.0",
     "hyperswarm": "^4.17.0",
     "jsqr": "^1.4.0",

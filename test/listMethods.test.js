@@ -208,6 +208,35 @@ test('donation reminder: fresh is not due, dismiss marks it shown', async () => 
   await engine.close()
 })
 
+test('avatar stored as a blob reference (not inline), resolves back for the UI', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const png = 'data:image/png;base64,' + 'A'.repeat(4096) // ~3 KB of bytes
+  await call('profile:set', { displayName: 'Sam', avatar: png })
+  const id = await call('identity:get', {})
+
+  // The replicated member row carries only a tiny reference, NOT the bytes.
+  const base = engine.bases.get(groupId)
+  await base.update()
+  const row = (await base.view.get('member:' + id.pubkey)).value
+  assert.equal(row.avatar, undefined)
+  assert.ok(row.avatarBlob && typeof row.avatarBlob.key === 'string')
+  // The row (a reference) is far smaller than the inline data URL it replaced.
+  assert.ok(JSON.stringify(row).length < png.length / 4, 'member row stays small')
+
+  // profile:get and member:getAll resolve the reference back to the data URL.
+  assert.equal((await call('profile:get', {})).avatar, png)
+  assert.equal((await call('member:getAll', { groupId }))[0].avatar, png)
+
+  // A name-only edit reuses the same blob ref (no re-append of the bytes).
+  await call('profile:set', { displayName: 'Samantha' })
+  await base.update()
+  const row2 = (await base.view.get('member:' + id.pubkey)).value
+  assert.deepEqual(row2.avatarBlob, row.avatarBlob)
+  await engine.close()
+})
+
 test('member roster: publish self, read it, and assign a list to a member', async () => {
   const { engine, call } = driver()
   await call('init', {})
