@@ -2,6 +2,36 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-01 - Invite links, wallet detection, haptics, back gesture
+Tier: T2 (invite presentation + new shell bridges); no wire-format change.
+Context: four polish items for the shell/UX.
+Choice:
+- **Invite as a URL**: the raw invite stays an opaque base64url blob (core
+  encoder), but the UI now presents it as
+  `https://peerloomllc.com/pearlist/join#<blob>`. The blob rides in the URL
+  FRAGMENT so it never reaches the peerloomllc.com server (it grants access).
+  QR, copy, and share all emit the URL; parseInvite() accepts a bare blob, a
+  #fragment, an ?i= query, or a post-/join tail, so paste/scan/deep-link all
+  work. The shell forwards opened invite URLs as a `deeplink:invite` event and
+  the UI auto-joins. NB: tapping an https link auto-opens the app only once
+  peerloomllc.com hosts /.well-known/assetlinks.json (domain verification);
+  until then the reliable paths are copy-link/paste and scan-QR (both shipped).
+- **Early-event buffer**: events delivered before React mounts (a cold-start
+  deep link fires at WebView onLoad, before the app's on() listeners register)
+  were lost. ipc.js now buffers events with no listener and replays them when a
+  listener subscribes. Fixes deep-link-on-cold-start; harmless for live events.
+- **Lightning wallet detection**: Android 11+ hides external handlers unless
+  declared. New config plugin plugins/with-android-queries.js adds a <queries>
+  block for lightning:, bitcoin:, https:, and mailto: so canOpenURL/openURL
+  work (the BTC donate flow can detect an installed wallet).
+- **Haptics**: shell:haptic already existed; the UI now calls it. Shared Button
+  (light; danger buzzes 'warn') and IconButton wrap their onClick via tap();
+  the item checkbox ('success' on check), Toggle, and the add (+) buttons buzz.
+- **Back gesture**: the UI reports canBack (any open sheet / full-screen view /
+  list detail / modal) via shell:navState; the shell's BackHandler forwards a
+  'back' event to dismiss the top layer and consumes the press, else lets the OS
+  exit. New shell bridge: shell:navState.
+
 ## 2026-07-01 - Menu tidy, contrast, animated avatars
 Tier: T1 (UI) plus a stored-value cap bump (mildly wire-relevant).
 Context: on-device UX pass. Four asks.

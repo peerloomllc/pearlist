@@ -4,7 +4,7 @@
 // WebView camera permission for the in-WebView QR scanner.
 
 import { useEffect, useRef, useState } from 'react'
-import { View, Platform, Share, StatusBar } from 'react-native'
+import { View, Platform, Share, StatusBar, BackHandler } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Worklet } from 'react-native-bare-kit'
@@ -83,7 +83,9 @@ async function loadUiHtml () {
   return buildHtml(js)
 }
 
-const INVITE_RE = /^(pear:\/\/pearlist\/join|https:\/\/peerloomllc\.com\/pearlist\/join)\/?\?/
+// The invite payload rides in the URL fragment (#) or, as a fallback, a query
+// (?). Match either so a fragment-only link is still recognized and forwarded.
+const INVITE_RE = /^(pear:\/\/pearlist\/join|https:\/\/peerloomllc\.com\/pearlist\/join)\/?[?#]/
 
 export default function Shell () {
   const webViewRef = useRef<any>(null)
@@ -91,6 +93,7 @@ export default function Shell () {
   const [statusBarStyle, setStatusBarStyle] = useState<'light-content' | 'dark-content'>('light-content')
   const webViewLoaded = useRef(false)
   const pendingDeeplink = useRef<string | null>(null)
+  const canBackRef = useRef(false) // set by shell:navState; drives the back button
   const insets = useSafeAreaInsets()
 
   useEffect(() => { _webViewRef = webViewRef })
@@ -114,6 +117,17 @@ export default function Shell () {
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
       setHtml(await loadUiHtml())
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
+  }, [])
+
+  // Android hardware back / gesture: if the WebView reported an open overlay
+  // (sheet, full-screen view, list detail), forward a 'back' event for it to
+  // dismiss and consume the press; otherwise let the OS exit the app.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (canBackRef.current) { emitEvent('back'); return true }
+      return false
+    })
+    return () => sub.remove()
   }, [])
 
   // Deep-link invite delivery (buffer until the WebView has mounted).
@@ -170,6 +184,10 @@ export default function Shell () {
           const t = args?.theme
           if (t !== 'dark' && t !== 'light') return replyError(id, "theme must be 'dark' or 'light'")
           await AsyncStorage.setItem('pearlist:theme', t); return reply(id, { ok: true })
+        }
+        case 'shell:navState': {
+          canBackRef.current = !!args?.canBack
+          return reply(id, { ok: true })
         }
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')
