@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import QRCode from 'qrcode'
 import { call, on, isMock } from './ipc.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 
@@ -175,6 +176,39 @@ function FullScreen ({ open, title, onBack, children }) {
   )
 }
 
+// QR of the invite, always on a white quiet-zone box so it scans in dark mode.
+function QrImage ({ text, size = 200 }) {
+  const [url, setUrl] = useState(null)
+  useEffect(() => {
+    let alive = true
+    QRCode.toString(text || '', { type: 'svg', margin: 1, errorCorrectionLevel: 'M' })
+      .then((svg) => { if (alive) setUrl('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)) }).catch(() => {})
+    return () => { alive = false }
+  }, [text])
+  return (
+    <div style={{ width: size, height: size, background: '#fff', borderRadius: r.md, padding: 8, boxSizing: 'content-box', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {url ? <img src={url} width={size} height={size} alt='Invite QR code' /> : null}
+    </div>
+  )
+}
+
+// Two-week donation nudge (suite pattern). Shown once; gated off on iOS by the caller.
+function DonationReminderModal ({ open, onDonate, onDismiss }) {
+  if (!open) return null
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
+      <div style={{ background: c.surface.card, borderRadius: r.xl, padding: sp.xl, maxWidth: 360, width: '100%', textAlign: 'center' }}>
+        <div style={{ fontSize: 40 }}>⚡</div>
+        <h2 style={{ fontSize: 20, fontWeight: 400, margin: `${sp.sm}px 0`, color: c.text.primary }}>Enjoying PearList?</h2>
+        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>PearList is free and open source with no ads, accounts, or subscriptions. If you've received value from it, consider returning value to support development.</p>
+        <Button onClick={onDonate}>Donate</Button>
+        <Button variant='secondary' onClick={onDismiss} style={{ marginTop: sp.sm }}>Maybe later</Button>
+        <button onClick={onDismiss} style={{ marginTop: sp.md, background: 'none', border: 'none', color: c.text.muted, fontSize: 14, cursor: 'pointer' }}>Already donated ✓</button>
+      </div>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Item row: the signature is the felt-tip marker strike that draws across the
 // text when checked (in the accent green), like crossing it off a paper list.
@@ -226,6 +260,7 @@ export default function App () {
   const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'lists'|'menu'|'wallet'|{type:'item',item}
   const [view, setView] = useState(null) // full-screen: 'profile' | 'about'
   const [profile, setProfile] = useState(null)
+  const [donateReminder, setDonateReminder] = useState(false)
   const [draft, setDraft] = useState('')
   const composer = useRef(null)
 
@@ -263,6 +298,17 @@ export default function App () {
     const off = on('peer:connected', () => { loadLists(gid); loadItems(gid, activeListId) })
     return () => { clearInterval(t); off() }
   }, [phase, gid, activeListId, loadItems, loadLists])
+
+  // Two-week donation nudge: check once on reaching home, skip on iOS, show only
+  // once ever (mark shown as soon as it surfaces).
+  useEffect(() => {
+    if (phase !== 'home' || isIOS()) return
+    let done = false
+    call('donation:status', {}).then((s) => {
+      if (!done && s?.due) { setDonateReminder(true); call('donation:dismiss', {}).catch(() => {}) }
+    }).catch(() => {})
+    return () => { done = true }
+  }, [phase])
 
   const activeList = lists.find(l => l.id === activeListId) || null
 
@@ -351,6 +397,7 @@ export default function App () {
         onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
       <AboutView open={view === 'about'} onBack={() => setView(null)} onWallet={() => setSheet('wallet')} />
       <LightningWalletSheet open={sheet === 'wallet'} onClose={() => setSheet(null)} />
+      <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); setView('about') }} />
       <ItemSheet
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} onClose={() => setSheet(null)}
         onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: activeListId, itemId: sheet.item.id, ...patch }); if ('assignee' in patch) await call('item:assign', { groupId: gid, listId: activeListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, activeListId); setSheet(null) }}
@@ -379,11 +426,18 @@ function JoinSheet ({ open, onClose, onJoin }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => { if (open) { setCode(''); setBusy(false) } }, [open])
+  const join = async (value) => {
+    const v = (value ?? code).trim(); if (!v) return
+    setBusy(true)
+    try { await onJoin(v) } catch (e) { setBusy(false); alert('Could not join: ' + e.message) }
+  }
+  const scan = async () => { try { const res = await call('shell:scanQr', {}); if (res?.code) join(res.code) } catch {} }
   return (
     <BottomSheet open={open} onClose={onClose} title='Join a household'>
       <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
         <Field value={code} onChange={setCode} placeholder='Paste the invite code' autoFocus />
-        <Button disabled={busy || !code.trim()} style={{ opacity: busy || !code.trim() ? 0.5 : 1 }} onClick={async () => { setBusy(true); try { await onJoin(code.trim()) } catch (e) { setBusy(false); alert('Could not join: ' + e.message) } }}>{busy ? 'Joining…' : 'Join'}</Button>
+        <Button disabled={busy || !code.trim()} style={{ opacity: busy || !code.trim() ? 0.5 : 1 }} onClick={() => join()}>{busy ? 'Joining…' : 'Join'}</Button>
+        <Button variant='secondary' onClick={scan}>Scan QR code</Button>
       </div>
     </BottomSheet>
   )
@@ -392,11 +446,18 @@ function JoinSheet ({ open, onClose, onJoin }) {
 function InviteSheet ({ open, onClose, inviteKey }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => { if (open) setCopied(false) }, [open])
+  const copy = async () => { try { await navigator.clipboard.writeText(inviteKey || '') } catch {} setCopied(true) }
+  const share = () => { try { call('shell:share', { title: 'PearList invite', text: 'Join my PearList:\n\n' + (inviteKey || '') }) } catch {} }
   return (
-    <BottomSheet open={open} onClose={onClose} title='Invite your household'>
-      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>Share this code. Anyone with it can join and edit your lists.</p>
-      <div style={{ background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, padding: sp.md, fontFamily: MONO, fontSize: 13, color: c.text.primary, wordBreak: 'break-all', marginBottom: sp.md, maxHeight: 140, overflowY: 'auto' }}>{inviteKey || ''}</div>
-      <Button onClick={async () => { try { await navigator.clipboard.writeText(inviteKey || ''); setCopied(true) } catch { setCopied(true) } }}>{copied ? 'Copied' : 'Copy code'}</Button>
+    <BottomSheet open={open} onClose={onClose} title='Invite peers'>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>Anyone with this can join and edit your lists. Show the QR to scan, or copy or send the code.</p>
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: sp.base }}>
+        {inviteKey ? <QrImage text={inviteKey} size={200} /> : null}
+      </div>
+      <div style={{ display: 'flex', gap: sp.sm }}>
+        <Button variant='secondary' onClick={copy}>{copied ? 'Copied' : 'Copy code'}</Button>
+        <Button onClick={share}>Share</Button>
+      </div>
     </BottomSheet>
   )
 }
@@ -434,7 +495,7 @@ function MenuSheet ({ open, onClose, profile, onProfile, onAbout, onInvite }) {
           <span style={{ color: c.text.muted, fontSize: 13 }}>Name and photo</span>
         </span>
       </button>
-      <Row onClick={onInvite}><span style={{ flex: 1 }}>Invite household</span><span style={{ color: c.text.muted }}>↗</span></Row>
+      <Row onClick={onInvite}><span style={{ flex: 1 }}>Invite peers</span><span style={{ color: c.text.muted }}>↗</span></Row>
       <Row onClick={onAbout}><span style={{ flex: 1 }}>About PearList</span><span style={{ color: c.text.muted }}>›</span></Row>
     </BottomSheet>
   )
@@ -469,9 +530,9 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
     <FullScreen open={open} title='Profile' onBack={onBack}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.base, padding: `${sp.lg}px 0` }}>
         <Avatar name={profile?.displayName || name} avatar={profile?.avatar} size={96} />
-        <div style={{ display: 'flex', gap: sp.sm }}>
-          <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ padding: '8px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add photo'}</button>
-          {hasAvatar ? <button onClick={() => commitAvatar(null)} disabled={busy} style={{ padding: '8px 16px', borderRadius: r.md, border: `1px solid ${c.error}`, background: 'transparent', color: c.error, fontSize: 14, cursor: 'pointer' }}>Remove</button> : null}
+        <div style={{ display: 'flex', gap: sp.sm, width: '100%', maxWidth: 280 }}>
+          <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ flex: 1, padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add photo'}</button>
+          {hasAvatar ? <button onClick={() => commitAvatar(null)} disabled={busy} style={{ flex: 1, padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.error}`, background: 'transparent', color: c.error, fontSize: 14, cursor: 'pointer' }}>Remove</button> : null}
         </div>
         <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
       </div>
@@ -518,8 +579,8 @@ function AboutView ({ open, onBack, onWallet }) {
         <Collapsible title='Support development' open={section === 'support'} onToggle={() => toggle('support')}>
           <P>PearList is free and open source. If you receive value from it, please consider returning value.</P>
           <div style={{ display: 'flex', gap: sp.sm }}>
-            <Pill primary onClick={donateBTC}>⚡ BTC</Pill>
-            <Pill onClick={() => openUrl(BUYMEACOFFEE_URL)}>$ USD</Pill>
+            <Pill primary onClick={donateBTC}>⚡ BTC ⚡</Pill>
+            <Pill onClick={() => openUrl(BUYMEACOFFEE_URL)}>$ USD $</Pill>
           </div>
         </Collapsible>
       )}

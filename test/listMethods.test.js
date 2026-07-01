@@ -142,6 +142,20 @@ test('profile:set / profile:get round-trip, preserving avatar on a name-only upd
   await engine.close()
 })
 
+test('donation reminder: fresh is not due, dismiss marks it shown', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const s1 = await call('donation:status', {})
+  assert.equal(s1.due, false) // first use just now, 14 days not elapsed
+  assert.equal(s1.shown, false)
+  assert.equal(typeof s1.firstUseAt, 'number')
+  await call('donation:dismiss', {})
+  const s2 = await call('donation:status', {})
+  assert.equal(s2.shown, true)
+  assert.equal(s2.due, false)
+  await engine.close()
+})
+
 test('deleting a list hides it from list:getAll', async () => {
   const { engine, call } = driver()
   await call('init', {})

@@ -79,6 +79,22 @@ const methods = {
     return profile
   },
 
+  // --- donation reminder (device-local) ----------------------------------
+  // Suite pattern: nudge once after 2 weeks of use. Tracks first use + whether
+  // shown. The UI additionally gates this off on iOS (App Store 3.1.1).
+  'donation:status': async (_args, ctx) => {
+    let row = (await ctx.localDb.get('donateReminder'))?.value
+    if (!row) { row = { firstUseAt: Date.now(), shown: false }; await ctx.localDb.put('donateReminder', row) }
+    const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000
+    return { due: !row.shown && (Date.now() - row.firstUseAt >= FOURTEEN_DAYS), shown: !!row.shown, firstUseAt: row.firstUseAt }
+  },
+  'donation:dismiss': async (_args, ctx) => {
+    const row = (await ctx.localDb.get('donateReminder'))?.value || { firstUseAt: Date.now() }
+    row.shown = true
+    await ctx.localDb.put('donateReminder', row)
+    return { ok: true }
+  },
+
   // --- lists --------------------------------------------------------------
   'list:create': async ({ groupId, name }, ctx) => {
     const listId = newEntityId()

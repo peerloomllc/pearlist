@@ -95,10 +95,14 @@ const mockMethods = {
     if ('avatar' in rest) { if (rest.avatar) p.avatar = rest.avatar; else delete p.avatar }
     mock.profile = p; return p
   },
+  // Donation reminder: ?donate forces "due" so it can be previewed on demand.
+  'donation:status': async () => ({ due: /(?:\?|&)donate/.test(window.location.search || ''), shown: false, firstUseAt: 0 }),
+  'donation:dismiss': async () => ({ ok: true }),
   // Shell actions (real shell intercepts these; here we approximate for preview).
   'shell:openUrl': async ({ url }) => { try { window.open(url, '_blank', 'noopener') } catch {} return { ok: true } },
-  'shell:share': async ({ title, text }) => { try { if (navigator.share) await navigator.share({ title, text }) } catch {} return { ok: true } },
+  'shell:share': async ({ title, text }) => { try { if (navigator.share) await navigator.share({ title, text }); else alert('Share:\n\n' + text) } catch {} return { ok: true } },
   'shell:canOpenURL': async () => ({ can: false }),
+  'shell:scanQr': async () => { const code = window.prompt ? window.prompt('Paste an invite code (camera scan on device):') : null; return { code: code || null } },
 }
 // Browser design preview: open index.html?seed to land on a populated list
 // instead of onboarding. Seeds lazily on the first mock call (after all module
