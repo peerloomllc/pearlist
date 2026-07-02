@@ -1,6 +1,14 @@
 # 2026-07-01 - Reliable pair-channel establishment on reused connections (@peerloom/core)
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED (core) - pending multi-platform redeploy + on-device
+re-trace. peerloom-core `feature/pairing-trace-hook`: trace hook e421046, fix
+aa83311. The `mux.pair` lazy-open (design item 1) landed and a two-peer
+regression that fails pre-fix now passes (full gate 38/38). Design item 2
+(per-(conn,group) tracking + re-open-on-close) was deliberately NOT implemented:
+`createChannel({ unique: true })` already prevents duplicate channels, and the
+listener re-pairs on any later mount/reconnect, so the reproduced bug is fully
+resolved without it. Revisit only if a spurious mid-session channel close (paired
+then dropped while still non-writable) shows up in a trace.
 
 **Goal**
 
