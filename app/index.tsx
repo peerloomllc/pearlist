@@ -36,6 +36,16 @@ function emitEvent (event: string, data?: any) {
   _webViewRef?.current?.injectJavaScript(`window.__pearEvent(${JSON.stringify(event)}, ${JSON.stringify(data ?? null)}); true;`)
 }
 
+// Diagnostic: tee the worklet's pairing trace to Documents/pair-trace.log so we
+// can pull it off an iOS device (worklet console.warn does not reach a remote
+// shell there). The worklet re-ships the full buffer each mark, so we overwrite
+// (not append) to keep the file to the latest complete trace. Fire-and-forget.
+function writePairTrace (lines?: string[]) {
+  if (!Array.isArray(lines)) return
+  const path = FileSystem.documentDirectory + 'pair-trace.log'
+  FileSystem.writeAsStringAsync(path, lines.join('\n') + '\n').catch(() => {})
+}
+
 async function startWorklet () {
   if (_workletStarted) return
   _workletStarted = true
@@ -59,6 +69,7 @@ async function startWorklet () {
       try {
         const msg = JSON.parse(line)
         if (msg.id != null && _pending.has(msg.id)) { _pending.get(msg.id)!(msg); _pending.delete(msg.id) }
+        else if (msg.event === 'pair:trace') writePairTrace(msg.data?.lines)
         else if (msg.event) emitEvent(msg.event, msg.data)
       } catch {}
     }
