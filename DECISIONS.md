@@ -2,6 +2,26 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-02 - Strip aps-environment so expo-notifications signs with the wildcard profile
+Tier: T1 (build/signing config; no runtime behavior change).
+Context: expo-notifications ships its OWN config plugin (runs on prebuild even when
+not listed in app.json) that adds the aps-environment entitlement + Push
+Notifications capability. iOS archive then FAILS ("provisioning profile ... doesn't
+include the Push Notifications capability / aps-environment") because PearList signs
+with Xcode's wildcard team profile + empty entitlements (2026-07-01 bring-up
+decision, no Apple-portal trip). We use LOCAL notifications only - no APNs - so the
+entitlement is unwanted.
+Choice: added plugins/with-strip-aps.js (withEntitlementsPlist deletes
+aps-environment), listed LAST in app.json plugins so it runs after
+expo-notifications. Entitlements regenerate empty; wildcard signing works. Also
+removed the redundant explicit "expo-notifications" plugin entry (the package
+auto-applies its plugin; POST_NOTIFICATIONS is set directly via android.permissions).
+Alternatives: enable Push in the Apple portal + a real profile (rejected - we do
+not use push and want to keep zero-portal wildcard signing).
+Consequences: run `expo prebuild -p ios` after touching notifications; the strip
+plugin keeps it durable. Also recorded the "npm install on the Mac after adding a
+dep" gotcha in the devices memory.
+
 ## 2026-07-02 - Notifications implemented: assignment + join, opt-in, local
 Tier: T1 (local plumbing; no wire/schema/cross-peer change). Implements the
 2026-06-30 notifications policy (assignment-only, opt-in, off by default) and adds
