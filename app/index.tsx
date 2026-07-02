@@ -114,7 +114,11 @@ async function startWorklet () {
         if (msg.id != null && _pending.has(msg.id)) { _pending.get(msg.id)!(msg); _pending.delete(msg.id) }
         else if (msg.event === 'pair:trace') writePairTrace(msg.data?.lines)
         else if (msg.event === 'notify:assigned') {
-          fireNotify('assignment', 'Assigned to you', `You were assigned "${msg.data?.text ?? 'an item'}"`)
+          const isList = msg.data?.kind === 'list'
+          const text = msg.data?.text ?? (isList ? 'a list' : 'an item')
+          fireNotify('assignment',
+            isList ? 'List assigned to you' : 'Assigned to you',
+            isList ? `You were assigned the list "${text}"` : `You were assigned "${text}"`)
           emitEvent('notify:assigned', msg.data) // WebView shows an in-app banner too
         }
         else if (msg.event === 'notify:joined') {

@@ -578,7 +578,11 @@ export default function App () {
 
   // In-app banner when a peer assigns me an item (foreground case). The OS
   // notification, if the user opted in, is raised separately by the shell.
-  useEffect(() => on('notify:assigned', (d) => setBanner(`You were assigned "${d?.text || 'an item'}"`)), [])
+  useEffect(() => on('notify:assigned', (d) => setBanner(
+    d?.kind === 'list'
+      ? `You were assigned the list "${d?.text || 'a list'}"`
+      : `You were assigned "${d?.text || 'an item'}"`
+  )), [])
 
   // Two-week donation nudge: check once on reaching home, skip on iOS, show only
   // once ever (mark shown as soon as it surfaces).
