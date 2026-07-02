@@ -41,7 +41,12 @@ const RESET = `
 *,*::before,*::after{box-sizing:border-box}
 *{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
 html,body,#root{height:100%;margin:0}
-body{background:var(--color-surface-base);color:var(--color-text-primary);font-family:${FONT};font-weight:300;-webkit-font-smoothing:antialiased}
+/* #root gets its background from the theme var too. The native shell hardcodes
+   #root{background:#0d0d0d} for the pre-JS flash (see app/index.tsx buildHtml);
+   without this override #root stays black in light mode and the app container
+   (transparent) shows it through, so themed dark text renders unreadable. */
+body,#root{background:var(--color-surface-base)}
+body{color:var(--color-text-primary);font-family:${FONT};font-weight:300;-webkit-font-smoothing:antialiased}
 input,textarea{-webkit-user-select:text;user-select:text;font-size:16px;font-family:${FONT};font-weight:300}
 button{font-family:${FONT};transition:transform 120ms cubic-bezier(0.2,0,0,1)}
 button:active{transform:scale(0.97)}
