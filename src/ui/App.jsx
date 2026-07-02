@@ -561,16 +561,19 @@ export default function App () {
   // Storage retention now runs in the worklet on a timer (roadmap #4 P2), so the
   // UI no longer schedules it. space:retain remains available for manual use.
 
-  // Poll lists + the open list's items + roster so a peer's changes show up.
-  // Lists must be in here too, else a peer's list rename/delete/add only lands
-  // when the local user switches spaces. Cheap for a list app.
+  // Live updates: the worklet emits `group:updated` whenever the active space's
+  // Autobase view changes (a local edit or a replicated remote change), so we
+  // refetch on demand instead of polling. This covers lists + the open list's
+  // items + the roster (all one base view). `peer:connected` forces an immediate
+  // catch-up on (re)connect, and a slow backstop covers any missed event.
   useEffect(() => {
     if (phase !== 'home' || !gid) return
     const refresh = () => { loadLists(gid); loadItems(gid, openListId); loadMembers(gid, selfPubkey) }
     refresh()
-    const t = setInterval(refresh, 2500)
-    const off = on('peer:connected', () => refresh())
-    return () => { clearInterval(t); off() }
+    const offUpdated = on('group:updated', (d) => { if (!d || d.groupId === gid) refresh() })
+    const offPeer = on('peer:connected', () => refresh())
+    const backstop = setInterval(refresh, 15000)
+    return () => { offUpdated(); offPeer(); clearInterval(backstop) }
   }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers])
 
   // Two-week donation nudge: check once on reaching home, skip on iOS, show only
@@ -661,7 +664,7 @@ export default function App () {
     const { groupId } = await call('group:join', { inviteKey })
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
-    call('member:publish', { groupId }).catch(() => {}) // retried by the poll until writable
+    call('member:publish', { groupId }).catch(() => {}) // retried on each refresh until writable
   }
   function switchSpace (groupId) {
     setActiveSpaceId(groupId); setOpenListId(null); setSheet(null)

@@ -2,6 +2,23 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-02 - Live view-change events replace the 2.5s poll
+Tier: T1 (additive local worklet->UI event; no wire/schema/cross-peer change).
+Context: the UI polled list:getAll + item:getAll + member:getAll every 2.5s so a
+peer's changes would surface. Wasteful and up to 2.5s stale.
+Choice: @peerloom/core now emits `group:updated { groupId }` whenever a mounted
+base's Autobase view updates (local edit or replicated-then-applied remote
+change), trailing-debounced 120ms (core PR #10, engine mountBase). The UI
+subscribes and refetches the active space on that event instead of the interval.
+Kept: an immediate refresh on mount + on peer:connected, plus a slow 15s backstop
+so a missed event self-heals (worst case 15s, not broken sync - never worse than
+before). member:publish still retries on each refresh until writable.
+Alternatives: emit on every 'update' undebounced (IPC flood during fast-forward);
+debounce in the UI (still floods IPC); keep polling (the status quo).
+Consequences: near-instant cross-peer updates, far less churn. New core event is
+additive so old/new peers interoperate. Two-peer integration test added in core
+(remote change -> group:updated on receiver, ~430ms), gate 39/39.
+
 ## 2026-07-01 - Reused-connection pairing fix VALIDATED / SHIPPED
 Tier: T3 (writer-admission pairing in @peerloom/core).
 Context: on-device re-trace was the last open item on
