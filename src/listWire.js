@@ -92,6 +92,31 @@ async function applyListOp (op, ctx) {
   const existing = (await view.get(op.key))?.value
   if (rowApplyDecision(op.key, op.value, existing) === 'accept') {
     await view.put(op.key, op.value)
+    maybeNotify(ctx, op.key, op.value, existing)
+  }
+}
+
+// Local-notification signals (policy: assignment-only + join, opt-in, no push).
+// Emitted from apply so they fire exactly when a peer's change is synced, and
+// reach the RN shell even if the WebView is backgrounded. The shell decides
+// whether to raise an OS notification (respecting the user's opt-in). A freshness
+// window skips the burst of historical rows applied during an initial catch-up
+// sync, so joining/reopening a space does not replay old assignments as alerts.
+const NOTIFY_FRESH_MS = 60 * 1000
+function maybeNotify (ctx, key, value, existing) {
+  const { emit, selfKey } = ctx
+  if (typeof emit !== 'function' || !selfKey) return
+  if (typeof value.updatedAt !== 'number' || value.updatedAt < Date.now() - NOTIFY_FRESH_MS) return
+  if (value.pubkey === selfKey) return // our own change never notifies us
+  if (key.startsWith('item:') && !value.deleted) {
+    // Someone assigned this item to me (and it was not already mine).
+    const wasMine = !!existing && existing.assignee === selfKey
+    if (value.assignee === selfKey && !wasMine) {
+      try { emit('notify:assigned', { text: String(value.text || 'an item'), by: value.pubkey }) } catch {}
+    }
+  } else if (key.startsWith('member:') && !existing && !value.deleted) {
+    // A member row we have never seen before = someone joined the space.
+    try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey }) } catch {}
   }
 }
 

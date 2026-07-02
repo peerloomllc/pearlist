@@ -14,7 +14,49 @@ import * as FileSystem from 'expo-file-system/legacy'
 import * as Linking from 'expo-linking'
 import * as Haptics from 'expo-haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
+
+// --- local notifications (assignment + join; opt-in, off by default) --------
+// Policy: assignment-only + join, LOCAL (no server/push), OFF by default. The
+// worklet emits notify:* when it applies a fresh peer change; the shell raises
+// an OS notification if the user has opted in. Suppress the OS banner while the
+// app is foreground (the WebView shows its own in-app banner); the OS still
+// shows it when we are backgrounded. No background sync yet, so this fires while
+// the app is running (foreground + its brief background window).
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: false, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false,
+  }),
+})
+
+const NOTIF_KEY = 'pearlist:notifications'
+let _notifEnabled = false
+async function loadNotifEnabled () {
+  try { _notifEnabled = (await AsyncStorage.getItem(NOTIF_KEY)) === '1' } catch { _notifEnabled = false }
+  return _notifEnabled
+}
+async function ensureNotifPermission () {
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('assignment', {
+      name: 'Item assignments', importance: Notifications.AndroidImportance.DEFAULT,
+      description: 'When someone assigns you an item',
+    })
+    await Notifications.setNotificationChannelAsync('membership', {
+      name: 'Space membership', importance: Notifications.AndroidImportance.DEFAULT,
+      description: 'When someone joins a space',
+    })
+  }
+  const s = await Notifications.getPermissionsAsync()
+  if (s.status !== 'granted') await Notifications.requestPermissionsAsync()
+}
+function fireNotify (channelId: string, title: string, body: string) {
+  if (!_notifEnabled) return
+  Notifications.scheduleNotificationAsync({
+    content: { title, body, ...(Platform.OS === 'android' ? { channelId } : {}) },
+    trigger: null, // deliver now
+  }).catch(() => {})
+}
 
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
@@ -71,6 +113,14 @@ async function startWorklet () {
         const msg = JSON.parse(line)
         if (msg.id != null && _pending.has(msg.id)) { _pending.get(msg.id)!(msg); _pending.delete(msg.id) }
         else if (msg.event === 'pair:trace') writePairTrace(msg.data?.lines)
+        else if (msg.event === 'notify:assigned') {
+          fireNotify('assignment', 'Assigned to you', `You were assigned "${msg.data?.text ?? 'an item'}"`)
+          emitEvent('notify:assigned', msg.data) // WebView shows an in-app banner too
+        }
+        else if (msg.event === 'notify:joined') {
+          fireNotify('membership', 'Someone joined', `${msg.data?.name ?? 'Someone'} joined a space`)
+          // join already surfaces in-app via the roster diff; no WebView forward
+        }
         else if (msg.event) emitEvent(msg.event, msg.data)
       } catch {}
     }
@@ -128,6 +178,8 @@ export default function Shell () {
     // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
     // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
     requestLocalNetworkPermission()
+    // Load the notifications opt-in so fireNotify gates correctly from boot.
+    loadNotifEnabled()
     ;(async () => {
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
       setHtml(await loadUiHtml())
@@ -194,6 +246,18 @@ export default function Shell () {
         case 'shell:theme:get': {
           const raw = await AsyncStorage.getItem('pearlist:theme')
           return reply(id, { theme: raw === 'light' ? 'light' : 'dark' })
+        }
+        case 'shell:notifications:get': {
+          return reply(id, { enabled: _notifEnabled })
+        }
+        case 'shell:notifications:set': {
+          const enabled = !!args?.enabled
+          if (enabled) await ensureNotifPermission()
+          // Reflect the actual OS permission: if the user declined, stay off.
+          const granted = enabled ? (await Notifications.getPermissionsAsync()).status === 'granted' : false
+          _notifEnabled = enabled && granted
+          await AsyncStorage.setItem(NOTIF_KEY, _notifEnabled ? '1' : '0')
+          return reply(id, { enabled: _notifEnabled, permissionDenied: enabled && !granted })
         }
         case 'shell:theme:set': {
           const t = args?.theme

@@ -148,6 +148,8 @@ const mockMethods = {
   'shell:canOpenURL': async () => ({ can: false }),
   'shell:haptic': async () => ({ ok: true }),
   'shell:navState': async () => ({ ok: true }),
+  'shell:notifications:get': async () => ({ enabled: false }),
+  'shell:notifications:set': async ({ enabled }) => ({ enabled: !!enabled }),
   'shell:scanQr': async () => { const code = window.prompt ? window.prompt('Paste an invite code (camera scan on device):') : null; return { code: code || null } },
 }
 // Browser design preview: open index.html?seed to land on a populated list
