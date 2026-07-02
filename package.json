@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@peerloom/core": "file:../peerloom-core",
+    "@phosphor-icons/react": "^2.1.10",
     "@react-native-async-storage/async-storage": "2.2.0",
     "autobase": "^7.25.1",
     "b4a": "^1.8.0",
