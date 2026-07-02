@@ -576,6 +576,10 @@ export default function App () {
     return () => { offUpdated(); offPeer(); clearInterval(backstop) }
   }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers])
 
+  // In-app banner when a peer assigns me an item (foreground case). The OS
+  // notification, if the user opted in, is raised separately by the shell.
+  useEffect(() => on('notify:assigned', (d) => setBanner(`You were assigned "${d?.text || 'an item'}"`)), [])
+
   // Two-week donation nudge: check once on reaching home, skip on iOS, show only
   // once ever (mark shown as soon as it surfaces).
   useEffect(() => {
@@ -1051,7 +1055,16 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [notif, setNotif] = useState(false)
   useEffect(() => { if (open) setName(profile?.displayName || '') }, [open, profile])
+  useEffect(() => { if (open) call('shell:notifications:get', {}).then((r) => setNotif(!!r?.enabled)).catch(() => {}) }, [open])
+  async function toggleNotif (v) {
+    try {
+      const r = await call('shell:notifications:set', { enabled: v })
+      setNotif(!!r?.enabled)
+      if (v && r?.permissionDenied) alert('Turn on notifications for PearList in your device Settings to receive alerts.')
+    } catch { setNotif(false) }
+  }
 
   async function commitAvatar (value) {
     setBusy(true)
@@ -1104,6 +1117,13 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px 0` }}>
           <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Dark mode</span>
           <Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
+          <span style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Notifications</span>
+            <span style={{ color: c.text.muted, fontSize: 12 }}>When someone assigns you an item or joins</span>
+          </span>
+          <Toggle on={notif} onChange={toggleNotif} />
         </div>
       </div>
     </FullScreen>

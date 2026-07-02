@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const b4a = require('b4a')
 const { generateKeypair } = require('@peerloom/core/identity')
 const { signValue } = require('@peerloom/core/records')
-const { rowApplyDecision, listKey, itemKey } = require('../src/listWire')
+const { rowApplyDecision, listKey, itemKey, applyListOp } = require('../src/listWire')
 
 const KP = generateKeypair()
 const PUB = b4a.toString(KP.publicKey, 'hex')
@@ -69,4 +69,54 @@ test('member row is owner-scoped: only the key-matching pubkey may write it', ()
   // A member row whose key names a different pubkey than the (validly signed)
   // value is rejected, so nobody can overwrite another member's roster entry.
   assert.equal(rowApplyDecision('member:' + '00'.repeat(32), good, null), 'reject')
+})
+
+// --- local-notification signals from apply (maybeNotify) --------------------
+
+const OTHER = generateKeypair()
+const OTHERPUB = b4a.toString(OTHER.publicKey, 'hex')
+
+function mockView (initial = {}) {
+  const m = new Map(Object.entries(initial))
+  return {
+    async get (k) { return m.has(k) ? { value: m.get(k) } : null },
+    async put (k, v) { m.set(k, v) },
+  }
+}
+async function apply (op, extra = {}) {
+  const events = []
+  const view = extra.view || mockView(extra.initial || {})
+  await applyListOp(op, { view, groupId: 'g', selfKey: PUB, emit: (e, d) => events.push([e, d]), ...extra.ctx })
+  return events
+}
+
+test('notify:assigned fires when a peer assigns me a fresh item', async () => {
+  const val = signValue({ pubkey: OTHERPUB, updatedAt: Date.now(), text: 'milk', assignee: PUB, deleted: false }, OTHER.secretKey)
+  const events = await apply({ type: 'put', key: itemKey('L', 'I'), value: val })
+  assert.ok(events.some(([e, d]) => e === 'notify:assigned' && d.text === 'milk' && d.by === OTHERPUB))
+})
+
+test('no notify for a historical assignment (initial-sync burst)', async () => {
+  const val = signValue({ pubkey: OTHERPUB, updatedAt: Date.now() - 5 * 60 * 1000, text: 'old', assignee: PUB }, OTHER.secretKey)
+  const events = await apply({ type: 'put', key: itemKey('L', 'I2'), value: val })
+  assert.ok(!events.some(([e]) => e === 'notify:assigned'))
+})
+
+test('no notify when I assign an item to myself', async () => {
+  const val = signValue({ pubkey: PUB, updatedAt: Date.now(), text: 'mine', assignee: PUB }, KP.secretKey)
+  const events = await apply({ type: 'put', key: itemKey('L', 'I3'), value: val })
+  assert.ok(!events.some(([e]) => e === 'notify:assigned'))
+})
+
+test('no re-notify when an already-mine item is edited', async () => {
+  const existing = signValue({ pubkey: OTHERPUB, updatedAt: Date.now() - 1000, text: 'milk', assignee: PUB }, OTHER.secretKey)
+  const val = signValue({ pubkey: OTHERPUB, updatedAt: Date.now(), text: 'milk 2%', assignee: PUB }, OTHER.secretKey)
+  const events = await apply({ type: 'put', key: itemKey('L', 'I4'), value: val }, { initial: { [itemKey('L', 'I4')]: existing } })
+  assert.ok(!events.some(([e]) => e === 'notify:assigned'))
+})
+
+test('notify:joined fires for a new member row from a peer', async () => {
+  const val = signValue({ pubkey: OTHERPUB, updatedAt: Date.now(), displayName: 'Sam' }, OTHER.secretKey)
+  const events = await apply({ type: 'put', key: 'member:' + OTHERPUB, value: val })
+  assert.ok(events.some(([e, d]) => e === 'notify:joined' && d.name === 'Sam'))
 })

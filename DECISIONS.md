@@ -2,6 +2,29 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-02 - Notifications implemented: assignment + join, opt-in, local
+Tier: T1 (local plumbing; no wire/schema/cross-peer change). Implements the
+2026-06-30 notifications policy (assignment-only, opt-in, off by default) and adds
+join alerts per request.
+Choice: detection lives in the worklet apply (listWire maybeNotify), so it fires
+exactly when a peer's change is synced and reaches the RN shell even if the
+WebView is backgrounded. It emits notify:assigned {text,by} when someone ELSE
+assigns me an item (using core's new apply-ctx selfKey, core PR #11) and
+notify:joined {name} for a never-seen member row. A 60s freshness window skips the
+historical burst applied during an initial catch-up sync (no alert spam on
+join/reopen); own-change and already-mine-item are also filtered. The shell
+(expo-notifications ~0.32.17) raises a local OS notification if the user opted in
+(shell:notifications:get/set, AsyncStorage, OFF by default; toggle in Profile),
+with Android channels assignment/membership. setNotificationHandler suppresses the
+banner while foreground (the WebView shows an in-app banner for assignment; join
+already shows via the roster diff); the OS shows it when backgrounded.
+Scope: NO background sync, so this fires while the app runs (foreground + brief
+background window). Background delivery stays deferred (policy). Verified: 6 unit
+tests on the detection logic (fresh/historical/self/already-mine/join), verify
+green. On-device OS delivery needs a permission grant + two-device assignment test.
+Alternatives: detect in the UI (misses backgrounded WebView, duplicates logic);
+notify on every change (rejected by policy, spammy).
+
 ## 2026-07-02 - Live view-change events replace the 2.5s poll
 Tier: T1 (additive local worklet->UI event; no wire/schema/cross-peer change).
 Context: the UI polled list:getAll + item:getAll + member:getAll every 2.5s so a
