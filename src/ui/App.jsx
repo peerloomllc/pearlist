@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 import { call, on, isMock, haptic } from './ipc.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -186,7 +187,7 @@ function AssigneePickerSheet ({ open, onClose, members, selfPubkey, current, onP
   const Row = ({ pubkey, children }) => (
     <button onClick={() => { onPick(pubkey); onClose() }} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>
       {children}
-      {current === pubkey ? <span style={{ color: c.primary }}>✓</span> : null}
+      {current === pubkey ? <Check size={18} color={c.primary} weight='bold' /> : null}
     </button>
   )
   return (
@@ -211,7 +212,7 @@ function Collapsible ({ title, open, onToggle, children }) {
     <div style={{ background: c.surface.elevated, borderRadius: r.lg, overflow: 'hidden', marginBottom: sp.sm }}>
       <button onClick={onToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.base}px`, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 400 }}>
         <span>{title}</span>
-        <span style={{ fontSize: 18, color: c.text.muted, transition: 'transform 0.3s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>›</span>
+        <CaretRight size={18} color={c.text.muted} weight='regular' style={{ transition: 'transform 0.3s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }} />
       </button>
       <div style={{ maxHeight: open ? 600 : 0, overflow: 'hidden', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
         <div style={{ padding: `0 ${sp.base}px ${sp.base}px` }}>{children}</div>
@@ -232,7 +233,7 @@ function FullScreen ({ open, title, onBack, children }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 40, background: c.surface.base, transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', display: 'flex', flexDirection: 'column' }}>
       <header style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `calc(var(--pear-safe-top) + ${sp.md}px) ${sp.base}px ${sp.md}px`, borderBottom: `1px solid ${c.border}` }}>
-        <button onClick={onBack} aria-label='Back' style={{ width: 36, height: 36, background: 'none', border: 'none', color: c.text.secondary, fontSize: 28, cursor: 'pointer', lineHeight: 1 }}>‹</button>
+        <button onClick={onBack} aria-label='Back' style={{ width: 36, height: 36, background: 'none', border: 'none', color: c.text.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CaretLeft size={24} weight='regular' /></button>
         <h1 style={{ flex: 1, textAlign: 'center', fontSize: 20, fontWeight: 400, margin: 0, color: c.text.primary }}>{title}</h1>
         <span style={{ width: 36 }} />
       </header>
@@ -303,7 +304,7 @@ function ScannerView ({ open, onClose, onDecode }) {
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
         <div style={{ width: 240, height: 240, border: `3px solid ${c.primary}`, borderRadius: r.lg }} />
       </div>
-      <button onClick={onClose} aria-label='Close scanner' style={{ position: 'absolute', top: sp.base, right: sp.base, width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 20, cursor: 'pointer' }}>✕</button>
+      <button onClick={onClose} aria-label='Close scanner' style={{ position: 'absolute', top: sp.base, right: sp.base, width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.5)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={20} weight='regular' /></button>
       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, textAlign: 'center', color: '#fff', fontSize: 14, padding: `${sp.xl}px ${sp.base}px`, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
         {error || 'Point the camera at an invite QR code'}
       </div>
@@ -390,7 +391,7 @@ function ItemRow ({ item, members, onToggle, onOpen }) {
   const checked = !!item.checked
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}` }}>
-      <button onClick={() => onToggle(item)} data-haptic={checked ? 'light' : 'success'} aria-label={checked ? 'uncheck' : 'check'} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', border: `2px solid ${checked ? c.primary : c.text.muted}`, background: checked ? c.primary : 'transparent', color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 0, animation: checked ? 'pearlist-pop 240ms ease' : 'none' }}>{checked ? '✓' : ''}</button>
+      <button onClick={() => onToggle(item)} data-haptic={checked ? 'light' : 'success'} aria-label={checked ? 'uncheck' : 'check'} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', border: `2px solid ${checked ? c.primary : c.text.muted}`, background: checked ? c.primary : 'transparent', color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 0, animation: checked ? 'pearlist-pop 240ms ease' : 'none' }}>{checked ? <Check size={15} weight='bold' /> : null}</button>
       <button onClick={() => onOpen(item)} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, maxWidth: '100%' }}>
           <span style={{ position: 'relative', color: checked ? c.text.muted : c.text.primary, fontSize: 16, fontWeight: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -426,35 +427,17 @@ function Onboarding ({ onStart, onJoin }) {
   )
 }
 
-// Standard share glyph (box with an up-arrow), replacing the plain ↗.
+// Suite icons via Phosphor; thin wrappers keep the existing call sites.
 function ShareIcon ({ size = 20 }) {
-  return (
-    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
-      <path d='M12 15V3' />
-      <path d='M8 7l4-4 4 4' />
-      <path d='M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7' />
-    </svg>
-  )
+  return <ShareNetwork size={size} weight='regular' />
 }
 
 function TrashIcon ({ size = 18 }) {
-  return (
-    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
-      <path d='M3 6h18' />
-      <path d='M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2' />
-      <path d='M6 6v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6' />
-      <path d='M10 11v6M14 11v6' />
-    </svg>
-  )
+  return <Trash size={size} weight='regular' />
 }
 
 function LinkIcon ({ size = 17 }) {
-  return (
-    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
-      <path d='M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' />
-      <path d='M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' />
-    </svg>
-  )
+  return <Link size={size} weight='regular' />
 }
 
 // Overlapping member avatars on the space page; tap to see the full roster.
@@ -472,7 +455,7 @@ function MembersBar ({ members, onOpen }) {
       </span>
       <span style={{ color: c.text.secondary, fontSize: 13 }}>{members.length} {members.length === 1 ? 'member' : 'members'}</span>
       <span style={{ flex: 1 }} />
-      <span style={{ color: c.text.muted, fontSize: 16 }}>›</span>
+      <CaretRight size={16} color={c.text.muted} weight='regular' />
     </button>
   )
 }
@@ -783,7 +766,7 @@ export default function App () {
         // ===== Lists overview: all lists in the space + persistent add-list bar =====
         <>
           <TopBar
-            title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><span style={{ color: c.text.muted, fontSize: 15 }}>▾</span></button>}
+            title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><CaretDown size={16} color={c.text.muted} weight='regular' /></button>}
             left={<button aria-label='Menu' onClick={() => setSheet('menu')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}><Avatar name={profile?.displayName} avatar={profile?.avatar} size={30} /></button>}
             right={<IconButton label='Invite' onClick={() => setSheet('invite')}><ShareIcon /></IconButton>}
           />
@@ -875,7 +858,7 @@ function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate
             <div key={s.groupId} style={{ display: 'flex', alignItems: 'center', background: active ? c.surface.elevated : 'none', borderRadius: r.md }}>
               <button onClick={() => onPick(s.groupId)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: sp.sm, padding: `${sp.md}px ${sp.sm}px`, background: 'none', border: 'none', borderRadius: r.md, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: active ? 400 : 300, textAlign: 'left' }}>
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
-                {active ? <span style={{ color: c.primary }}>✓</span> : null}
+                {active ? <Check size={18} color={c.primary} weight='bold' /> : null}
               </button>
               {s.owner ? (
                 <button onClick={() => onDelete(s)} aria-label={`Delete ${s.name}`} style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><TrashIcon size={17} /></button>
@@ -940,7 +923,7 @@ function ListRow ({ list, members, onOpen }) {
     <button onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', textAlign: 'left' }}>
       <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 17, fontWeight: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{list.name}</span>
       <AssigneeAvatar pubkey={list.assignee} members={members} size={24} />
-      <span style={{ color: c.text.muted, fontSize: 20, lineHeight: 1 }}>›</span>
+      <CaretRight size={18} color={c.text.muted} weight='regular' />
     </button>
   )
 }
@@ -963,7 +946,7 @@ function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef }) {
   return (
     <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base, borderTop: `1px solid ${c.border}` }}>
       <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onSubmit() }} placeholder={placeholder} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-      <button onClick={onSubmit} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 24, cursor: 'pointer' }}>+</button>
+      <button onClick={onSubmit} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={22} weight='bold' /></button>
     </div>
   )
 }
@@ -972,11 +955,11 @@ function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef }) {
 function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
   return (
     <header style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `calc(var(--pear-safe-top) + ${sp.md}px) ${sp.base}px ${sp.md}px`, borderBottom: `1px solid ${c.border}`, background: c.surface.base, position: 'sticky', top: 0, zIndex: 5 }}>
-      <button onClick={onBack} aria-label='Back to lists' style={{ width: 36, height: 36, background: 'none', border: 'none', color: c.text.secondary, fontSize: 28, cursor: 'pointer', lineHeight: 1 }}>‹</button>
+      <button onClick={onBack} aria-label='Back to lists' style={{ width: 36, height: 36, background: 'none', border: 'none', color: c.text.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CaretLeft size={24} weight='regular' /></button>
       <h1 style={{ flex: 1, textAlign: 'center', fontSize: 20, fontWeight: 400, margin: 0, color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h1>
       <span style={{ display: 'flex', alignItems: 'center', gap: sp.xs }}>
         <AssigneeAvatar pubkey={assignee} members={members} size={22} />
-        <IconButton label='List options' onClick={onOptions}>⋯</IconButton>
+        <IconButton label='List options' onClick={onOptions}><DotsThree size={22} weight='bold' /></IconButton>
       </span>
     </header>
   )
@@ -1056,7 +1039,7 @@ function MenuSheet ({ open, onClose, profile, onProfile, onAbout }) {
           <span style={{ color: c.text.muted, fontSize: 13 }}>Name and photo</span>
         </span>
       </button>
-      <Row onClick={onAbout}><span style={{ flex: 1 }}>About PearList</span><span style={{ color: c.text.muted }}>›</span></Row>
+      <Row onClick={onAbout}><span style={{ flex: 1 }}>About PearList</span><CaretRight size={16} color={c.text.muted} weight='regular' /></Row>
     </BottomSheet>
   )
 }
@@ -1213,16 +1196,16 @@ function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete
           <Field value={text} onChange={setText} placeholder='Item' />
           <div style={{ display: 'flex', alignItems: 'center', gap: sp.md }}>
             <span style={{ color: c.text.secondary, fontSize: 14, width: 70 }}>Quantity</span>
-            <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>−</button>
+            <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Minus size={18} weight='bold' /></button>
             <span style={{ fontFamily: MONO, fontSize: 16, color: c.text.primary, minWidth: 24, textAlign: 'center' }}>{qty}</span>
-            <button onClick={() => setQty((q) => q + 1)} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, fontSize: 18, cursor: 'pointer' }}>+</button>
+            <button onClick={() => setQty((q) => q + 1)} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={18} weight='bold' /></button>
           </div>
           <button onClick={() => setPicking(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, padding: '12px 14px', background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, cursor: 'pointer' }}>
             <span style={{ color: c.text.secondary, fontSize: 14 }}>Assigned to</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, color: c.text.primary, fontSize: 15 }}>
               {assignee ? <AssigneeAvatar pubkey={assignee} members={members} size={22} /> : null}
               {memberLabel(members, assignee, selfPubkey)}
-              <span style={{ color: c.text.muted }}>›</span>
+              <CaretRight size={16} color={c.text.muted} weight='regular' />
             </span>
           </button>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder='Notes (optional)' rows={2} maxLength={2000}
