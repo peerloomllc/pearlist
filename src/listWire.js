@@ -111,11 +111,12 @@ function maybeNotify (ctx, key, value, existing) {
   if (value.deleted) return
   if (key.startsWith('member:')) {
     // A member row we have never seen before = someone joined the space.
-    if (!existing) { try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey }) } catch {} }
+    if (!existing) { try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey, groupId: ctx.groupId }) } catch {} }
     return
   }
   // Someone assigned an item OR a whole list to me (and it was not already mine).
-  // `kind` lets the shell/UI phrase item vs list assignments differently.
+  // `kind` lets the shell/UI phrase item vs list differently; groupId + listId
+  // let a notification tap deep-link straight to the related list.
   const isItem = key.startsWith('item:')
   const isList = key.startsWith('list:')
   if ((isItem || isList) && value.assignee === selfKey) {
@@ -123,7 +124,9 @@ function maybeNotify (ctx, key, value, existing) {
     if (!wasMine) {
       const kind = isItem ? 'item' : 'list'
       const text = String((isItem ? value.text : value.name) || (isItem ? 'an item' : 'a list'))
-      try { emit('notify:assigned', { kind, text, by: value.pubkey }) } catch {}
+      // item key = item:{listId}:{itemId}; list key = list:{listId}
+      const listId = isItem ? key.split(':')[1] : key.slice('list:'.length)
+      try { emit('notify:assigned', { kind, text, by: value.pubkey, groupId: ctx.groupId, listId }) } catch {}
     }
   }
 }

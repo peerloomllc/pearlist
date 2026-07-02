@@ -50,10 +50,10 @@ async function ensureNotifPermission () {
   const s = await Notifications.getPermissionsAsync()
   if (s.status !== 'granted') await Notifications.requestPermissionsAsync()
 }
-function fireNotify (channelId: string, title: string, body: string) {
+function fireNotify (channelId: string, title: string, body: string, data?: any) {
   if (!_notifEnabled) return
   Notifications.scheduleNotificationAsync({
-    content: { title, body, ...(Platform.OS === 'android' ? { channelId } : {}) },
+    content: { title, body, data: data || {}, ...(Platform.OS === 'android' ? { channelId } : {}) },
     trigger: null, // deliver now
   }).catch(() => {})
 }
@@ -118,11 +118,13 @@ async function startWorklet () {
           const text = msg.data?.text ?? (isList ? 'a list' : 'an item')
           fireNotify('assignment',
             isList ? 'List assigned to you' : 'Assigned to you',
-            isList ? `You were assigned the list "${text}"` : `You were assigned "${text}"`)
+            isList ? `You were assigned the list "${text}"` : `You were assigned "${text}"`,
+            { groupId: msg.data?.groupId, listId: msg.data?.listId }) // tap -> open the list
           emitEvent('notify:assigned', msg.data) // WebView shows an in-app banner too
         }
         else if (msg.event === 'notify:joined') {
-          fireNotify('membership', 'Someone joined', `${msg.data?.name ?? 'Someone'} joined a space`)
+          fireNotify('membership', 'Someone joined', `${msg.data?.name ?? 'Someone'} joined a space`,
+            { groupId: msg.data?.groupId }) // tap -> open the space
           // join already surfaces in-app via the roster diff; no WebView forward
         }
         else if (msg.event) emitEvent(msg.event, msg.data)
@@ -159,6 +161,7 @@ export default function Shell () {
   const [statusBarStyle, setStatusBarStyle] = useState<'light-content' | 'dark-content'>('light-content')
   const webViewLoaded = useRef(false)
   const pendingDeeplink = useRef<string | null>(null)
+  const pendingNotifNav = useRef<any>(null) // notification-tap target, buffered until the WebView mounts
   const canBackRef = useRef(false) // set by shell:navState; drives the back button
   const insets = useSafeAreaInsets()
 
@@ -209,6 +212,24 @@ export default function Shell () {
     }
     Linking.getInitialURL().then((url) => { if (url && INVITE_RE.test(url)) deliver(url) })
     const sub = Linking.addEventListener('url', ({ url }) => { if (INVITE_RE.test(url)) deliver(url) })
+    return () => sub.remove()
+  }, [])
+
+  // Notification tap -> open the related space/list. Buffer until the WebView has
+  // mounted (covers cold start via getLastNotificationResponseAsync).
+  useEffect(() => {
+    const deliverNav = (data: any) => {
+      if (!data || !data.groupId) return
+      const nav = { groupId: data.groupId, listId: data.listId ?? null }
+      if (webViewLoaded.current) emitEvent('notify:open', nav)
+      else pendingNotifNav.current = nav
+    }
+    Notifications.getLastNotificationResponseAsync()
+      .then((resp) => { if (resp) deliverNav(resp.notification.request.content.data) })
+      .catch(() => {})
+    const sub = Notifications.addNotificationResponseReceivedListener(
+      (resp) => deliverNav(resp.notification.request.content.data)
+    )
     return () => sub.remove()
   }, [])
 
@@ -295,6 +316,10 @@ export default function Shell () {
     if (pendingDeeplink.current) {
       emitEvent('deeplink:invite', { url: pendingDeeplink.current })
       pendingDeeplink.current = null
+    }
+    if (pendingNotifNav.current) {
+      emitEvent('notify:open', pendingNotifNav.current)
+      pendingNotifNav.current = null
     }
   }
 
