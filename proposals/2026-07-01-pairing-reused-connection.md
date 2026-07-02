@@ -192,10 +192,9 @@ The 5s hello retry is unchanged once a channel is paired.
   close. Bounded; no per-op work.
 - Fixes multi-space writer admission (the core reason a joiner appeared stuck
   read-only) and removes the "heals only when another peer connects" behavior.
-- Does **not** address the separate slow first-connection latency seen in the
-  same traces. Now **reproduced twice** (147s, then 112s in the validation trace)
-  and foreground both times, so not background suspend. iOS Local Network
-  permission is **ruled out** as the cause: the validation trace was taken with LN
-  granted and still took 112s (Hyperswarm discovery is DHT-only, so LN only helps
-  the direct connection *after* discovery, not discovery itself). Leading suspect
-  now: DHT announce/lookup + holepunch latency. Tracked separately in TODO.md.
+- The separate slow first-connection latency seen in the same traces was a
+  **distinct bug, now FIXED**: iOS Local Network permission was gating the
+  same-WiFi holepunch. Reproduced at 147s (no LN) and 112s (LN granted late), then
+  a clean cold-relaunch with LN pre-granted connected in **+3356ms (~3.4s)**, ~40x
+  faster. Fixed by the force-prompt module (pearlist modules/local-network, PR #21).
+  (An earlier draft called LN "ruled out" for this - that was wrong.)
