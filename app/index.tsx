@@ -14,6 +14,7 @@ import * as FileSystem from 'expo-file-system/legacy'
 import * as Linking from 'expo-linking'
 import * as Haptics from 'expo-haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { requestLocalNetworkPermission } from '../modules/local-network'
 
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
@@ -34,6 +35,16 @@ function callRaw (method: string, args: any = {}): Promise<any> {
 }
 function emitEvent (event: string, data?: any) {
   _webViewRef?.current?.injectJavaScript(`window.__pearEvent(${JSON.stringify(event)}, ${JSON.stringify(data ?? null)}); true;`)
+}
+
+// Diagnostic: tee the worklet's pairing trace to Documents/pair-trace.log so we
+// can pull it off an iOS device (worklet console.warn does not reach a remote
+// shell there). The worklet re-ships the full buffer each mark, so we overwrite
+// (not append) to keep the file to the latest complete trace. Fire-and-forget.
+function writePairTrace (lines?: string[]) {
+  if (!Array.isArray(lines)) return
+  const path = FileSystem.documentDirectory + 'pair-trace.log'
+  FileSystem.writeAsStringAsync(path, lines.join('\n') + '\n').catch(() => {})
 }
 
 async function startWorklet () {
@@ -59,6 +70,7 @@ async function startWorklet () {
       try {
         const msg = JSON.parse(line)
         if (msg.id != null && _pending.has(msg.id)) { _pending.get(msg.id)!(msg); _pending.delete(msg.id) }
+        else if (msg.event === 'pair:trace') writePairTrace(msg.data?.lines)
         else if (msg.event) emitEvent(msg.event, msg.data)
       } catch {}
     }
@@ -113,7 +125,10 @@ export default function Shell () {
   useEffect(() => { if (webViewLoaded.current) injectInsets() }, [insets.top, insets.bottom, insets.left, insets.right])
 
   useEffect(() => {
-    (async () => {
+    // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
+    // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
+    requestLocalNetworkPermission()
+    ;(async () => {
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
       setHtml(await loadUiHtml())
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))

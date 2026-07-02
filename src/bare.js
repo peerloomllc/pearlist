@@ -8,15 +8,40 @@ const { createGroupEngine } = require('@peerloom/core/engine')
 const { applyListOp } = require('./listWire')
 const listMethods = require('./listMethods')
 
+// Pairing/writer-admission trace (diagnostic, 2026-07-01). The core emits marks
+// (peer:connected, group:mounted, group:join, pair:onopen, pair:hello-sent,
+// pair:hello-received, pair:addwriter-appended, pair:became-writable,
+// apply:addwriter) through this hook. We timestamp each relative to worklet boot,
+// keep a running buffer, and ship the whole buffer to the shell as a `pair:trace`
+// event; the shell tees it to Documents/pair-trace.log, which we pull off the
+// iPhone with `xcrun devicectl ... copy from` (worklet console does not reach a
+// remote shell on iOS). Marks here are all one-shot per connection/join, so
+// re-shipping the buffer each time is bounded (no per-op flood).
+const _bootTs = Date.now()
+const _traceLines = []
+let _engine = null
+function mark (name, extra) {
+  const dt = Date.now() - _bootTs
+  const line = (extra !== undefined)
+    ? '[pair worklet+' + dt + 'ms] ' + name + ' ' + JSON.stringify(extra)
+    : '[pair worklet+' + dt + 'ms] ' + name
+  console.warn(line)
+  _traceLines.push(line)
+  if (_engine) { try { _engine.emit('pair:trace', { lines: _traceLines.slice() }) } catch {} }
+}
+mark('worklet:loaded')
+
 const engine = createGroupEngine({
   appId: 'pearlist',
   applyOps: applyListOp,
   methods: listMethods,
+  mark,
   // Storage retention (roadmap #4 P2): auto-prune old already-applied blocks
   // across all mounted spaces every 30 min, keeping a generous recent buffer so
   // small spaces are untouched and only long-churned ones shrink.
   retentionInterval: 30 * 60 * 1000,
   retentionKeepRecent: 512,
 })
+_engine = engine
 
 engine.start()

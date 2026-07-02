@@ -14,7 +14,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan space invite QR codes.",
         "NSLocalNetworkUsageDescription": "PearList connects directly to your peers' devices on your Wi-Fi to sync lists peer-to-peer.",
-        "NSBonjourServices": ["_hyperswarm._udp"]
+        "NSBonjourServices": ["_hyperswarm._udp", "_pearlistlan._tcp"]
       }
     },
     "android": {
