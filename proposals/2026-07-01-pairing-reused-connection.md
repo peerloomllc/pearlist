@@ -1,7 +1,25 @@
 # 2026-07-01 - Reliable pair-channel establishment on reused connections (@peerloom/core)
 
-**Status:** IMPLEMENTED (core) - pending multi-platform redeploy + on-device
-re-trace. peerloom-core `feature/pairing-trace-hook`: trace hook e421046, fix
+**Status:** VALIDATED / SHIPPED (2026-07-01). On-device re-trace (test-plan item
+4) confirms the fix end to end: the iPhone joined a new space `TraceTest2`
+(`4-_t6dJN`) over the connection it already had with the Pixel and became a writer
+in ~5s, with **no** dependence on a third peer. Trace excerpt (ms from boot,
+single `peer:connected` at +112717, never dropped):
+
+```
++164638  pair:remote-open      4-_t6dJN   # our new setupPairListener catching the remote's open
++180047  pair:channel-opened   4-_t6dJN
++180048  group:join            4-_t6dJN {writable:false}   # user tapped join
++180080  pair:onopen           4-_t6dJN
++180080  pair:hello-sent       4-_t6dJN
++180523  apply:addwriter       4-_t6dJN {ff157255}
++185081  pair:became-writable  4-_t6dJN   # writer in ~5s from join, reused connection
+```
+
+Pre-fix this channel got no `pair:onopen` and closed ~100ms later; now it pairs
+lazily over the existing connection. All three devices redeployed with the fix.
+
+peerloom-core `feature/pairing-trace-hook`: trace hook e421046, fix
 aa83311. The `mux.pair` lazy-open (design item 1) landed and a two-peer
 regression that fails pre-fix now passes (full gate 38/38). Design item 2
 (per-(conn,group) tracking + re-open-on-close) was deliberately NOT implemented:
@@ -174,6 +192,10 @@ The 5s hello retry is unchanged once a channel is paired.
   close. Bounded; no per-op work.
 - Fixes multi-space writer admission (the core reason a joiner appeared stuck
   read-only) and removes the "heals only when another peer connects" behavior.
-- Does **not** address the separate ~147s first-connection latency seen in the
-  same trace (foreground, so not background suspend; unconfirmed, possibly iOS
-  Local Network permission / DHT cold-start). Tracked separately in TODO.md.
+- Does **not** address the separate slow first-connection latency seen in the
+  same traces. Now **reproduced twice** (147s, then 112s in the validation trace)
+  and foreground both times, so not background suspend. iOS Local Network
+  permission is **ruled out** as the cause: the validation trace was taken with LN
+  granted and still took 112s (Hyperswarm discovery is DHT-only, so LN only helps
+  the direct connection *after* discovery, not discovery itself). Leading suspect
+  now: DHT announce/lookup + holepunch latency. Tracked separately in TODO.md.

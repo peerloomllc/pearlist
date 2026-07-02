@@ -2,6 +2,51 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-01 - Reused-connection pairing fix VALIDATED / SHIPPED
+Tier: T3 (writer-admission pairing in @peerloom/core).
+Context: on-device re-trace was the last open item on
+proposals/2026-07-01-pairing-reused-connection.md (the mux.pair lazy-open fix,
+core aa83311).
+Choice: accept the fix as shipped. All three devices (iPhone, Pixel, TCL) run it.
+Validation trace (pearlist scripts/pull-pair-trace.sh): iPhone joined a new space
+TraceTest2 (4-_t6dJN) over the connection it already had with the Pixel (single
+peer:connected, never dropped) and went pair:remote-open -> onopen -> hello-sent
+-> became-writable in ~5s, no 3rd-peer dependency. Pre-fix that channel got no
+onopen and closed ~100ms later.
+Consequences: multi-space writer admission now works over reused connections.
+Proposal Status -> VALIDATED/SHIPPED. reviews/2026-07-01-pairing-reused-connection.md
+added (Constitution §6). Candidate merges: core feature/pairing-trace-hook,
+pearlist feature/ios-bring-up. Separate slow first-connect (DHT discovery) stays
+open - see TODO and DECISIONS below.
+
+## 2026-07-01 - iOS Local Network permission force-prompt module
+Tier: T1 (device-local permission trigger; no wire-format, IPC, Hyperbee key, or
+Hyperswarm-topic change - old and new peers still talk, LAN or relay).
+Context: PearList never appeared under iOS Settings -> PearList -> Local Network
+and never prompted, even though app.json/Info.plist correctly declare
+NSLocalNetworkUsageDescription + NSBonjourServices. Root cause: iOS only surfaces
+the prompt/toggle after the app first actually touches the LAN, and modern
+Hyperswarm (hyperdht, DHT + UDP holepunch, no Bonjour) apparently never attempts
+a direct same-subnet connection on first launch. Suspected cause of the
+unconfirmed ~147s cold first-connect (peers falling back to the relayed path).
+Choice: added an iOS-only Expo local module `modules/local-network`
+(LocalNetworkModule.swift) that, at app boot, advertises + browses a throwaway
+Bonjour service `_pearlistlan._tcp` (added to NSBonjourServices) via the Network
+framework. Browsing makes iOS evaluate LAN access and show the prompt; once
+granted, the whole app process (including the Bare sockets) may reach LAN peers
+directly. Called fire-and-forget from app/index.tsx boot effect
+(requestLocalNetworkPermission), no-op off iOS via requireOptionalNativeModule.
+Probe tears itself down after ~8s. ios/ regenerated via prebuild so the new
+Bonjour type ships.
+Alternatives: reuse the inert `_hyperswarm._udp` type (rejected - UDP NWListener
+advertising is finicky and mismatches a TCP listener); browse-only with no
+advertise (less reliable trigger across iOS versions); a native AppDelegate hook
+via config plugin (more brittle than an autolinked local module).
+Consequences: first PearList native module. Verify green (25/25), tsc clean,
+autolinking resolves podName LocalNetwork. Pending on-device confirmation that
+the prompt appears + the toggle shows, then whether it actually cuts same-WiFi
+connect latency (the real motivation).
+
 ## 2026-07-01 - iOS bring-up (first iPhone build)
 Tier: T1 (build/infra; no wire-format or app-behavior change).
 Context: iOS was the last unproven leg of the three-layer stack. Android deploy
