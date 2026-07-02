@@ -108,15 +108,23 @@ function maybeNotify (ctx, key, value, existing) {
   if (typeof emit !== 'function' || !selfKey) return
   if (typeof value.updatedAt !== 'number' || value.updatedAt < Date.now() - NOTIFY_FRESH_MS) return
   if (value.pubkey === selfKey) return // our own change never notifies us
-  if (key.startsWith('item:') && !value.deleted) {
-    // Someone assigned this item to me (and it was not already mine).
-    const wasMine = !!existing && existing.assignee === selfKey
-    if (value.assignee === selfKey && !wasMine) {
-      try { emit('notify:assigned', { text: String(value.text || 'an item'), by: value.pubkey }) } catch {}
-    }
-  } else if (key.startsWith('member:') && !existing && !value.deleted) {
+  if (value.deleted) return
+  if (key.startsWith('member:')) {
     // A member row we have never seen before = someone joined the space.
-    try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey }) } catch {}
+    if (!existing) { try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey }) } catch {} }
+    return
+  }
+  // Someone assigned an item OR a whole list to me (and it was not already mine).
+  // `kind` lets the shell/UI phrase item vs list assignments differently.
+  const isItem = key.startsWith('item:')
+  const isList = key.startsWith('list:')
+  if ((isItem || isList) && value.assignee === selfKey) {
+    const wasMine = !!existing && existing.assignee === selfKey
+    if (!wasMine) {
+      const kind = isItem ? 'item' : 'list'
+      const text = String((isItem ? value.text : value.name) || (isItem ? 'an item' : 'a list'))
+      try { emit('notify:assigned', { kind, text, by: value.pubkey }) } catch {}
+    }
   }
 }
 
