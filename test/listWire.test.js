@@ -93,13 +93,13 @@ async function apply (op, extra = {}) {
 test('notify:assigned (kind item) fires when a peer assigns me a fresh item', async () => {
   const val = signValue({ pubkey: OTHERPUB, updatedAt: Date.now(), text: 'milk', assignee: PUB, deleted: false }, OTHER.secretKey)
   const events = await apply({ type: 'put', key: itemKey('L', 'I'), value: val })
-  assert.ok(events.some(([e, d]) => e === 'notify:assigned' && d.kind === 'item' && d.text === 'milk' && d.by === OTHERPUB))
+  assert.ok(events.some(([e, d]) => e === 'notify:assigned' && d.kind === 'item' && d.text === 'milk' && d.by === OTHERPUB && d.groupId === 'g' && d.listId === 'L'))
 })
 
 test('notify:assigned (kind list) fires when a peer assigns me a whole list', async () => {
   const val = signValue({ pubkey: OTHERPUB, updatedAt: Date.now(), name: 'Chores', assignee: PUB, deleted: false }, OTHER.secretKey)
   const events = await apply({ type: 'put', key: listKey('L2'), value: val })
-  assert.ok(events.some(([e, d]) => e === 'notify:assigned' && d.kind === 'list' && d.text === 'Chores' && d.by === OTHERPUB))
+  assert.ok(events.some(([e, d]) => e === 'notify:assigned' && d.kind === 'list' && d.text === 'Chores' && d.by === OTHERPUB && d.groupId === 'g' && d.listId === 'L2'))
 })
 
 test('no notify for a historical assignment (initial-sync burst)', async () => {

@@ -475,6 +475,7 @@ export default function App () {
   const [members, setMembers] = useState([])
   const [selfPubkey, setSelfPubkey] = useState(null)
   const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
+  const [navRequest, setNavRequest] = useState(null) // { groupId, listId } from a notification tap
   const prevMembersRef = useRef({})              // groupId -> Set(pubkey) for join detection
   const [listPicker, setListPicker] = useState(null) // { listId, current } for assigning a whole list
   const [deleteTarget, setDeleteTarget] = useState(null) // space {groupId,name} pending delete confirm
@@ -583,6 +584,18 @@ export default function App () {
       ? `You were assigned the list "${d?.text || 'a list'}"`
       : `You were assigned "${d?.text || 'an item'}"`
   )), [])
+
+  // Notification tap -> open the related space (and list, if any). Requested by
+  // the shell (notify:open); applied once we are home and that space has loaded
+  // (covers a cold start where the tap arrives before spaces are ready).
+  useEffect(() => on('notify:open', (d) => { if (d?.groupId) setNavRequest(d) }), [])
+  useEffect(() => {
+    if (!navRequest || phase !== 'home') return
+    if (!spaces.some((s) => s.groupId === navRequest.groupId)) return
+    setActiveSpaceId(navRequest.groupId)
+    setOpenListId(navRequest.listId || null)
+    setNavRequest(null)
+  }, [navRequest, phase, spaces])
 
   // Two-week donation nudge: check once on reaching home, skip on iOS, show only
   // once ever (mark shown as soon as it surfaces).
