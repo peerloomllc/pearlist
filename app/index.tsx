@@ -14,6 +14,7 @@ import * as FileSystem from 'expo-file-system/legacy'
 import * as Linking from 'expo-linking'
 import * as Haptics from 'expo-haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { requestLocalNetworkPermission } from '../modules/local-network'
 
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
@@ -124,7 +125,10 @@ export default function Shell () {
   useEffect(() => { if (webViewLoaded.current) injectInsets() }, [insets.top, insets.bottom, insets.left, insets.right])
 
   useEffect(() => {
-    (async () => {
+    // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
+    // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
+    requestLocalNetworkPermission()
+    ;(async () => {
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
       setHtml(await loadUiHtml())
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
