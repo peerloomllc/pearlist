@@ -2,6 +2,30 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-05 - Android background sync via a foreground service (default ON)
+Tier: T1 (device-local infra; no wire/schema/cross-peer change - a background-
+syncing peer talks to any peer normally).
+Context: notifications only fired while the app was running, because Android
+suspends the process when backgrounded and drops the Hyperswarm connection. For a
+serverless P2P app, a periodic wake (15 min) rarely coincides with a peer being
+online, so nothing syncs. A persistent foreground service keeps at least the
+Android device continuously connected as a reliable sync/relay backbone; iOS has
+no equivalent (App Store restrictions), so iPhones stay open-to-sync.
+Choice: added an Android-only Expo local module `modules/bg-sync` (ported and
+simplified from PearGuard's ParentConnectionService): a foreground Service
+(startForeground + persistent notification + START_STICKY + onTaskRemoved
+AlarmManager restart + wakeHost via the launcher intent), a BgSyncBootReceiver
+(resumes on reboot if opted in, persisted in SharedPreferences), and a
+BgSyncModule (start/stop). Setting `pearlist:bgsync`, default ON on Android;
+toggle "Keep syncing in background" in Profile (hidden off Android). foreground
+ServiceType=dataSync; FOREGROUND_SERVICE(+_DATA_SYNC) + RECEIVE_BOOT_COMPLETED.
+Decisions (per Tim): default ON + boot restart. Verified: Kotlin compiles, service
++ receiver + permissions merge into the release manifest, verify/tsc green.
+PENDING: on-device runtime validation of actual background sync + boot/kill
+recovery (OEM-dependent; only Tim can confirm on real devices).
+Alternatives: periodic background task (rejected - peers rarely online together);
+Android foreground service was chosen over it for reliable continuous sync.
+
 ## 2026-07-02 - Strip aps-environment so expo-notifications signs with the wildcard profile
 Tier: T1 (build/signing config; no runtime behavior change).
 Context: expo-notifications ships its OWN config plugin (runs on prebuild even when

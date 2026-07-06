@@ -27,3 +27,6 @@ scripts/.env
 /android/
 /ios/
 expo-env.d.ts
+
+# Local Expo module native build output
+modules/*/android/build/

@@ -150,6 +150,8 @@ const mockMethods = {
   'shell:navState': async () => ({ ok: true }),
   'shell:notifications:get': async () => ({ enabled: false }),
   'shell:notifications:set': async ({ enabled }) => ({ enabled: !!enabled }),
+  'shell:bgsync:get': async () => ({ supported: false, enabled: false }),
+  'shell:bgsync:set': async ({ enabled }) => ({ supported: false, enabled: !!enabled }),
   'shell:scanQr': async () => { const code = window.prompt ? window.prompt('Paste an invite code (camera scan on device):') : null; return { code: code || null } },
 }
 // Browser design preview: open index.html?seed to land on a populated list

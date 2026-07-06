@@ -1073,14 +1073,20 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [notif, setNotif] = useState(false)
+  const [bgSync, setBgSync] = useState(false)
+  const [bgSyncSupported, setBgSyncSupported] = useState(false)
   useEffect(() => { if (open) setName(profile?.displayName || '') }, [open, profile])
   useEffect(() => { if (open) call('shell:notifications:get', {}).then((r) => setNotif(!!r?.enabled)).catch(() => {}) }, [open])
+  useEffect(() => { if (open) call('shell:bgsync:get', {}).then((r) => { setBgSyncSupported(!!r?.supported); setBgSync(!!r?.enabled) }).catch(() => {}) }, [open])
   async function toggleNotif (v) {
     try {
       const r = await call('shell:notifications:set', { enabled: v })
       setNotif(!!r?.enabled)
       if (v && r?.permissionDenied) alert('Turn on notifications for PearList in your device Settings to receive alerts.')
     } catch { setNotif(false) }
+  }
+  async function toggleBgSync (v) {
+    try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
 
   async function commitAvatar (value) {
@@ -1142,6 +1148,15 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
           </span>
           <Toggle on={notif} onChange={toggleNotif} />
         </div>
+        {bgSyncSupported ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
+            <span style={{ display: 'flex', flexDirection: 'column', paddingRight: sp.md }}>
+              <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Keep syncing in background</span>
+              <span style={{ color: c.text.muted, fontSize: 12 }}>Stays connected so updates and alerts arrive when the app is closed. Shows a permanent notification.</span>
+            </span>
+            <Toggle on={bgSync} onChange={toggleBgSync} />
+          </div>
+        ) : null}
       </div>
     </FullScreen>
   )
