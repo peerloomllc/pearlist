@@ -25,11 +25,17 @@ cd "$REPO_ROOT"
 npm run build:ui 2>&1 | tail -2
 
 echo "==> Syncing to $MAC_MINI"
+# Exclude everything regenerated on the Mac (Pods, workspace, build output) so we
+# never clobber its pod state; ios-screenshots.sh runs `pod install` to resync.
 rsync -az --checksum --exclude='.git' --exclude='node_modules' --exclude='android' \
+  --exclude='ios/Pods/' --exclude='ios/build/' --exclude='ios/PearList.xcworkspace/' \
+  --exclude='.expo/' \
   "$REPO_ROOT/" "$MAC_MINI:$MAC_REPO/"
 
 echo "==> Running driver on $MAC_MINI"
-ssh "$MAC_MINI" "cd $MAC_REPO && ${SKIP_BUILD:+SKIP_BUILD=1 }./scripts/ios-screenshots.sh"
+# Login shell (bash -lc) so Homebrew/rbenv tools (pod, xcodebuild helpers) are on
+# PATH; a bare ssh command shell does not source the profile.
+ssh "$MAC_MINI" "bash -lc 'cd $MAC_REPO && ${SKIP_BUILD:+SKIP_BUILD=1 }./scripts/ios-screenshots.sh'"
 
 echo "==> Pulling PNGs into $OUT_DIR"
 mkdir -p "$OUT_DIR"

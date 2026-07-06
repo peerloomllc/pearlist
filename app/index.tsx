@@ -156,6 +156,18 @@ function parseScreenshotScene (url: string | null): number | null {
   return m ? parseInt(m[1], 10) : null
 }
 
+// iOS screenshot delivery: the driver writes the scene number into the app's
+// Documents dir before launching (simctl openurl on a custom scheme shows an
+// "Open in ...?" confirmation that would cover the frame, so we avoid it). No
+// effect in normal use - the file only exists during a capture run.
+async function readScreenshotSceneFile (): Promise<number | null> {
+  try {
+    const txt = await FileSystem.readAsStringAsync(FileSystem.documentDirectory + 'screenshot-scene')
+    const n = parseInt(String(txt).trim(), 10)
+    return Number.isInteger(n) ? n : null
+  } catch { return null }
+}
+
 // --- UI html ---------------------------------------------------------------
 function buildHtml (jsBundle: string, screenshotScene?: number | null) {
   const platform = JSON.stringify(Platform.OS)
@@ -208,7 +220,7 @@ export default function Shell () {
       // worklet and every permission prompt, which would otherwise cover the
       // captured frame (iOS Local Network, notifications, etc.).
       const initialUrl = await Linking.getInitialURL().catch(() => null)
-      const scene = parseScreenshotScene(initialUrl)
+      const scene = (await readScreenshotSceneFile()) ?? parseScreenshotScene(initialUrl)
       if (scene != null) {
         if (!cancelled) setHtml(await loadUiHtml(scene))
         return
