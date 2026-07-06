@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Android Play Store screenshot capture — runs on Linux.
-# Boots each configured AVD, installs the debug APK, loops scenes ×
+# Boots each configured AVD, installs a standalone RELEASE APK (embeds the JS +
+# WebView/worklet bundles so no Metro server is needed; debug-signed via the
+# release-signing plugin's fallback when KEYSTORE_* is unset), loops scenes ×
 # appearances cold-launching via a pear://pearlist/screenshot/<N> deep link
 # (the shell reads it and injects the scene), and captures PNGs via
 # adb exec-out screencap. Needs the screenshot-fixtures harness in the UI.
@@ -20,7 +22,7 @@ if [ -f "$REPO_ROOT/scripts/app.conf" ]; then
 fi
 APP_ID="${ANDROID_APP_ID:-com.pearlist}"
 MAIN_ACTIVITY="${ANDROID_MAIN_ACTIVITY:-$APP_ID/com.pearlist.MainActivity}"
-APK_PATH="${APK_PATH:-$REPO_ROOT/android/app/build/outputs/apk/debug/app-debug.apk}"
+APK_PATH="${APK_PATH:-$REPO_ROOT/android/app/build/outputs/apk/release/app-release.apk}"
 
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/metadata/android/screenshots}"
 SCENES=(1 2 3 4 5 6)
@@ -34,14 +36,24 @@ SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 EMULATOR="$SDK_ROOT/emulator/emulator"
 ADB="$SDK_ROOT/platform-tools/adb"
 
+# App is arm64-only in production (plugins/with-android-abis), but the capture
+# emulator is x86_64 and modern QEMU2 cannot run arm on x86_64 - an arm64-only
+# APK crashes on launch (no loadable native libs). Build the screenshot APK for
+# the emulator's ABI so it runs. react-native-bare-kit ships x86_64 prebuilts.
+SCREENSHOT_ABI="${SCREENSHOT_ABI:-x86_64}"
+
 # ── Build ──
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
-  echo "==> Bundling UI"
+  echo "==> Bundling UI + worklet"
   cd "$REPO_ROOT"
   npm run build:ui 2>&1 | tail -2
+  npm run build:bare 2>&1 | tail -1
 
-  echo "==> Building debug APK"
-  (cd android && ./gradlew assembleDebug) 2>&1 | tail -3
+  # Release build embeds the JS bundle + the WebView/worklet assets, so the APK
+  # runs standalone (no Metro). Debug-signed via the release-signing plugin
+  # fallback when KEYSTORE_* is unset — fine for local screenshots.
+  echo "==> Building standalone release APK ($SCREENSHOT_ABI)"
+  (cd android && ./gradlew assembleRelease -PreactNativeArchitectures="$SCREENSHOT_ABI") 2>&1 | tail -3
 fi
 
 [ -f "$APK_PATH" ] || { echo "Error: APK not found at $APK_PATH" >&2; exit 1; }

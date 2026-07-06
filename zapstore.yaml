@@ -28,12 +28,13 @@ tags:
 license: MIT
 website: https://peerloomllc.com/pearlist/
 
-# Screenshots are generated into metadata/android/screenshots/ before the first
-# release (see scripts/screenshots.sh once ported). Uncomment when they exist.
-# images:
-#   - ./metadata/android/screenshots/Pixel_9_Pro_Framed/light/scene-1.png
-#   - ./metadata/android/screenshots/Pixel_9_Pro_Framed/light/scene-2.png
-#   - ./metadata/android/screenshots/Pixel_9_Pro_Framed/light/scene-3.png
+images:
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-1.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-2.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-3.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-4.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-5.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-6.png
 
 metadata_sources:
   - github
