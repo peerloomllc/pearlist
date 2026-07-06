@@ -485,8 +485,16 @@ const TOUR_STEPS = [
 function GuidedTour ({ open, onDone }) {
   const [i, setI] = useState(0)
   if (!open) return null
-  const step = TOUR_STEPS[i]
-  const last = i === TOUR_STEPS.length - 1
+  // Final slide sets background-sync expectations, tailored to the platform:
+  // iOS pauses background apps (so an all-iPhone space only syncs when open),
+  // while Android can keep syncing in the background.
+  const isIOS = typeof window !== 'undefined' && window.__pearPlatform === 'ios'
+  const bgStep = isIOS
+    ? { emoji: '📱', title: 'A note for iPhone', body: "iOS pauses apps in the background, so on iPhone PearList syncs and sends alerts mainly while it's open. If everyone in a space is on iPhone, updates only sync when someone has PearList open. Keep an Android device in the space for always-on background sync." }
+    : { emoji: '📶', title: 'Syncing in the background', body: "On Android, PearList can keep syncing even when it's closed (Settings → Keep syncing in background), so updates arrive right away - and it keeps iPhone members in your space synced too." }
+  const steps = [...TOUR_STEPS, bgStep]
+  const step = steps[i]
+  const last = i === steps.length - 1
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 65, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
       <div style={{ background: c.surface.card, borderRadius: r.xl, padding: sp.xl, maxWidth: 360, width: '100%', textAlign: 'center' }}>
@@ -494,7 +502,7 @@ function GuidedTour ({ open, onDone }) {
         <h2 style={{ fontSize: 20, fontWeight: 400, margin: `${sp.sm}px 0`, color: c.text.primary }}>{step.title}</h2>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.lg}px`, minHeight: 63 }}>{step.body}</p>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginBottom: sp.base }}>
-          {TOUR_STEPS.map((_, k) => <span key={k} style={{ width: 7, height: 7, borderRadius: '50%', background: k === i ? c.primary : c.border }} />)}
+          {steps.map((_, k) => <span key={k} style={{ width: 7, height: 7, borderRadius: '50%', background: k === i ? c.primary : c.border }} />)}
         </div>
         <Button onClick={() => last ? onDone() : setI(i + 1)}>{last ? 'Get started' : 'Next'}</Button>
         {!last ? <button onClick={onDone} style={{ marginTop: sp.sm, background: 'none', border: 'none', color: c.text.muted, fontSize: 14, cursor: 'pointer' }}>Skip</button> : null}
