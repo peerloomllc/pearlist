@@ -104,6 +104,14 @@ security set-key-partition-list \
 # PATH for xcodebuild invocations so the system rsync is found instead.
 XCODE_PATH=$(printf '%s' "$PATH" | sed 's|/opt/homebrew/bin:||g; s|:/opt/homebrew/bin||g')
 
+# ── Pods ────────────────────────────────────────────────────────────────────
+# Resync Pods to the current Podfile. The release rsync copies the repo over and
+# can leave the CocoaPods sandbox out of sync with Podfile.lock, which fails the
+# "Check Pods Manifest.lock" build phase during archive. UTF-8 env is required:
+# CocoaPods' UnicodeNormalize crashes without it.
+echo "Running pod install..."
+( cd "$REPO_ROOT/ios" && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install ) 2>&1 | tail -3
+
 # ── Archive ─────────────────────────────────────────────────────────────────
 rm -rf "$ARCHIVE_PATH"
 echo "Archiving..."
@@ -116,6 +124,12 @@ PATH="$XCODE_PATH" xcodebuild \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   OTHER_CODE_SIGN_FLAGS="--keychain ~/Library/Keychains/buildkey.keychain" \
   archive | grep -E "^(error:|warning:|note:|.*ARCHIVE)" || true
+# xcodebuild's failure is masked by the grep pipe above, so verify the archive
+# actually exists rather than pressing on to a confusing "archive not found".
+if [ ! -d "$ARCHIVE_PATH" ]; then
+  echo "Error: archive was not created at $ARCHIVE_PATH (see xcodebuild output above)."
+  exit 1
+fi
 echo "Archive complete: $ARCHIVE_PATH"
 
 # ── Export ──────────────────────────────────────────────────────────────────

@@ -10,11 +10,14 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.pearlist",
-      "buildNumber": "0",
+      "buildNumber": "4",
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan space invite QR codes.",
         "NSLocalNetworkUsageDescription": "PearList connects directly to your peers' devices on your Wi-Fi to sync lists peer-to-peer.",
-        "NSBonjourServices": ["_hyperswarm._udp", "_pearlistlan._tcp"]
+        "NSBonjourServices": [
+          "_hyperswarm._udp",
+          "_pearlistlan._tcp"
+        ]
       }
     },
     "android": {
@@ -24,31 +27,72 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0d0d0d"
       },
-      "permissions": ["CAMERA", "POST_NOTIFICATIONS"],
+      "permissions": [
+        "CAMERA",
+        "POST_NOTIFICATIONS"
+      ],
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": false,
-          "data": [{ "scheme": "pear", "host": "pearlist", "pathPrefix": "/join" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "pear",
+              "host": "pearlist",
+              "pathPrefix": "/join"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         },
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "peerloomllc.com", "pathPrefix": "/pearlist/join" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "https",
+              "host": "peerloomllc.com",
+              "pathPrefix": "/pearlist/join"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
     "plugins": [
-      ["expo-router"],
-      ["expo-build-properties", { "android": { "minSdkVersion": 29 } }],
-      ["expo-splash-screen", { "image": "./assets/images/icon.png", "imageWidth": 200, "backgroundColor": "#0d0d0d", "resizeMode": "contain" }],
+      [
+        "expo-router"
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 29
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "imageWidth": 200,
+          "backgroundColor": "#0d0d0d",
+          "resizeMode": "contain"
+        }
+      ],
       "./plugins/with-android-abis",
       "./plugins/with-android-queries",
       "./plugins/with-android-release-signing",
       "./plugins/with-strip-aps"
     ],
-    "assets": ["./assets/bare-universal.bundle", "./assets/bare-ios.bundle"]
+    "assets": [
+      "./assets/bare-universal.bundle",
+      "./assets/bare-ios.bundle"
+    ]
   }
 }
