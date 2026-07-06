@@ -16,6 +16,7 @@ import * as Haptics from 'expo-haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
+import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
 
 // --- local notifications (assignment + join; opt-in, off by default) --------
 // Policy: assignment-only + join, LOCAL (no server/push), OFF by default. The
@@ -50,6 +51,13 @@ async function ensureNotifPermission () {
   const s = await Notifications.getPermissionsAsync()
   if (s.status !== 'granted') await Notifications.requestPermissionsAsync()
 }
+// --- background sync opt-in (Android foreground service; default ON) --------
+const BGSYNC_KEY = 'pearlist:bgsync'
+async function bgSyncEnabled (): Promise<boolean> {
+  if (!bgSyncSupported) return false
+  try { const v = await AsyncStorage.getItem(BGSYNC_KEY); return v === null ? true : v === '1' } catch { return true }
+}
+
 function fireNotify (channelId: string, title: string, body: string, data?: any) {
   if (!_notifEnabled) return
   Notifications.scheduleNotificationAsync({
@@ -187,6 +195,10 @@ export default function Shell () {
     requestLocalNetworkPermission()
     // Load the notifications opt-in so fireNotify gates correctly from boot.
     loadNotifEnabled()
+    // Keep-syncing-in-background (Android, default ON): start the foreground
+    // service so the worklet stays connected while backgrounded. Ensure the
+    // notification permission first (the service needs a visible notification).
+    bgSyncEnabled().then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) })
     ;(async () => {
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
       setHtml(await loadUiHtml())
@@ -271,6 +283,15 @@ export default function Shell () {
         case 'shell:theme:get': {
           const raw = await AsyncStorage.getItem('pearlist:theme')
           return reply(id, { theme: raw === 'light' ? 'light' : 'dark' })
+        }
+        case 'shell:bgsync:get': {
+          return reply(id, { supported: bgSyncSupported, enabled: await bgSyncEnabled() })
+        }
+        case 'shell:bgsync:set': {
+          const on = !!args?.enabled
+          await AsyncStorage.setItem(BGSYNC_KEY, on ? '1' : '0')
+          if (on) { await ensureNotifPermission(); startBackgroundSync() } else stopBackgroundSync()
+          return reply(id, { supported: bgSyncSupported, enabled: on })
         }
         case 'shell:notifications:get': {
           return reply(id, { enabled: _notifEnabled })

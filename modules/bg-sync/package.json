@@ -1,0 +1,8 @@
+{
+  "name": "bg-sync",
+  "version": "1.0.0",
+  "description": "Android foreground service that keeps PearList syncing peer-to-peer in the background",
+  "main": "index.ts",
+  "license": "MIT",
+  "author": "PeerLoom"
+}
