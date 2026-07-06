@@ -427,6 +427,82 @@ function Onboarding ({ onStart, onJoin }) {
   )
 }
 
+// First-run: set a display name (required) + optional photo before create/join,
+// so peers can resolve who's who instead of a bare "Member".
+function NameSetup ({ profile, onDone }) {
+  const fileRef = useRef(null)
+  const [name, setName] = useState(profile?.displayName || '')
+  const [avatar, setAvatar] = useState(profile?.avatar || null)
+  const [busy, setBusy] = useState(false)
+
+  async function onPickFile (e) {
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file) return
+    const animated = file.type === 'image/gif' || file.type === 'image/webp'
+    try {
+      if (animated) {
+        if (file.size > AVATAR_MAX_BYTES) { alert(`That image is too large. Keep it under ${Math.round(AVATAR_MAX_BYTES / 1024 / 1024)} MB.`); return }
+        setAvatar(await readFileDataUrl(file))
+      } else {
+        setAvatar(await compressToAvatar(await readFileDataUrl(file)))
+      }
+    } catch { alert('Could not read that image') }
+  }
+  async function cont () {
+    const n = name.trim(); if (!n) return
+    setBusy(true)
+    try { await call('profile:set', { displayName: n, avatar: avatar || undefined }); onDone() }
+    catch (e) { alert('Could not save: ' + e.message); setBusy(false) }
+  }
+  const hasAvatar = !!avatarSrc(avatar)
+  return (
+    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: sp.xl, gap: sp.base, maxWidth: 460, margin: '0 auto' }}>
+      <div style={{ textAlign: 'center', marginBottom: sp.md }}>
+        <div style={{ fontSize: 40, marginBottom: sp.sm }}>🍐</div>
+        <h1 style={{ fontSize: 26, fontWeight: 400, margin: 0, color: c.text.primary }}>Welcome to PearList</h1>
+        <p style={{ color: c.text.secondary, fontSize: 15, fontWeight: 300, marginTop: sp.sm }}>Set your name so the people you share with know who's who.</p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.sm }}>
+        <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, borderRadius: '50%' }}>
+          <Avatar name={name} avatar={avatar} size={96} />
+        </button>
+        <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', color: c.accent, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add a photo (optional)'}</button>
+        <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
+      </div>
+      <input value={name} maxLength={64} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') cont() }} placeholder='Your name'
+        style={{ padding: '14px 16px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none', textAlign: 'center' }} />
+      <Button variant='primary' disabled={busy || !name.trim()} style={{ opacity: busy || !name.trim() ? 0.6 : 1 }} onClick={cont}>Continue</Button>
+    </div>
+  )
+}
+
+// A brief once-only tour shown the first time the user reaches the home screen.
+const TOUR_STEPS = [
+  { emoji: '📝', title: 'Lists live in a space', body: "Everything here is shared with the people in this space. Add lists like Groceries or Chores with the field at the bottom." },
+  { emoji: '✅', title: 'Tap a list to fill it', body: 'Open a list to add items, check them off, set quantities, and assign an item to someone.' },
+  { emoji: '👋', title: 'Invite your people', body: 'Tap the share icon to invite others. Everyone syncs peer-to-peer - no account, no server.' },
+]
+function GuidedTour ({ open, onDone }) {
+  const [i, setI] = useState(0)
+  if (!open) return null
+  const step = TOUR_STEPS[i]
+  const last = i === TOUR_STEPS.length - 1
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 65, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
+      <div style={{ background: c.surface.card, borderRadius: r.xl, padding: sp.xl, maxWidth: 360, width: '100%', textAlign: 'center' }}>
+        <div style={{ fontSize: 40 }}>{step.emoji}</div>
+        <h2 style={{ fontSize: 20, fontWeight: 400, margin: `${sp.sm}px 0`, color: c.text.primary }}>{step.title}</h2>
+        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.lg}px`, minHeight: 63 }}>{step.body}</p>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginBottom: sp.base }}>
+          {TOUR_STEPS.map((_, k) => <span key={k} style={{ width: 7, height: 7, borderRadius: '50%', background: k === i ? c.primary : c.border }} />)}
+        </div>
+        <Button onClick={() => last ? onDone() : setI(i + 1)}>{last ? 'Get started' : 'Next'}</Button>
+        {!last ? <button onClick={onDone} style={{ marginTop: sp.sm, background: 'none', border: 'none', color: c.text.muted, fontSize: 14, cursor: 'pointer' }}>Skip</button> : null}
+      </div>
+    </div>
+  )
+}
+
 // Suite icons via Phosphor; thin wrappers keep the existing call sites.
 function ShareIcon ({ size = 20 }) {
   return <ShareNetwork size={size} weight='regular' />
@@ -476,6 +552,7 @@ export default function App () {
   const [selfPubkey, setSelfPubkey] = useState(null)
   const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
   const [navRequest, setNavRequest] = useState(null) // { groupId, listId } from a notification tap
+  const [showTour, setShowTour] = useState(false)     // brief once-only guided tour on first home
   const prevMembersRef = useRef({})              // groupId -> Set(pubkey) for join detection
   const [listPicker, setListPicker] = useState(null) // { listId, current } for assigning a whole list
   const [deleteTarget, setDeleteTarget] = useState(null) // space {groupId,name} pending delete confirm
@@ -584,6 +661,13 @@ export default function App () {
       ? `You were assigned the list "${d?.text || 'a list'}"`
       : `You were assigned "${d?.text || 'an item'}"`
   )), [])
+
+  // Show the brief guided tour once, the first time the user reaches home.
+  useEffect(() => {
+    if (phase !== 'home') return
+    try { if (!localStorage.getItem('pearlist:tourSeen')) setShowTour(true) } catch {}
+  }, [phase])
+  function dismissTour () { try { localStorage.setItem('pearlist:tourSeen', '1') } catch {}; setShowTour(false) }
 
   // Notification tap -> open the related space (and list, if any). Requested by
   // the shell (notify:open); applied once we are home and that space has loaded
@@ -774,6 +858,10 @@ export default function App () {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spinner size={28} /></div>
   }
   if (phase === 'onboarding') {
+    // First run: require a display name (+ optional photo) before create/join.
+    if (!profile?.displayName) {
+      return <NameSetup profile={profile} onDone={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
+    }
     return (
       <>
         <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} />
@@ -844,6 +932,7 @@ export default function App () {
       <AboutView open={view === 'about'} onBack={() => setView(null)} onWallet={() => setSheet('wallet')} />
       <LightningWalletSheet open={sheet === 'wallet'} onClose={() => setSheet(null)} />
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); setView('about') }} />
+      <GuidedTour open={showTour} onDone={dismissTour} />
       <ItemSheet
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
         onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, openListId); setSheet(null) }}
