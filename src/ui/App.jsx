@@ -147,7 +147,7 @@ function BottomSheet ({ open, onClose, title, children }) {
 
 function Toggle ({ on: isOn, onChange }) {
   return (
-    <button onClick={() => onChange(!isOn)} aria-label='toggle' style={{ width: 44, height: 26, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
+    <button onClick={() => onChange(!isOn)} aria-label='toggle' style={{ width: 44, height: 26, flexShrink: 0, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
       <span style={{ position: 'absolute', top: 3, left: isOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.35)', transition: 'left 160ms' }} />
     </button>
   )
@@ -1238,18 +1238,18 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
           <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Dark mode</span>
           <Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
-          <span style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
+          <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
             <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Notifications</span>
-            <span style={{ color: c.text.muted, fontSize: 12 }}>When someone assigns you an item or joins</span>
+            <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>When someone assigns you an item or joins</span>
           </span>
           <Toggle on={notif} onChange={toggleNotif} />
         </div>
         {bgSyncSupported ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
-            <span style={{ display: 'flex', flexDirection: 'column', paddingRight: sp.md }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
+            <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
               <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Keep syncing in background</span>
-              <span style={{ color: c.text.muted, fontSize: 12 }}>Stays connected so updates and alerts arrive when the app is closed. Shows a permanent notification.</span>
+              <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Stays connected so updates and alerts arrive when the app is closed. Shows a permanent notification.</span>
             </span>
             <Toggle on={bgSync} onChange={toggleBgSync} />
           </div>
