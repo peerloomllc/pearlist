@@ -1,6 +1,6 @@
 {
   "name": "pearlist",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "main": "index.js",
   "description": "Shared household lists (groceries, to-dos, chores) over P2P. Part of the PeerLoom suite, built on @peerloom/core.",
