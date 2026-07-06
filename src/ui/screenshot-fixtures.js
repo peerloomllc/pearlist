@@ -22,9 +22,9 @@ const FROZEN_MS = new Date('2026-07-06T09:41:00').getTime()
 
 // Stable member identities (hex pubkeys). Items/lists reference these so the
 // assignee avatars resolve against member:getAll.
-const SELF = '00'.repeat(32) // this device: Maya
-const SAM = '5a'.repeat(32)
-const ALEX = 'a1'.repeat(32)
+const SELF = '00'.repeat(32) // this device: Satoshi
+const HAL = '5a'.repeat(32)
+const LUKE = 'a1'.repeat(32)
 const JORDAN = 'c3'.repeat(32)
 const RILEY = 'd4'.repeat(32)
 
@@ -33,7 +33,7 @@ const RILEY = 'd4'.repeat(32)
 const INVITE_FAMILY = 'pl1KQZ4nR7xW2mB9tD6vY0aH3cJ8fL5gN1sU4pE7qO2iX6yA9zC3bV0dM8kT5wR2nG7hP4'
 const INVITE_PARTY = 'pl1TmP9wKQ2xR7nB4vY6aH0cJ3fL8gN5sU1pE9qO7iX2yA4zC6bV3dM0kT8wR5nG2hP1oD'
 
-const PROFILE = { displayName: 'Maya', avatar: null, updatedAt: FROZEN_MS, v: 1 }
+const PROFILE = { displayName: 'Satoshi', avatar: null, updatedAt: FROZEN_MS, v: 1 }
 
 // Spaces in insertion order; the shell boots into the first one (Family).
 const SPACES = [
@@ -43,12 +43,12 @@ const SPACES = [
 
 const MEMBERS = {
   fam: [
-    { pubkey: SELF, displayName: 'Maya', avatar: null },
-    { pubkey: SAM, displayName: 'Sam', avatar: null },
-    { pubkey: ALEX, displayName: 'Alex', avatar: null },
+    { pubkey: SELF, displayName: 'Satoshi', avatar: null },
+    { pubkey: HAL, displayName: 'Hal', avatar: null },
+    { pubkey: LUKE, displayName: 'Luke', avatar: null },
   ],
   party: [
-    { pubkey: SELF, displayName: 'Maya', avatar: null },
+    { pubkey: SELF, displayName: 'Satoshi', avatar: null },
     { pubkey: JORDAN, displayName: 'Jordan', avatar: null },
     { pubkey: RILEY, displayName: 'Riley', avatar: null },
   ],
@@ -57,7 +57,7 @@ const MEMBERS = {
 const LISTS = {
   fam: [
     { id: 'groceries', name: 'Groceries', assignee: null },
-    { id: 'chores', name: 'Chores', assignee: ALEX },
+    { id: 'chores', name: 'Chores', assignee: LUKE },
     { id: 'trip', name: 'Weekend Trip', assignee: null },
   ],
   party: [
@@ -71,15 +71,15 @@ const ITEMS = {
     { id: 'g1', listId: 'groceries', text: 'Oat milk', qty: 2, checked: false, assignee: null },
     { id: 'g2', listId: 'groceries', text: 'Sourdough bread', qty: 1, checked: false, assignee: null },
     { id: 'g3', listId: 'groceries', text: 'Coffee beans', qty: 1, checked: true, assignee: null },
-    { id: 'g4', listId: 'groceries', text: 'Spinach', qty: 1, checked: false, assignee: SAM },
+    { id: 'g4', listId: 'groceries', text: 'Spinach', qty: 1, checked: false, assignee: HAL },
     { id: 'g5', listId: 'groceries', text: 'Bananas', qty: 6, checked: false, assignee: null },
     { id: 'g6', listId: 'groceries', text: 'Olive oil', qty: 1, checked: true, assignee: null },
-    { id: 'g7', listId: 'groceries', text: 'Cherry tomatoes', qty: 1, checked: false, assignee: ALEX, note: 'for the salad' },
+    { id: 'g7', listId: 'groceries', text: 'Cherry tomatoes', qty: 1, checked: false, assignee: LUKE, note: 'for the salad' },
   ],
   chores: [
-    { id: 'c1', listId: 'chores', text: 'Water the plants', qty: 1, checked: false, assignee: ALEX },
+    { id: 'c1', listId: 'chores', text: 'Water the plants', qty: 1, checked: false, assignee: LUKE },
     { id: 'c2', listId: 'chores', text: 'Take out the recycling', qty: 1, checked: true, assignee: null },
-    { id: 'c3', listId: 'chores', text: 'Vacuum the living room', qty: 1, checked: false, assignee: SAM },
+    { id: 'c3', listId: 'chores', text: 'Vacuum the living room', qty: 1, checked: false, assignee: HAL },
     { id: 'c4', listId: 'chores', text: 'Load the dishwasher', qty: 1, checked: true, assignee: null },
   ],
   trip: [
