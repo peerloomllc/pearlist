@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Android Play Store screenshot capture — runs on Linux.
 # Boots each configured AVD, installs the debug APK, loops scenes ×
-# appearances launching MainActivity with intent extras, and captures
-# PNGs via adb exec-out screencap.
+# appearances cold-launching via a pear://pearlist/screenshot/<N> deep link
+# (the shell reads it and injects the scene), and captures PNGs via
+# adb exec-out screencap. Needs the screenshot-fixtures harness in the UI.
 #
 # Usage:
 #   ./scripts/android-screenshots.sh              # full rebuild
@@ -22,7 +23,7 @@ MAIN_ACTIVITY="${ANDROID_MAIN_ACTIVITY:-$APP_ID/com.pearlist.MainActivity}"
 APK_PATH="${APK_PATH:-$REPO_ROOT/android/app/build/outputs/apk/debug/app-debug.apk}"
 
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/metadata/android/screenshots}"
-SCENES=(1 2 3 4 5 6 7 8 9 10)
+SCENES=(1 2 3 4 5 6)
 APPEARANCES=(light)
 
 # AVDs from ANDROID_SCREENSHOT_AVDS (space-separated, set in scripts/app.conf)
@@ -147,8 +148,11 @@ for avd in "${AVDS[@]}"; do
         attempt=$((attempt+1))
         "$ADB" -s "$SERIAL" shell am force-stop "$APP_ID" >/dev/null
         sleep 1
-        "$ADB" -s "$SERIAL" shell am start -n "$MAIN_ACTIVITY" \
-          --ei screenshotScene "$scene" --ez screenshotDark "$DARK_BOOL" >/dev/null
+        # Cold-launch via the screenshot deep link (VIEW intent). The host-agnostic
+        # pear:// scheme filter routes it to MainActivity; the shell reads it from
+        # getInitialURL and injects the scene before the UI bundle runs.
+        "$ADB" -s "$SERIAL" shell am start -a android.intent.action.VIEW \
+          -d "pear://pearlist/screenshot/$scene" >/dev/null
         sleep 20
         # Verify our activity is actually in the foreground. If not, retry
         # (launcher-home instead of app indicates a crash or race).

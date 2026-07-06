@@ -146,17 +146,28 @@ async function startWorklet () {
 }
 export async function ensureBackendStarted () { await startWorklet() }
 
+// Screenshot capture: the store-screenshot scripts cold-launch the app with a
+// pear://pearlist/screenshot/<N> deep link. Parse the scene number so the shell
+// can inject it into the WebView before the UI bundle runs (see buildHtml). No
+// effect in normal use - only the capture scripts ever send that URL.
+function parseScreenshotScene (url: string | null): number | null {
+  if (!url) return null
+  const m = url.match(/^pear:\/\/pearlist\/screenshot\/(\d+)/i) || url.match(/[?&]__screenshotScene=(\d+)/)
+  return m ? parseInt(m[1], 10) : null
+}
+
 // --- UI html ---------------------------------------------------------------
-function buildHtml (jsBundle: string) {
+function buildHtml (jsBundle: string, screenshotScene?: number | null) {
   const platform = JSON.stringify(Platform.OS)
   const debug = JSON.stringify(__DEV__)
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" /><style>html,body,#root{height:100%;margin:0;padding:0;background:#0d0d0d}body{-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}</style><script>window.__pearPlatform=${platform};window.__pearDebug=${debug};</script></head><body><div id="root"></div><script>${jsBundle}</script></body></html>`
+  const shot = screenshotScene != null ? `window.__PEARLIST_SCREENSHOT_SCENE=${JSON.stringify(screenshotScene)};` : ''
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" /><style>html,body,#root{height:100%;margin:0;padding:0;background:#0d0d0d}body{-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}</style><script>window.__pearPlatform=${platform};window.__pearDebug=${debug};${shot}</script></head><body><div id="root"></div><script>${jsBundle}</script></body></html>`
 }
-async function loadUiHtml () {
+async function loadUiHtml (screenshotScene?: number | null) {
   const asset = Asset.fromModule(require('../assets/app-ui.bundle'))
   await asset.downloadAsync()
   const js = await FileSystem.readAsStringAsync(asset.localUri!, { encoding: FileSystem.EncodingType.UTF8 })
-  return buildHtml(js)
+  return buildHtml(js, screenshotScene)
 }
 
 // The invite payload rides in the URL fragment (#) or, as a fallback, a query
@@ -190,19 +201,31 @@ export default function Shell () {
   useEffect(() => { if (webViewLoaded.current) injectInsets() }, [insets.top, insets.bottom, insets.left, insets.right])
 
   useEffect(() => {
-    // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
-    // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
-    requestLocalNetworkPermission()
-    // Load the notifications opt-in so fireNotify gates correctly from boot.
-    loadNotifEnabled()
-    // Keep-syncing-in-background (Android, default ON): start the foreground
-    // service so the worklet stays connected while backgrounded. Ensure the
-    // notification permission first (the service needs a visible notification).
-    bgSyncEnabled().then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) })
+    let cancelled = false
     ;(async () => {
+      // Screenshot capture: if launched via pear://pearlist/screenshot/<N>, the
+      // UI runs from fixtures (see src/ui/screenshot-fixtures.js). Skip the
+      // worklet and every permission prompt, which would otherwise cover the
+      // captured frame (iOS Local Network, notifications, etc.).
+      const initialUrl = await Linking.getInitialURL().catch(() => null)
+      const scene = parseScreenshotScene(initialUrl)
+      if (scene != null) {
+        if (!cancelled) setHtml(await loadUiHtml(scene))
+        return
+      }
+      // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
+      // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
+      requestLocalNetworkPermission()
+      // Load the notifications opt-in so fireNotify gates correctly from boot.
+      loadNotifEnabled()
+      // Keep-syncing-in-background (Android, default ON): start the foreground
+      // service so the worklet stays connected while backgrounded. Ensure the
+      // notification permission first (the service needs a visible notification).
+      bgSyncEnabled().then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) })
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
-      setHtml(await loadUiHtml())
+      if (!cancelled) setHtml(await loadUiHtml())
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
+    return () => { cancelled = true }
   }, [])
 
   // Android hardware back / gesture: if the WebView reported an open overlay

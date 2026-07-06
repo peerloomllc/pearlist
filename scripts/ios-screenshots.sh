@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # iOS App Store screenshot capture — runs on Mac Mini.
 # Builds PearList for the iOS Simulator, then loops scenes × appearances
-# on each configured device, launching with -screenshotScene N and
-# capturing PNGs via xcrun simctl io screenshot.
+# on each configured device, cold-launching via a pear://pearlist/screenshot/<N>
+# deep link (simctl openurl; the shell reads it and injects the scene) and
+# capturing PNGs via xcrun simctl io screenshot. Needs the UI fixtures harness.
 #
 # Usage (on Mac Mini):
 #   cd ~/peerloomllc/pearlist && SKIP_BUILD=1 ./scripts/ios-screenshots.sh
@@ -24,7 +25,7 @@ XCODE_WORKSPACE="${XCODE_WORKSPACE:-ios/${APP_NAME}.xcworkspace}"
 XCODE_SCHEME="${XCODE_SCHEME:-$APP_NAME}"
 
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/metadata/ios/screenshots}"
-SCENES=(1 2 3 4 5 6 7 8 9 10)
+SCENES=(1 2 3 4 5 6)
 APPEARANCES=(light)
 
 # Devices from IOS_SCREENSHOT_DEVICES (space-separated "DeviceName|UDID"
@@ -78,7 +79,9 @@ for dev in "${DEVICES[@]}"; do
     for scene in "${SCENES[@]}"; do
       echo "    → $appearance scene $scene"
       xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-      xcrun simctl launch "$UDID" "$BUNDLE_ID" -screenshotScene "$scene" -screenshotDark "$DARK" >/dev/null
+      # Cold-launch via the screenshot deep link; the shell reads it from
+      # getInitialURL and injects the scene before the UI bundle runs.
+      xcrun simctl openurl "$UDID" "pear://pearlist/screenshot/$scene" >/dev/null
       sleep 5
       xcrun simctl io "$UDID" screenshot "$OUT_DIR/$NAME/$appearance/scene-$scene.png" >/dev/null 2>&1
     done

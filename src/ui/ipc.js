@@ -4,7 +4,14 @@
 // In a plain browser (design/dev preview) we fall back to an in-memory mock that
 // mirrors the worklet methods, so the screens are fully clickable without a phone.
 
+import { SCREENSHOT_SCENE, screenshotCall, installScreenshotEnv } from './screenshot-fixtures.js'
+
 const inShell = typeof window !== 'undefined' && !!window.ReactNativeWebView
+
+// Screenshot mode: the shell injected a scene number, so drive the UI from
+// deterministic fixtures instead of the worklet (or the browser mock). Prepare
+// the capture environment (dark theme, no tour, frozen clock) once, at import.
+if (SCREENSHOT_SCENE != null) installScreenshotEnv()
 
 // --- real bridge ----------------------------------------------------------
 const pending = new Map()
@@ -194,7 +201,7 @@ async function mockCall (method, args) {
   return fn(args || {})
 }
 
-export const call = inShell ? realCall : mockCall
+export const call = SCREENSHOT_SCENE != null ? screenshotCall : (inShell ? realCall : mockCall)
 export const isMock = !inShell
 
 if (typeof window !== 'undefined') window.pear = { call, on }
