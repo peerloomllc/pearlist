@@ -1,0 +1,40 @@
+repository: https://github.com/peerloomllc/pearlist
+
+name: PearList
+summary: Shared household lists over peer-to-peer - groceries, to-dos and chores, no account
+description: |
+  PearList keeps a household's shared lists in sync across everyone's phones,
+  peer to peer, with no server, no account and no third party in the middle.
+
+  One household group holds many lists. Any member can add, check off, rename,
+  assign and delete items, and every change syncs directly between your devices.
+  The assignee field doubles the grocery list as a chore board.
+
+  Features:
+  - Multiple shared lists per household (groceries, to-dos, chores)
+  - Add, check, rename, assign and delete items, synced across all members
+  - Assign items to a person to use any list as a chore board
+  - Join a household by scanning a QR code or tapping an invite link
+  - Fully offline-capable - your lists stay on your devices
+  - No account, no sign-up, no server
+
+tags:
+  - lists
+  - productivity
+  - privacy
+  - p2p
+  - nostr
+
+license: MIT
+website: https://peerloomllc.com/pearlist/
+
+images:
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-1.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-2.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-3.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-4.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-5.png
+  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-6.png
+
+metadata_sources:
+  - github

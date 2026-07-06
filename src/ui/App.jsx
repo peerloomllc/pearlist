@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 import { call, on, isMock, haptic } from './ipc.js'
+import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree } from '@phosphor-icons/react'
 
@@ -571,6 +572,7 @@ export default function App () {
   const composer = useRef(null)
   const listComposer = useRef(null)
   const navRef = useRef({}) // latest overlay state, for the shell's back handler
+  const shotApplied = useRef(false) // screenshot mode: route applied once
 
   const gid = activeSpaceId
   const activeSpace = spaces.find((s) => s.groupId === activeSpaceId) || null
@@ -623,6 +625,23 @@ export default function App () {
       else setPhase('onboarding')
     })().catch((e) => { console.error(e); setPhase('onboarding') })
   }, [loadSpaces])
+
+  // Screenshot mode: once home and the active space's lists have loaded, route
+  // to the scene's target screen (open a list by name, or open a sheet). Applied
+  // once. No effect in production (SCREENSHOT_SCENE is null unless the shell
+  // injected a scene from a pear://pearlist/screenshot/<N> launch deep link).
+  useEffect(() => {
+    if (SCREENSHOT_SCENE == null || shotApplied.current || phase !== 'home') return
+    const route = SCREENSHOT_ROUTE || {}
+    if (route.openList) {
+      const l = lists.find((x) => x.name === route.openList)
+      if (!l) return // lists not loaded yet; re-run when they are
+      setOpenListId(l.id)
+    }
+    if (route.sheet) setSheet(route.sheet)
+    if (route.view) setView(route.view)
+    shotApplied.current = true
+  }, [phase, lists])
 
   // Global haptics: one delegated listener buzzes on every tap of any button or
   // tappable (and any future one), so controls need no per-onClick wiring. Click
