@@ -865,9 +865,14 @@ export default function App () {
     return () => { live = false; clearTimeout(t) }
   }, [draft, openListId])
   async function toggleItem (item) {
-    setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: !item.checked } : i)) // optimistic
-    await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: !item.checked })
-    loadItems(gid, openListId)
+    const nowChecked = !item.checked
+    setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: nowChecked } : i)) // optimistic
+    await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: nowChecked })
+    await loadItems(gid, openListId)
+    // Checking this item just completed the list (every item now checked) ->
+    // offer to delete it. `items` is the pre-toggle state, so this fires only on
+    // the transition, when the LAST open item is checked.
+    if (nowChecked && items.length > 0 && items.every(i => i.id === item.id || i.checked)) setSheet('listComplete')
   }
   // Swipe-delete: remove the item, then offer a 3s undo. Undo re-creates it with
   // its fields (a new row, since the delete is a no-resurrection tombstone).
@@ -1000,6 +1005,7 @@ export default function App () {
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
+      <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
@@ -1297,6 +1303,18 @@ function DeleteSpaceSheet ({ open, onClose, spaceName, onConfirm }) {
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>This deletes the space and all its lists for everyone in it. This cannot be undone.</p>
       <Button variant='danger' onClick={onConfirm}>Delete for everyone</Button>
       <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onClose}>Cancel</Button>
+    </BottomSheet>
+  )
+}
+
+// Offered when checking the last open item completes a list: delete it, or keep
+// it. Deleting removes the list for everyone in the space (a shared tombstone).
+function ListCompleteSheet ({ open, listName, onDelete, onKeep, onClose }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title='All done 🎉'>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>Every item on {listName ? `"${listName}"` : 'this list'} is checked off. Delete the list? This removes it for everyone in the space.</p>
+      <Button variant='danger' onClick={onDelete}>Delete list</Button>
+      <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onKeep}>Keep it</Button>
     </BottomSheet>
   )
 }
