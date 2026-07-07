@@ -871,8 +871,10 @@ export default function App () {
     await loadItems(gid, openListId)
     // Checking this item just completed the list (every item now checked) ->
     // offer to delete it. `items` is the pre-toggle state, so this fires only on
-    // the transition, when the LAST open item is checked.
-    if (nowChecked && items.length > 0 && items.every(i => i.id === item.id || i.checked)) setSheet('listComplete')
+    // the transition, when the LAST open item is checked. Skipped on chore lists:
+    // those are a parent/child setup where a child finishing chores should not be
+    // prompted to delete the (typically recurring, parent-owned) list.
+    if (nowChecked && openList?.kind !== 'chore' && items.length > 0 && items.every(i => i.id === item.id || i.checked)) setSheet('listComplete')
   }
   // Swipe-delete: remove the item, then offer a 3s undo. Undo re-creates it with
   // its fields (a new row, since the delete is a no-resurrection tombstone).
