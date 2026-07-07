@@ -135,21 +135,21 @@ test('notify:joined fires for a new member row from a peer', async () => {
   assert.ok(events.some(([e, d]) => e === 'notify:joined' && d.name === 'Sam'))
 })
 
-// --- completion notifications (the return leg; overseer = list.assignee) -----
+// --- completion notifications (the return leg; recipient = list creator) -----
 
-// A chore list I oversee (assignee = me), keyed by listId.
+// A chore list I created (createdBy = me), assigned to a peer (like a kid).
 function choreList (listId, extra = {}) {
-  return signValue({ pubkey: PUB, updatedAt: Date.now() - 2000, id: listId, name: 'Chores', kind: 'chore', assignee: PUB, deleted: false, ...extra }, KP.secretKey)
+  return signValue({ pubkey: PUB, updatedAt: Date.now() - 2000, id: listId, name: 'Chores', kind: 'chore', createdBy: PUB, assignee: OTHERPUB, deleted: false, ...extra }, KP.secretKey)
 }
 // A peer's item at a checked state (defaults to a fresh check).
 function peerItem (listId, id, checked, ts = Date.now()) {
   return signValue({ pubkey: OTHERPUB, updatedAt: ts, id, text: id, checked, deleted: false }, OTHER.secretKey)
 }
 
-test('notify:completed (each) fires when a peer checks an item on a chore list I oversee', async () => {
+test('notify:completed (each) fires when a peer checks an item on a chore list I created', async () => {
   const initial = { [listKey('L')]: choreList('L', { notifyOnComplete: 'each' }), [itemKey('L', 'I')]: peerItem('L', 'I', false, Date.now() - 500) }
   const events = await apply({ type: 'put', key: itemKey('L', 'I'), value: peerItem('L', 'I', true) }, { initial })
-  assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === false && d.text === 'I' && d.by === OTHERPUB && d.listId === 'L' && d.groupId === 'g'))
+  assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === false && d.item === 'I' && d.listName === 'Chores' && d.kind === 'chore' && d.by === OTHERPUB && d.listId === 'L' && d.groupId === 'g'))
 })
 
 test('notify:completed (done) fires only when the LAST open item is checked', async () => {
@@ -160,7 +160,7 @@ test('notify:completed (done) fires only when the LAST open item is checked', as
     [itemKey('L2', 'B')]: peerItem('L2', 'B', false, Date.now() - 700),
   }
   const events = await apply({ type: 'put', key: itemKey('L2', 'B'), value: peerItem('L2', 'B', true) }, { initial })
-  assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === true && d.text === 'Chores'))
+  assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === true && d.listName === 'Chores' && d.kind === 'chore'))
 })
 
 test('no notify:completed (done) while other items remain open', async () => {
@@ -179,15 +179,16 @@ test('chore list with no explicit mode defaults to done-mode completion notify',
   assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === true))
 })
 
-test('no notify:completed when I do not oversee the list (assignee is someone else)', async () => {
-  const list = signValue({ pubkey: OTHERPUB, updatedAt: Date.now() - 2000, name: 'Chores', kind: 'chore', assignee: OTHERPUB, notifyOnComplete: 'each' }, OTHER.secretKey)
+test('no notify:completed when I did not create the list (I am only its assignee)', async () => {
+  // Created by a peer, assigned to me: I am the "kid", not the recipient.
+  const list = signValue({ pubkey: OTHERPUB, updatedAt: Date.now() - 2000, name: 'Chores', kind: 'chore', createdBy: OTHERPUB, assignee: PUB, notifyOnComplete: 'each' }, OTHER.secretKey)
   const initial = { [listKey('L5')]: list, [itemKey('L5', 'I')]: peerItem('L5', 'I', false, Date.now() - 500) }
   const events = await apply({ type: 'put', key: itemKey('L5', 'I'), value: peerItem('L5', 'I', true) }, { initial })
   assert.ok(!events.some(([e]) => e === 'notify:completed'))
 })
 
 test('non-chore list fires no completion notify by default', async () => {
-  const list = signValue({ pubkey: PUB, updatedAt: Date.now() - 2000, name: 'Groceries', kind: 'grocery', assignee: PUB }, KP.secretKey)
+  const list = signValue({ pubkey: PUB, updatedAt: Date.now() - 2000, name: 'Groceries', kind: 'grocery', createdBy: PUB }, KP.secretKey)
   const initial = { [listKey('L6')]: list, [itemKey('L6', 'I')]: peerItem('L6', 'I', false, Date.now() - 500) }
   const events = await apply({ type: 'put', key: itemKey('L6', 'I'), value: peerItem('L6', 'I', true) }, { initial })
   assert.ok(!events.some(([e]) => e === 'notify:completed'))

@@ -710,11 +710,11 @@ export default function App () {
       ? `You were assigned the list "${d?.text || 'a list'}"`
       : `You were assigned "${d?.text || 'an item'}"`
   )), [])
-  // In-app banner when someone completes an item on a list I oversee.
+  // In-app banner when someone completes an item on a list I created.
   useEffect(() => on('notify:completed', (d) => setBanner(
     d?.allDone
-      ? `"${d?.text || 'a list'}" is all done`
-      : `"${d?.text || 'an item'}" was completed`
+      ? `${d?.kind === 'chore' ? 'Chore list' : 'List'} "${d?.listName || 'a list'}" is all done`
+      : `"${d?.item || 'an item'}" was completed in "${d?.listName || 'a list'}"`
   )), [])
 
   // Show the brief guided tour once, the first time the user reaches home.
@@ -999,7 +999,7 @@ export default function App () {
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
-      <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} hasOverseer={!!openList?.assignee} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
+      <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
@@ -1211,12 +1211,12 @@ function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory,
   )
 }
 
-// Pick a chore list's completion-notify mode. The overseer (list.assignee) is
-// the notify target, so we hint when none is set (the alerts go nowhere).
-function NotifySheet ({ open, current, hasOverseer, onClose, onSave }) {
+// Pick a chore list's completion-notify mode. The list's creator/owner is the
+// notify target (not the assignee), so we say so.
+function NotifySheet ({ open, current, onClose, onSave }) {
   return (
     <BottomSheet open={open} onClose={onClose} title='Notify when completed'>
-      {!hasOverseer ? <p style={{ color: c.text.muted, fontSize: 13, textAlign: 'center', margin: `0 0 ${sp.sm}px` }}>Assign an overseer to the list to receive these.</p> : null}
+      <p style={{ color: c.text.muted, fontSize: 13, textAlign: 'center', margin: `0 0 ${sp.sm}px` }}>Sent to whoever created this list.</p>
       {NOTIFY_MODES.map((m) => {
         const on = m.key === current
         return (

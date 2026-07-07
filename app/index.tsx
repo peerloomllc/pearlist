@@ -156,10 +156,13 @@ async function startWorklet () {
         }
         else if (msg.event === 'notify:completed') {
           const allDone = !!msg.data?.allDone
-          const text = msg.data?.text ?? (allDone ? 'a list' : 'an item')
+          const listLabel = msg.data?.kind === 'chore' ? 'Chore list' : 'List'
+          const listName = msg.data?.listName ?? 'a list'
           fireNotify('completion',
             allDone ? 'All done' : 'Item completed',
-            allDone ? `"${text}" is all done` : `"${text}" was completed`,
+            allDone
+              ? `${listLabel} "${listName}" is all done`
+              : `"${msg.data?.item ?? 'an item'}" was completed in "${listName}"`,
             { groupId: msg.data?.groupId, listId: msg.data?.listId }) // tap -> open the list
           emitEvent('notify:completed', msg.data) // WebView shows an in-app banner too
         }

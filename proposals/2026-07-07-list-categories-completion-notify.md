@@ -1,12 +1,19 @@
 # 2026-07-07 - List categories + completion notifications
 
 **Status:** APPROVED 2026-07-07 (Tim). Backlog item #5 (member-mapped assignees +
-notify-the-assignee), completion half. Decisions locked: completion notifications
-target the list overseer (`list.assignee`) only; granularity is a per-list
-user choice (`off | each | done`). **P1 (categories, presentation-only) and P2
-(completion notifications) both built on `feature/list-categories`.** Note:
-notifications were also flipped to ON by default in the same branch (reverses
-the 2026-06-30 opt-in policy; see DECISIONS 2026-07-07).
+notify-the-assignee), completion half. Decisions: granularity is a per-list user
+choice (`off | each | done`). **P1 (categories) and P2 (completion notifications)
+both built on `feature/list-categories`.** Notifications also flipped to ON by
+default in the same branch (reverses the 2026-06-30 opt-in policy; see DECISIONS
+2026-07-07).
+
+**AMENDED 2026-07-07 (Tim, on-device review):** the completion-notify recipient
+is the list **creator/owner** (`list.createdBy`), NOT the overseer/assignee that
+the body below describes. Rationale: the parent creates a chore list and assigns
+it to the kid (who gets `notify:assigned` = "this list is yours"); the parent, as
+creator, is who should hear it got done. Every "overseer / `list.assignee`"
+reference below as the notify target is superseded by `list.createdBy`. Also:
+all-done copy reads "Chore list \"X\" is all done" (kind-aware).
 
 **Goal**
 
@@ -80,8 +87,8 @@ within `NOTIFY_FRESH_MS`, not our own change, not a delete):
 - The op is an `item:` row that went `checked: false -> true`
   (`value.checked && !(existing && existing.checked)`).
 - Read the parent list once: `const list = (await view.get('list:' + listId))?.value`.
-- If `list.kind === 'chore'`, `list.assignee === selfKey` (I am the overseer),
-  and `value.pubkey !== selfKey` (someone else did it):
+- If `list.createdBy === selfKey` (I created the list) and `value.pubkey !==
+  selfKey` (someone else did it), per the list's effective notify mode:
   - `notifyOnComplete === 'each'` -> emit `notify:completed`
     `{ text, by: value.pubkey, groupId, listId }`.
   - `notifyOnComplete === 'done'` -> also read the item range for this list and
@@ -93,8 +100,10 @@ forget with a `.catch`) in `applyListOp`; it currently runs un-awaited. The extr
 reads are cheap `view.get` / range scans on the already-linearized Hyperbee view.
 
 Field mapping (no new identity concepts, consistent with the egalitarian model):
-- `item.assignee` = the doer (child).
-- `list.assignee` = the overseer (parent) and the completion-notify target.
+- `list.createdBy` = the creator/owner (parent) and the completion-notify target.
+- `list.assignee` = who the list belongs to (child); drives `notify:assigned`, so
+  the child learns the list is theirs. NOT the completion target (see AMENDED).
+- `item.assignee` = the doer of a single item (optional, unchanged).
 
 ### UI
 

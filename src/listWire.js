@@ -151,22 +151,26 @@ async function maybeNotify (ctx, key, value, existing) {
     }
   }
   // Completion (the return leg): someone else just checked an item on a list I
-  // oversee (I am list.assignee). Fires on my own device when I apply their
-  // check, per the list's notify mode. `done` scans the list and only fires once
-  // the last open item is checked; the just-checked item is already in the view.
+  // created. The recipient is the list's CREATOR/owner (list.createdBy), NOT the
+  // assignee: the assignee is who the list belongs to (e.g. a kid), while the
+  // creator (e.g. a parent) is who wants to know it got done. Fires on my own
+  // device when I apply their check, per the list's notify mode. `done` scans the
+  // list and only fires once the last open item is checked; the just-checked item
+  // is already in the view.
   if (isItem && value.checked === true && !(existing && existing.checked === true) && view) {
     const listId = key.split(':')[1]
     const list = (await view.get('list:' + listId))?.value
-    if (list && !list.deleted && list.assignee === selfKey) {
+    if (list && !list.deleted && list.createdBy === selfKey) {
       const mode = effectiveNotifyMode(list)
+      const base = { listName: String(list.name || 'a list'), kind: list.kind || 'list', by: value.pubkey, groupId, listId }
       if (mode === 'each') {
-        try { emit('notify:completed', { text: String(value.text || 'an item'), by: value.pubkey, groupId, listId, allDone: false }) } catch {}
+        try { emit('notify:completed', { ...base, allDone: false, item: String(value.text || 'an item') }) } catch {}
       } else if (mode === 'done') {
         let anyOpen = false
         for await (const { value: it } of view.createReadStream(itemRange(listId))) {
           if (it && !it.deleted && !it.checked) { anyOpen = true; break }
         }
-        if (!anyOpen) { try { emit('notify:completed', { text: String(list.name || 'a list'), by: value.pubkey, groupId, listId, allDone: true }) } catch {} }
+        if (!anyOpen) { try { emit('notify:completed', { ...base, allDone: true }) } catch {} }
       }
     }
   }
