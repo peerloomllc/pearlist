@@ -4,7 +4,7 @@ import jsQR from 'jsqr'
 import { call, on, isMock, haptic } from './ipc.js'
 import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, ShoppingCart, Broom, ListChecks, ListBullets } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -22,6 +22,17 @@ const LIGHTNING_WALLETS = [
 const isIOS = () => typeof window !== 'undefined' && window.__pearPlatform === 'ios'
 
 const openUrl = (url) => { try { call('shell:openUrl', { url }) } catch {} }
+
+// List categories. The `kind` field on a list row (see listWire.js LIST_KINDS)
+// drives its icon, color, and the Lists-page section it groups under. Array
+// order is the section display order; the generic 'list' is the default + last.
+const CATEGORIES = [
+  { key: 'grocery', label: 'Groceries', section: 'Groceries', addPlaceholder: 'Add a grocery list', Icon: ShoppingCart, color: c.success },
+  { key: 'chore', label: 'Chores', section: 'Chores', addPlaceholder: 'Add a chore list', Icon: Broom, color: c.warn },
+  { key: 'todo', label: 'To-dos', section: 'To-dos', addPlaceholder: 'Add a to-do list', Icon: ListChecks, color: c.accent },
+  { key: 'list', label: 'List', section: 'Lists', addPlaceholder: 'Add a list', Icon: ListBullets, color: c.text.muted },
+]
+const categoryOf = (kind) => CATEGORIES.find((x) => x.key === kind) || CATEGORIES[CATEGORIES.length - 1]
 
 // Invite links. The raw invite is an opaque base64url blob (from the core
 // encoder); we present it as a real https link so a plain text/QR share opens
@@ -569,6 +580,7 @@ export default function App () {
   const [pendingUndo, setPendingUndo] = useState(null) // { snap, listId } for swipe-delete undo
   const [suggestions, setSuggestions] = useState([]) // item autocomplete from recents
   const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
+  const [newListKind, setNewListKind] = useState('list') // category for the next created list
   const composer = useRef(null)
   const listComposer = useRef(null)
   const navRef = useRef({}) // latest overlay state, for the shell's back handler
@@ -865,9 +877,14 @@ export default function App () {
   async function addList () {
     const name = listDraft.trim(); if (!name || !gid) return
     setListDraft('')
-    await call('list:create', { groupId: gid, name })
+    await call('list:create', { groupId: gid, name, kind: newListKind })
     await loadLists(gid)               // new list appears in the overview; do not auto-open
     listComposer.current?.blur?.()     // dismiss the keyboard; show the full lists page
+  }
+  async function setListKind (listId, kind) {
+    if (!gid || !listId) return
+    await call('list:setKind', { groupId: gid, listId, kind })
+    await loadLists(gid); setSheet(null)
   }
   async function renameList (name) {
     const n = (name || '').trim(); if (!n || !openListId) return
@@ -913,9 +930,10 @@ export default function App () {
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
-              : lists.map((l) => <ListRow key={l.id} list={l} members={members} onOpen={() => setOpenListId(l.id)} />)}
+              : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
           </div>
-          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={addList} placeholder='Add a list' />
+          <CategoryChips value={newListKind} onChange={setNewListKind} />
+          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={addList} placeholder={categoryOf(newListKind).addPlaceholder} />
         </>
       ) : (
         // ===== List detail: the items of the open list + add-item bar =====
@@ -946,9 +964,11 @@ export default function App () {
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} onClose={() => setSheet(null)}
         onRename={() => setSheet('renameList')}
+        onCategory={() => setSheet('category')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
+      <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
         onAbout={() => { setSheet(null); setView('about') }} />
@@ -1059,12 +1079,63 @@ function InviteSheet ({ open, onClose, inviteKey, spaceName }) {
 
 // A list row on the space overview. Tapping opens the list's detail.
 function ListRow ({ list, members, onOpen }) {
+  const cat = categoryOf(list.kind)
+  const Icon = cat.Icon
   return (
     <button onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', textAlign: 'left' }}>
+      <Icon size={20} color={cat.color} weight='regular' />
       <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 17, fontWeight: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{list.name}</span>
       <AssigneeAvatar pubkey={list.assignee} members={members} size={24} />
       <CaretRight size={18} color={c.text.muted} weight='regular' />
     </button>
+  )
+}
+
+// The Lists overview, grouped into category sections (Groceries, Chores, ...)
+// in CATEGORIES order. Section headers only show once more than one category is
+// in use, so a space that never categorizes still reads as one flat list.
+function GroupedLists ({ lists, members, onOpen }) {
+  const groups = CATEGORIES
+    .map((cat) => ({ cat, items: lists.filter((l) => categoryOf(l.kind).key === cat.key) }))
+    .filter((g) => g.items.length > 0)
+  const showHeaders = groups.length > 1
+  return (
+    <>
+      {groups.map(({ cat, items }) => (
+        <div key={cat.key}>
+          {showHeaders ? <SectionHeader cat={cat} count={items.length} /> : null}
+          {items.map((l) => <ListRow key={l.id} list={l} members={members} onOpen={() => onOpen(l.id)} />)}
+        </div>
+      ))}
+    </>
+  )
+}
+
+function SectionHeader ({ cat, count }) {
+  const Icon = cat.Icon
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `${sp.md}px ${sp.base}px ${sp.xs}px` }}>
+      <Icon size={15} color={cat.color} weight='regular' />
+      <span style={{ flex: 1, color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6 }}>{cat.section}</span>
+      <span style={{ color: c.text.muted, fontSize: 12 }}>{count}</span>
+    </div>
+  )
+}
+
+// Category picker above the add-list bar: sets the kind for the next list added.
+function CategoryChips ({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: sp.sm, overflowX: 'auto', padding: `${sp.sm}px ${sp.base}px 0`, background: c.surface.base, WebkitOverflowScrolling: 'touch' }}>
+      {CATEGORIES.map((cat) => {
+        const Icon = cat.Icon
+        const on = value === cat.key
+        return (
+          <button key={cat.key} onClick={() => onChange(cat.key)} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: r.full, border: `1px solid ${on ? cat.color : c.border}`, background: on ? c.surface.input : 'transparent', color: on ? c.text.primary : c.text.secondary, fontSize: 14, fontWeight: on ? 400 : 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <Icon size={16} color={cat.color} weight='regular' />{cat.label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -1106,16 +1177,40 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 }
 
 // List options (rename / assign / delete), opened from the detail header.
-function ListOptionsSheet ({ open, list, members, onClose, onRename, onAssign, onDelete }) {
+function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory, onAssign, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
   )
+  const cat = categoryOf(list.kind)
+  const CatIcon = cat.Icon
   return (
     <BottomSheet open={open} onClose={onClose} title={list.name}>
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename list</span></Row>
+      <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row>
+    </BottomSheet>
+  )
+}
+
+// Pick a list's category. Reuses the bottom-sheet pattern; the current kind is
+// checked. Saving calls list:setKind.
+function CategorySheet ({ open, current, onClose, onSave }) {
+  const cur = categoryOf(current).key
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Category'>
+      {CATEGORIES.map((cat) => {
+        const Icon = cat.Icon
+        const on = cat.key === cur
+        return (
+          <button key={cat.key} onClick={() => onSave(cat.key)} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: on ? 400 : 300 }}>
+            <Icon size={20} color={cat.color} weight='regular' />
+            <span style={{ flex: 1, textAlign: 'left' }}>{cat.label}</span>
+            {on ? <Check size={18} color={c.primary} weight='bold' /> : null}
+          </button>
+        )
+      })}
     </BottomSheet>
   )
 }

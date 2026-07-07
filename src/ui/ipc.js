@@ -105,10 +105,11 @@ const mockMethods = {
     return { published: true }
   },
   'member:getAll': async ({ groupId }) => [...mockGroup(groupId).members.values()],
-  'list:create': async ({ groupId, name }) => {
-    const id = rid(); mockGroup(groupId).lists.set(id, { id, name: name || '', assignee: null, deleted: false }); return { listId: id }
+  'list:create': async ({ groupId, name, kind }) => {
+    const id = rid(); mockGroup(groupId).lists.set(id, { id, name: name || '', kind: kind || 'list', assignee: null, deleted: false }); return { listId: id }
   },
   'list:rename': async ({ groupId, listId, name }) => { mockGroup(groupId).lists.get(listId).name = name; return { ok: true } },
+  'list:setKind': async ({ groupId, listId, kind }) => { mockGroup(groupId).lists.get(listId).kind = kind || 'list'; return { ok: true } },
   'list:delete': async ({ groupId, listId }) => { mockGroup(groupId).lists.get(listId).deleted = true; return { ok: true } },
   'list:assign': async ({ groupId, listId, assignee }) => { mockGroup(groupId).lists.get(listId).assignee = assignee || null; return { ok: true } },
   'list:getAll': async ({ groupId }) => [...mockGroup(groupId).lists.values()].filter(l => !l.deleted),

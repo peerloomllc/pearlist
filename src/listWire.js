@@ -3,8 +3,8 @@
 // as its applyOps.
 //
 // Data model (one household group, many lists):
-//   list:{listId}            -> signed { id, name, createdBy, createdAt,
-//                                        updatedAt, pubkey, deleted }
+//   list:{listId}            -> signed { id, name, kind?, assignee?, createdBy,
+//                                        createdAt, updatedAt, pubkey, deleted }
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
 //                                        assignee?, createdBy, createdAt,
 //                                        updatedAt, pubkey, deleted }
@@ -27,6 +27,13 @@ function itemRange (listId) { return { gt: 'item:' + listId + ':', lt: 'item:' +
 
 const NAMESPACES = ['list:', 'item:', 'member:']
 const inNamespace = (key) => typeof key === 'string' && NAMESPACES.some((n) => key.startsWith(n))
+
+// A list's category. Presentation now (icon + grouping on the Lists page) and
+// the hook completion notifications key off later (chore lists). Optional and
+// additive: old peers accept and ignore it, and a list without it defaults to
+// the generic 'list'. Chosen from a UI selector, NEVER inferred from the name.
+const LIST_KINDS = ['grocery', 'chore', 'todo', 'list']
+function normalizeKind (k) { return LIST_KINDS.includes(k) ? k : 'list' }
 
 // Accept / reject decision for a list:, item:, or member: row. Pure: takes the
 // incoming signed value and whatever (if anything) is already stored at that key.
@@ -131,4 +138,4 @@ function maybeNotify (ctx, key, value, existing) {
   }
 }
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS }
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind }
