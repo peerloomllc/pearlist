@@ -2,6 +2,29 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-07 - @peerloom/core stays one package with subpath exports (split CLOSED)
+Tier: T0 (design decision + documentation; no code change). Resolves the open
+question in proposals/2026-06-30-pearlist-core-extraction.md and the "core package
+split" backlog item.
+Context: the extraction proposal left open whether to keep a single @peerloom/core
+with subpath exports or split into @peerloom/core + @peerloom/seeder +
+@peerloom/device-link. Backlog carried "single package for v1, split once proven."
+Findings: core is 828 LOC across 7 files and ALREADY ships subpath exports
+(identity, records, swarm, ids, pairing, engine), so fine-grained imports exist
+without multiple packages. It is tightly coupled around engine.js (493 LOC), which
+requires identity/swarm/ids/pairing; records requires identity. Both consumers
+(pearlist and pearpetal) use the engine, so nobody wants an engine-less subset. The
+optional Tier-3 modules the split targeted (seeder, device-link, invite-kit) were
+never built, so there is nothing optional to carve out. Splitting the base
+substrate would fragment an interdependent unit and worsen the existing cross-app
+native-version lockstep (see core's rocksdb-native pin) for zero functional gain.
+Decision: keep @peerloom/core as a single package with subpath exports. Close the
+split question and the backlog item.
+Reopen trigger: only when an actually-optional, independently-useful module
+(blind-seeder, device-link, invite-kit) is BUILT and an app wants it WITHOUT the
+engine. Then extract that one module into its own package. Do not split the base
+substrate speculatively.
+
 ## 2026-07-07 - Background-while-killed notifications: Android best-effort, iOS impossible serverlessly (WON'T-FIX)
 Tier: T0 (design decision + documentation; no code change).
 Context: the backlog asked for notifications delivered when the app is

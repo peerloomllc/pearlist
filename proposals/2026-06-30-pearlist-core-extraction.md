@@ -136,6 +136,10 @@ config is modified, so there is no blast radius beyond the new dirs.
 - Package shape: single `@peerloom/core` with subpath exports, vs split
   packages (`@peerloom/core`, `@peerloom/seeder`, `@peerloom/device-link`).
   Leaning single package with internal folders for v1, split later.
+  RESOLVED 2026-07-07: stays a single package with subpath exports; split closed
+  (the optional modules it targeted were never built, and the base substrate is
+  interdependent). See DECISIONS 2026-07-07. Reopen only when an optional module
+  is actually built that an app wants without the engine.
 - Whether to bind the Hyperswarm to the identity keypair (PearCircle does) or
   use a default swarm (PearCal does). Leaning PearCircle's bound keypair.
 - PearList group model: one household group with many lists (chosen) vs one
