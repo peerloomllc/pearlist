@@ -209,6 +209,27 @@ test('donation reminder: fresh is not due, dismiss marks it shown', async () => 
   await engine.close()
 })
 
+test('donation reminder: due once 14 days have elapsed, then dismiss stops it', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  // Seed a first-use 15 days ago (the nudge triggers at 14). Seeding the localDb
+  // row directly stands in for "the app has been in use for two weeks".
+  const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000
+  await engine.localDb.put('donateReminder', { firstUseAt: fifteenDaysAgo, shown: false })
+
+  const due = await call('donation:status', {})
+  assert.equal(due.due, true) // 14 days elapsed and not yet shown -> due
+  assert.equal(due.shown, false)
+  assert.equal(due.firstUseAt, fifteenDaysAgo) // existing first-use is preserved, not reset
+
+  // The UI marks it shown the moment it surfaces, so it never nags twice.
+  await call('donation:dismiss', {})
+  const after = await call('donation:status', {})
+  assert.equal(after.shown, true)
+  assert.equal(after.due, false)
+  await engine.close()
+})
+
 test('avatar stored as a blob reference (not inline), resolves back for the UI', async () => {
   const { engine, call } = driver()
   await call('init', {})
