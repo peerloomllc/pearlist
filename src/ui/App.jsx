@@ -1019,7 +1019,7 @@ export default function App () {
         onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, openListId); setSheet(null) }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
-      <QtySheet open={!!sheet && sheet.type === 'qty'} text={sheet?.text} onClose={() => setSheet(null)}
+      <QtySheet open={!!sheet && sheet.type === 'qty'} onClose={() => setSheet(null)}
         onSave={async (qty) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.itemId, qty }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
@@ -1493,12 +1493,12 @@ function LightningWalletSheet ({ open, onClose }) {
 
 // Quick quantity stepper shown right after adding an item to a grocery list.
 // Defaults to 1; dismissing keeps 1 (item:add already stored qty 1), Done saves.
-function QtySheet ({ open, text, onClose, onSave }) {
+function QtySheet ({ open, onClose, onSave }) {
   const [qty, setQty] = useState(1)
   useEffect(() => { if (open) setQty(1) }, [open])
   const stepBtn = { width: 48, height: 48, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }
   return (
-    <BottomSheet open={open} onClose={onClose} title={text ? `How many? "${text}"` : 'How many?'}>
+    <BottomSheet open={open} onClose={onClose} title='How many?'>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.lg, margin: `${sp.sm}px 0 ${sp.lg}px` }}>
         <button onClick={() => setQty((q) => Math.max(1, q - 1))} aria-label='Decrease' style={stepBtn}><Minus size={22} weight='bold' /></button>
         <span style={{ fontFamily: MONO, fontSize: 28, color: c.text.primary, minWidth: 56, textAlign: 'center' }}>{qty}</span>
