@@ -119,7 +119,7 @@ function Button ({ variant = 'primary', children, style, ...rest }) {
   const variants = {
     primary: { background: c.primary, color: c.text.onPrimary, border: 'none' },
     secondary: { background: c.surface.input, color: c.text.primary, border: `1px solid ${c.text.muted}` },
-    danger: { background: 'transparent', color: c.error, border: `1px solid ${c.error}` },
+    danger: { background: c.error, color: '#000', border: 'none' },
   }
   return <button data-haptic={variant === 'danger' ? 'warn' : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
 }
@@ -865,9 +865,16 @@ export default function App () {
     return () => { live = false; clearTimeout(t) }
   }, [draft, openListId])
   async function toggleItem (item) {
-    setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: !item.checked } : i)) // optimistic
-    await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: !item.checked })
-    loadItems(gid, openListId)
+    const nowChecked = !item.checked
+    setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: nowChecked } : i)) // optimistic
+    await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: nowChecked })
+    await loadItems(gid, openListId)
+    // Checking this item just completed the list (every item now checked) ->
+    // offer to delete it. `items` is the pre-toggle state, so this fires only on
+    // the transition, when the LAST open item is checked. Skipped on chore lists:
+    // those are a parent/child setup where a child finishing chores should not be
+    // prompted to delete the (typically recurring, parent-owned) list.
+    if (nowChecked && openList?.kind !== 'chore' && items.length > 0 && items.every(i => i.id === item.id || i.checked)) setSheet('listComplete')
   }
   // Swipe-delete: remove the item, then offer a 3s undo. Undo re-creates it with
   // its fields (a new row, since the delete is a no-resurrection tombstone).
@@ -991,7 +998,7 @@ export default function App () {
         onDelete={(s) => { setDeleteTarget(s); setSheet('deleteSpace') }} />
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
-      <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} onClose={() => setSheet(null)}
+      <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
         onRename={() => setSheet('renameList')}
         onCategory={() => setSheet('category')}
         onNotify={() => setSheet('notifyMode')}
@@ -1000,6 +1007,7 @@ export default function App () {
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
+      <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
@@ -1193,20 +1201,24 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 
 // List options (rename / category / notify / assign / delete), opened from the
 // detail header. The completion-notify row shows only on chore lists.
-function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory, onNotify, onAssign, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, onClose, onRename, onCategory, onNotify, onAssign, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
   )
   const cat = categoryOf(list.kind)
   const CatIcon = cat.Icon
+  // Chore lists are a parent/child setup: only the creator (owner) may delete
+  // one, so a child cannot remove a parent-managed list. Other kinds keep the
+  // egalitarian model (anyone may delete). Falls open if createdBy is missing.
+  const canDelete = list.kind !== 'chore' || !list.createdBy || list.createdBy === selfPubkey
   return (
     <BottomSheet open={open} onClose={onClose} title={list.name}>
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename list</span></Row>
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
-      <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row>
+      {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row> : null}
     </BottomSheet>
   )
 }
@@ -1297,6 +1309,18 @@ function DeleteSpaceSheet ({ open, onClose, spaceName, onConfirm }) {
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>This deletes the space and all its lists for everyone in it. This cannot be undone.</p>
       <Button variant='danger' onClick={onConfirm}>Delete for everyone</Button>
       <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onClose}>Cancel</Button>
+    </BottomSheet>
+  )
+}
+
+// Offered when checking the last open item completes a list: delete it, or keep
+// it. Deleting removes the list for everyone in the space (a shared tombstone).
+function ListCompleteSheet ({ open, listName, onDelete, onKeep, onClose }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title='All done 🎉'>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>Every item on {listName ? `"${listName}"` : 'this list'} is checked off. Delete the list? This removes it for everyone in the space.</p>
+      <Button variant='danger' onClick={onDelete}>Delete list</Button>
+      <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onKeep}>Keep it</Button>
     </BottomSheet>
   )
 }
