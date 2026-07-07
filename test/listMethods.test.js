@@ -334,6 +334,57 @@ test('destroyGroup unmounts a group but leaves other groups intact', async () =>
   await engine.close()
 })
 
+test('list category: create carries a kind, defaults to list, normalizes junk, setKind changes it', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+
+  // Explicit kind is stored.
+  const chores = await call('list:create', { groupId, name: 'Chores', kind: 'chore' })
+  // Omitted kind defaults to the generic 'list'.
+  const misc = await call('list:create', { groupId, name: 'Misc' })
+  // An unknown kind is normalized to 'list', never stored as-is.
+  const junk = await call('list:create', { groupId, name: 'Junk', kind: 'not-a-kind' })
+
+  const byId = (id) => (lists.find((l) => l.id === id))
+  let lists = await call('list:getAll', { groupId })
+  assert.equal(byId(chores.listId).kind, 'chore')
+  assert.equal(byId(misc.listId).kind, 'list')
+  assert.equal(byId(junk.listId).kind, 'list')
+
+  // setKind changes the category (and re-normalizes).
+  await call('list:setKind', { groupId, listId: misc.listId, kind: 'grocery' })
+  await call('list:setKind', { groupId, listId: chores.listId, kind: 'bogus' })
+  lists = await call('list:getAll', { groupId })
+  assert.equal(byId(misc.listId).kind, 'grocery')
+  assert.equal(byId(chores.listId).kind, 'list')
+
+  // setKind on a missing list rejects.
+  await assert.rejects(() => call('list:setKind', { groupId, listId: 'nope', kind: 'chore' }))
+  await engine.close()
+})
+
+test('list:setNotifyOnComplete stores a normalized mode; junk falls back to off', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Chores', kind: 'chore' })
+  const modeOf = async () => (await call('list:getAll', { groupId })).find((l) => l.id === listId).notifyOnComplete
+
+  // A fresh list has no explicit mode (the default is derived in the worklet).
+  assert.equal(await modeOf(), undefined)
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'each' })
+  assert.equal(await modeOf(), 'each')
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'done' })
+  assert.equal(await modeOf(), 'done')
+  // Junk normalizes to 'off', never stored as-is.
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'bogus' })
+  assert.equal(await modeOf(), 'off')
+  // Missing list rejects.
+  await assert.rejects(() => call('list:setNotifyOnComplete', { groupId, listId: 'nope', mode: 'each' }))
+  await engine.close()
+})
+
 test('deleting a list hides it from list:getAll', async () => {
   const { engine, call } = driver()
   await call('init', {})

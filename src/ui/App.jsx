@@ -4,7 +4,7 @@ import jsQR from 'jsqr'
 import { call, on, isMock, haptic } from './ipc.js'
 import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, ShoppingCart, Broom, ListChecks, ListBullets } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -22,6 +22,28 @@ const LIGHTNING_WALLETS = [
 const isIOS = () => typeof window !== 'undefined' && window.__pearPlatform === 'ios'
 
 const openUrl = (url) => { try { call('shell:openUrl', { url }) } catch {} }
+
+// List categories. The `kind` field on a list row (see listWire.js LIST_KINDS)
+// drives its icon, color, and the Lists-page section it groups under. Array
+// order is the section display order; the generic 'list' is the default + last.
+const CATEGORIES = [
+  { key: 'grocery', label: 'Groceries', section: 'Groceries', Icon: ShoppingCart, color: c.success },
+  { key: 'chore', label: 'Chores', section: 'Chores', Icon: Broom, color: c.warn },
+  { key: 'todo', label: 'To-dos', section: 'To-dos', Icon: ListChecks, color: c.accent },
+  { key: 'list', label: 'List', section: 'Lists', Icon: ListBullets, color: c.text.muted },
+]
+const categoryOf = (kind) => CATEGORIES.find((x) => x.key === kind) || CATEGORIES[CATEGORIES.length - 1]
+
+// Completion-notification modes (see listWire.js). When someone checks items on
+// a list, its overseer (list.assignee) is notified per this mode. Absent ->
+// derive: chore lists default to 'done', everything else to 'off'.
+const NOTIFY_MODES = [
+  { key: 'done', label: 'When all done', hint: 'One alert when the last item is checked' },
+  { key: 'each', label: 'Every completion', hint: 'An alert each time an item is checked' },
+  { key: 'off', label: 'Off', hint: 'No completion alerts' },
+]
+const notifyModeOf = (key) => NOTIFY_MODES.find((m) => m.key === key) || NOTIFY_MODES[0]
+const effectiveNotifyMode = (list) => (['off', 'each', 'done'].includes(list?.notifyOnComplete) ? list.notifyOnComplete : (list?.kind === 'chore' ? 'done' : 'off'))
 
 // Invite links. The raw invite is an opaque base64url blob (from the core
 // encoder); we present it as a real https link so a plain text/QR share opens
@@ -682,11 +704,17 @@ export default function App () {
   }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers])
 
   // In-app banner when a peer assigns me an item (foreground case). The OS
-  // notification, if the user opted in, is raised separately by the shell.
+  // notification, if enabled, is raised separately by the shell.
   useEffect(() => on('notify:assigned', (d) => setBanner(
     d?.kind === 'list'
       ? `You were assigned the list "${d?.text || 'a list'}"`
       : `You were assigned "${d?.text || 'an item'}"`
+  )), [])
+  // In-app banner when someone completes an item on a list I created.
+  useEffect(() => on('notify:completed', (d) => setBanner(
+    d?.allDone
+      ? `${d?.kind === 'chore' ? 'Chore list' : 'List'} "${d?.listName || 'a list'}" is all done`
+      : `"${d?.item || 'an item'}" was completed in "${d?.listName || 'a list'}"`
   )), [])
 
   // Show the brief guided tour once, the first time the user reaches home.
@@ -862,12 +890,31 @@ export default function App () {
       await loadItems(gid, openListId)
     } catch {}
   }
-  async function addList () {
+  // Adding a list is two steps: submit the name (+ or Enter) opens the category
+  // prompt; picking a category finalizes creation. The typed name stays in the
+  // composer while the sheet is open, so dismissing the sheet cancels without
+  // losing it.
+  function beginAddList () {
     const name = listDraft.trim(); if (!name || !gid) return
-    setListDraft('')
-    await call('list:create', { groupId: gid, name })
+    listComposer.current?.blur?.()   // dismiss the keyboard so the sheet is unobstructed
+    setSheet('newListCategory')
+  }
+  async function createListWithKind (kind) {
+    const name = listDraft.trim()
+    if (!name || !gid) { setSheet(null); return }
+    await call('list:create', { groupId: gid, name, kind })
+    setListDraft(''); setSheet(null)
     await loadLists(gid)               // new list appears in the overview; do not auto-open
-    listComposer.current?.blur?.()     // dismiss the keyboard; show the full lists page
+  }
+  async function setListKind (listId, kind) {
+    if (!gid || !listId) return
+    await call('list:setKind', { groupId: gid, listId, kind })
+    await loadLists(gid); setSheet(null)
+  }
+  async function setNotifyMode (listId, mode) {
+    if (!gid || !listId) return
+    await call('list:setNotifyOnComplete', { groupId: gid, listId, mode })
+    await loadLists(gid); setSheet(null)
   }
   async function renameList (name) {
     const n = (name || '').trim(); if (!n || !openListId) return
@@ -913,9 +960,9 @@ export default function App () {
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
-              : lists.map((l) => <ListRow key={l.id} list={l} members={members} onOpen={() => setOpenListId(l.id)} />)}
+              : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
           </div>
-          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={addList} placeholder='Add a list' />
+          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' />
         </>
       ) : (
         // ===== List detail: the items of the open list + add-item bar =====
@@ -946,9 +993,14 @@ export default function App () {
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} onClose={() => setSheet(null)}
         onRename={() => setSheet('renameList')}
+        onCategory={() => setSheet('category')}
+        onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
+      <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
+      <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
+      <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
         onAbout={() => { setSheet(null); setView('about') }} />
@@ -1059,12 +1111,46 @@ function InviteSheet ({ open, onClose, inviteKey, spaceName }) {
 
 // A list row on the space overview. Tapping opens the list's detail.
 function ListRow ({ list, members, onOpen }) {
+  const cat = categoryOf(list.kind)
+  const Icon = cat.Icon
   return (
     <button onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.base}px`, background: 'none', border: 'none', borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', textAlign: 'left' }}>
+      <Icon size={20} color={cat.color} weight='regular' />
       <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 17, fontWeight: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{list.name}</span>
       <AssigneeAvatar pubkey={list.assignee} members={members} size={24} />
       <CaretRight size={18} color={c.text.muted} weight='regular' />
     </button>
+  )
+}
+
+// The Lists overview, grouped into category sections (Groceries, Chores, ...)
+// in CATEGORIES order. Section headers only show once more than one category is
+// in use, so a space that never categorizes still reads as one flat list.
+function GroupedLists ({ lists, members, onOpen }) {
+  const groups = CATEGORIES
+    .map((cat) => ({ cat, items: lists.filter((l) => categoryOf(l.kind).key === cat.key) }))
+    .filter((g) => g.items.length > 0)
+  const showHeaders = groups.length > 1
+  return (
+    <>
+      {groups.map(({ cat, items }) => (
+        <div key={cat.key}>
+          {showHeaders ? <SectionHeader cat={cat} count={items.length} /> : null}
+          {items.map((l) => <ListRow key={l.id} list={l} members={members} onOpen={() => onOpen(l.id)} />)}
+        </div>
+      ))}
+    </>
+  )
+}
+
+function SectionHeader ({ cat, count }) {
+  const Icon = cat.Icon
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `${sp.md}px ${sp.base}px ${sp.xs}px` }}>
+      <Icon size={15} color={cat.color} weight='regular' />
+      <span style={{ flex: 1, color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6 }}>{cat.section}</span>
+      <span style={{ color: c.text.muted, fontSize: 12 }}>{count}</span>
+    </div>
   )
 }
 
@@ -1105,17 +1191,66 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
   )
 }
 
-// List options (rename / assign / delete), opened from the detail header.
-function ListOptionsSheet ({ open, list, members, onClose, onRename, onAssign, onDelete }) {
+// List options (rename / category / notify / assign / delete), opened from the
+// detail header. The completion-notify row shows only on chore lists.
+function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory, onNotify, onAssign, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
   )
+  const cat = categoryOf(list.kind)
+  const CatIcon = cat.Icon
   return (
     <BottomSheet open={open} onClose={onClose} title={list.name}>
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename list</span></Row>
+      <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
+      {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
       <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row>
+    </BottomSheet>
+  )
+}
+
+// Pick a chore list's completion-notify mode. The list's creator/owner is the
+// notify target (not the assignee), so we say so.
+function NotifySheet ({ open, current, onClose, onSave }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Notify when completed'>
+      <p style={{ color: c.text.muted, fontSize: 13, textAlign: 'center', margin: `0 0 ${sp.sm}px` }}>Sent to whoever created this list.</p>
+      {NOTIFY_MODES.map((m) => {
+        const on = m.key === current
+        return (
+          <button key={m.key} onClick={() => onSave(m.key)} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: on ? 400 : 300 }}>
+            <span style={{ flex: 1, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span>{m.label}</span>
+              <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>{m.hint}</span>
+            </span>
+            {on ? <Check size={18} color={c.primary} weight='bold' /> : null}
+          </button>
+        )
+      })}
+    </BottomSheet>
+  )
+}
+
+// Pick a list's category. Reuses the bottom-sheet pattern; the current kind is
+// checked. Used both to change an existing list's category (onSave -> setKind)
+// and as the create-time prompt (onSave -> create with the chosen kind).
+function CategorySheet ({ open, current, title = 'Category', onClose, onSave }) {
+  const cur = categoryOf(current).key
+  return (
+    <BottomSheet open={open} onClose={onClose} title={title}>
+      {CATEGORIES.map((cat) => {
+        const Icon = cat.Icon
+        const on = cat.key === cur
+        return (
+          <button key={cat.key} onClick={() => onSave(cat.key)} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: on ? 400 : 300 }}>
+            <Icon size={20} color={cat.color} weight='regular' />
+            <span style={{ flex: 1, textAlign: 'left' }}>{cat.label}</span>
+            {on ? <Check size={18} color={c.primary} weight='bold' /> : null}
+          </button>
+        )
+      })}
     </BottomSheet>
   )
 }

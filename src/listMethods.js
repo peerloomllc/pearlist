@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode } = require('./listWire')
 
 // Grace before the owner tears down a just-deleted space, so the `space`
 // tombstone can replicate to connected members first.
@@ -310,12 +310,34 @@ const methods = {
   },
 
   // --- lists --------------------------------------------------------------
-  'list:create': async ({ groupId, name }, ctx) => {
+  'list:create': async ({ groupId, name, kind }, ctx) => {
     const listId = newEntityId()
     await putRow(ctx, groupId, listKey(listId), {
-      id: listId, name: String(name ?? ''), assignee: null, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+      id: listId, name: String(name ?? ''), kind: normalizeKind(kind), assignee: null, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
     })
     return { listId }
+  },
+
+  // Set (or change) a list's category. Presentation for now; a chore kind is the
+  // hook completion notifications will key off later. Normalized to a known kind.
+  'list:setKind': async ({ groupId, listId, kind }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, listKey(listId))
+    if (!existing || existing.deleted) throw new Error('list not found')
+    await putRow(ctx, groupId, listKey(listId), { ...existing, kind: normalizeKind(kind) })
+    return { ok: true }
+  },
+
+  // Set a list's completion-notification mode ('off' | 'each' | 'done'). When
+  // set, it overrides the kind-derived default (chore -> 'done'). Notifies the
+  // list's overseer (list.assignee) when someone else checks items; see
+  // listWire maybeNotify. Junk normalizes to 'off'.
+  'list:setNotifyOnComplete': async ({ groupId, listId, mode }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, listKey(listId))
+    if (!existing || existing.deleted) throw new Error('list not found')
+    await putRow(ctx, groupId, listKey(listId), { ...existing, notifyOnComplete: normalizeNotifyMode(mode) || 'off' })
+    return { ok: true }
   },
 
   'list:rename': async ({ groupId, listId, name }, ctx) => {
