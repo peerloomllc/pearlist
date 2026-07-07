@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
 # scripts/ios-dev-install.sh
 #
-# Build PearList for iOS device on Tims-Mac-mini.local and install on
-# the paired iPhone. Ported from pearcircle/scripts/ios-dev-install.sh
-# (the proven suite pipeline); PearList is the first app whose ios/
+# Build PearList's iOS IPA on Tims-Mac-mini.local (Xcode), then install it on the
+# iPhone directly from THIS Linux machine over USB via libimobiledevice. Ported
+# from pearcircle/scripts/ios-dev-install.sh; PearList is the first app whose ios/
 # project was generated fresh via `expo prebuild` for this bring-up.
+#
+# Split of responsibilities: the Mac only *builds + signs* (it has Xcode); the
+# *install* runs here, because the iPhone is USB-cabled to this Linux box, not the
+# Mac. The Mac's devicectl network tunnel to the phone proved unreliable (wedges at
+# "connecting"), so we copy the IPA back and install over USB with ideviceinstaller.
 #
 # Usage:
 #   ./scripts/ios-dev-install.sh                  # full pipeline
 #   SKIP_BUILD=1 ./scripts/ios-dev-install.sh     # bundles already fresh
 #   SKIP_SYNC=1 ./scripts/ios-dev-install.sh      # already in sync
-#   SKIP_INSTALL=1 ./scripts/ios-dev-install.sh   # archive+export only
+#   SKIP_INSTALL=1 ./scripts/ios-dev-install.sh   # archive+export only (no device)
 #
-# Required on the Mac mini:
+# Required on the Mac mini (build + sign):
 #   - Xcode 16+ with command-line tools
 #   - CocoaPods (~/.rbenv or /opt/homebrew via login shell)
 #   - Apple Development cert in ~/Library/Keychains/buildkey.keychain
-#     (signed under team G79ALD29NA)
-#   - Paired iPhone visible to `xcrun devicectl list devices`
+#     (signed under team G79ALD29NA); the device UDID in the provisioning profile
+#
+# Required on THIS Linux machine (install):
+#   - libimobiledevice: ideviceinstaller + idevicepair (dnf install ideviceinstaller)
+#   - iPhone USB-connected, unlocked, with a validated pairing (idevicepair pair)
+#   - Developer Mode enabled on the device
 #
 # One-time setup on the Mac mini (this rsync excludes node_modules, and pod
 # install resolves `expo`/`react-native` from node_modules, so the first run
@@ -174,21 +183,32 @@ EOF
   ls $EXPORT_DIR/PearList.ipa
 '"
 
-# ── 4. Install + launch on iPhone ───────────────────────────────────────────
+# ── 4. Install on iPhone (directly from THIS Linux machine over USB) ─────────
+# The iPhone is USB-connected to the Linux dev machine, NOT the Mac. The Mac only
+# reaches it over a CoreDevice network tunnel, which proved fragile (it wedges at
+# "connecting" and installs fail with "Authorization is required"). So we copy the
+# signed IPA back from the Mac and install it locally over USB via libimobiledevice
+# (ideviceinstaller) — the reliable path for this setup.
+# Requires on Linux: ideviceinstaller (libimobiledevice), a validated pairing
+# (`idevicepair validate`), Developer Mode enabled on the device, and the iPhone
+# unlocked. LOCAL_IPA overrides where the IPA is copied (default /tmp/PearList-dev).
 if [ "${SKIP_INSTALL:-0}" != "1" ]; then
-  step "install on iPhone $DEVICE_UDID"
-  ssh "$MAC_MINI" "bash -lc '
-    xcrun devicectl device install app \
-      --device $DEVICE_UDID \
-      $EXPORT_DIR/PearList.ipa 2>&1 | tail -3
-  '"
+  LOCAL_IPA="${LOCAL_IPA:-/tmp/PearList-dev/PearList.ipa}"
 
-  step "launch com.pearlist"
-  ssh "$MAC_MINI" "bash -lc '
-    xcrun devicectl device process launch \
-      --device $DEVICE_UDID \
-      com.pearlist 2>&1 | tail -2
-  '"
+  step "fetch signed IPA from $MAC_MINI"
+  mkdir -p "$(dirname "$LOCAL_IPA")"
+  scp "$MAC_MINI:$EXPORT_DIR/PearList.ipa" "$LOCAL_IPA"
+
+  step "install on iPhone over USB (ideviceinstaller)"
+  if ! idevicepair validate >/dev/null 2>&1; then
+    echo "No trusted USB pairing. Plug in + unlock the iPhone, tap Trust, then rerun with SKIP_BUILD=1 SKIP_SYNC=1." >&2
+    exit 1
+  fi
+  ideviceinstaller install "$LOCAL_IPA"
+
+  step "launch com.pearlist (best-effort; tap the icon if it does not open)"
+  idevicedebug -d run com.pearlist >/dev/null 2>&1 &
+  DBG=$!; sleep 4; kill "$DBG" 2>/dev/null || true; wait "$DBG" 2>/dev/null || true
 fi
 
-step "Done. IPA: $EXPORT_DIR/PearList.ipa on $MAC_MINI"
+step "Done. IPA installed on the iPhone from $(hostname) (copied from $MAC_MINI)."
