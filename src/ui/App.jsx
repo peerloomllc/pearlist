@@ -27,10 +27,10 @@ const openUrl = (url) => { try { call('shell:openUrl', { url }) } catch {} }
 // drives its icon, color, and the Lists-page section it groups under. Array
 // order is the section display order; the generic 'list' is the default + last.
 const CATEGORIES = [
-  { key: 'grocery', label: 'Groceries', section: 'Groceries', addPlaceholder: 'Add a grocery list', Icon: ShoppingCart, color: c.success },
-  { key: 'chore', label: 'Chores', section: 'Chores', addPlaceholder: 'Add a chore list', Icon: Broom, color: c.warn },
-  { key: 'todo', label: 'To-dos', section: 'To-dos', addPlaceholder: 'Add a to-do list', Icon: ListChecks, color: c.accent },
-  { key: 'list', label: 'List', section: 'Lists', addPlaceholder: 'Add a list', Icon: ListBullets, color: c.text.muted },
+  { key: 'grocery', label: 'Groceries', section: 'Groceries', Icon: ShoppingCart, color: c.success },
+  { key: 'chore', label: 'Chores', section: 'Chores', Icon: Broom, color: c.warn },
+  { key: 'todo', label: 'To-dos', section: 'To-dos', Icon: ListChecks, color: c.accent },
+  { key: 'list', label: 'List', section: 'Lists', Icon: ListBullets, color: c.text.muted },
 ]
 const categoryOf = (kind) => CATEGORIES.find((x) => x.key === kind) || CATEGORIES[CATEGORIES.length - 1]
 
@@ -580,7 +580,6 @@ export default function App () {
   const [pendingUndo, setPendingUndo] = useState(null) // { snap, listId } for swipe-delete undo
   const [suggestions, setSuggestions] = useState([]) // item autocomplete from recents
   const [listDraft, setListDraft] = useState('') // add-list composer (lists overview)
-  const [newListKind, setNewListKind] = useState('list') // category for the next created list
   const composer = useRef(null)
   const listComposer = useRef(null)
   const navRef = useRef({}) // latest overlay state, for the shell's back handler
@@ -874,12 +873,26 @@ export default function App () {
       await loadItems(gid, openListId)
     } catch {}
   }
-  async function addList () {
+  // Adding a list is two steps: submit the name (+ or Enter) opens the category
+  // prompt; picking a category finalizes creation. The typed name stays in the
+  // composer while the sheet is open, so dismissing the sheet cancels without
+  // losing it.
+  function beginAddList () {
     const name = listDraft.trim(); if (!name || !gid) return
-    setListDraft('')
-    await call('list:create', { groupId: gid, name, kind: newListKind })
+    listComposer.current?.blur?.()   // dismiss the keyboard so the sheet is unobstructed
+    setSheet('newListCategory')
+  }
+  async function createListWithKind (kind) {
+    const name = listDraft.trim()
+    if (!name || !gid) { setSheet(null); return }
+    await call('list:create', { groupId: gid, name, kind })
+    setListDraft(''); setSheet(null)
     await loadLists(gid)               // new list appears in the overview; do not auto-open
-    listComposer.current?.blur?.()     // dismiss the keyboard; show the full lists page
+  }
+  async function setListKind (listId, kind) {
+    if (!gid || !listId) return
+    await call('list:setKind', { groupId: gid, listId, kind })
+    await loadLists(gid); setSheet(null)
   }
   async function setListKind (listId, kind) {
     if (!gid || !listId) return
@@ -932,8 +945,7 @@ export default function App () {
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
               : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
           </div>
-          <CategoryChips value={newListKind} onChange={setNewListKind} />
-          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={addList} placeholder={categoryOf(newListKind).addPlaceholder} />
+          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' />
         </>
       ) : (
         // ===== List detail: the items of the open list + add-item bar =====
@@ -969,6 +981,7 @@ export default function App () {
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
+      <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
         onAbout={() => { setSheet(null); setView('about') }} />
@@ -1122,23 +1135,6 @@ function SectionHeader ({ cat, count }) {
   )
 }
 
-// Category picker above the add-list bar: sets the kind for the next list added.
-function CategoryChips ({ value, onChange }) {
-  return (
-    <div style={{ display: 'flex', gap: sp.sm, overflowX: 'auto', padding: `${sp.sm}px ${sp.base}px 0`, background: c.surface.base, WebkitOverflowScrolling: 'touch' }}>
-      {CATEGORIES.map((cat) => {
-        const Icon = cat.Icon
-        const on = value === cat.key
-        return (
-          <button key={cat.key} onClick={() => onChange(cat.key)} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: r.full, border: `1px solid ${on ? cat.color : c.border}`, background: on ? c.surface.input : 'transparent', color: on ? c.text.primary : c.text.secondary, fontSize: 14, fontWeight: on ? 400 : 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <Icon size={16} color={cat.color} weight='regular' />{cat.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 // Tap-to-add chips of previously-added items, shown above the add-item bar. The
 // bottom padding keeps a little buffer above the composer's divider line.
 function SuggestionBar ({ items, onPick }) {
@@ -1195,11 +1191,12 @@ function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory,
 }
 
 // Pick a list's category. Reuses the bottom-sheet pattern; the current kind is
-// checked. Saving calls list:setKind.
-function CategorySheet ({ open, current, onClose, onSave }) {
+// checked. Used both to change an existing list's category (onSave -> setKind)
+// and as the create-time prompt (onSave -> create with the chosen kind).
+function CategorySheet ({ open, current, title = 'Category', onClose, onSave }) {
   const cur = categoryOf(current).key
   return (
-    <BottomSheet open={open} onClose={onClose} title='Category'>
+    <BottomSheet open={open} onClose={onClose} title={title}>
       {CATEGORIES.map((cat) => {
         const Icon = cat.Icon
         const on = cat.key === cur
