@@ -846,9 +846,11 @@ export default function App () {
   async function addItemText (text) {
     const t = String(text || '').trim(); if (!t || !gid || !openListId) return
     setDraft(''); setSuggestions([])
-    await call('item:add', { groupId: gid, listId: openListId, text: t })
+    const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t })
     await loadItems(gid, openListId)
     composer.current?.blur?.() // dismiss the keyboard; show the full list
+    // Groceries: prompt for quantity right after adding (a common grocery need).
+    if (openList?.kind === 'grocery' && itemId) setSheet({ type: 'qty', itemId, text: t })
   }
   const addItem = () => addItemText(draft)
 
@@ -1016,6 +1018,9 @@ export default function App () {
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
         onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, openListId); setSheet(null) }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
+      />
+      <QtySheet open={!!sheet && sheet.type === 'qty'} text={sheet?.text} onClose={() => setSheet(null)}
+        onSave={async (qty) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.itemId, qty }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
@@ -1482,6 +1487,24 @@ function LightningWalletSheet ({ open, onClose }) {
         ))}
       </div>
       <p style={{ textAlign: 'center', color: c.text.muted, fontSize: 13, marginTop: sp.base }}>After installing, return here and tap BTC again.</p>
+    </BottomSheet>
+  )
+}
+
+// Quick quantity stepper shown right after adding an item to a grocery list.
+// Defaults to 1; dismissing keeps 1 (item:add already stored qty 1), Done saves.
+function QtySheet ({ open, text, onClose, onSave }) {
+  const [qty, setQty] = useState(1)
+  useEffect(() => { if (open) setQty(1) }, [open])
+  const stepBtn = { width: 48, height: 48, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }
+  return (
+    <BottomSheet open={open} onClose={onClose} title={text ? `How many? "${text}"` : 'How many?'}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.lg, margin: `${sp.sm}px 0 ${sp.lg}px` }}>
+        <button onClick={() => setQty((q) => Math.max(1, q - 1))} aria-label='Decrease' style={stepBtn}><Minus size={22} weight='bold' /></button>
+        <span style={{ fontFamily: MONO, fontSize: 28, color: c.text.primary, minWidth: 56, textAlign: 'center' }}>{qty}</span>
+        <button onClick={() => setQty((q) => q + 1)} aria-label='Increase' style={stepBtn}><Plus size={22} weight='bold' /></button>
+      </div>
+      <Button onClick={() => onSave(qty)}>Done</Button>
     </BottomSheet>
   )
 }
