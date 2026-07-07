@@ -2,6 +2,36 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-07 - Background-while-killed notifications: Android best-effort, iOS impossible serverlessly (WON'T-FIX)
+Tier: T0 (design decision + documentation; no code change).
+Context: the backlog asked for notifications delivered when the app is
+backgrounded or killed. Notifications are LOCAL: the worklet's maybeNotify
+computes them when it applies a synced peer change, so the process must be alive
+(receiving P2P traffic and running code) for one to fire. "While killed" means it
+is not.
+Decision:
+- Android: already the best achievable. The bg-sync foreground service (DECISIONS
+  2026-07-05, default ON) keeps the process alive and connected while backgrounded,
+  so notifications fire. A user force-stop or an aggressive OEM battery-killer
+  stops it; START_STICKY + onTaskRemoved AlarmManager re-arm + the boot receiver
+  resume it. That residual gap is inherent to Android and accepted.
+- iOS: NOT possible under the no-server constraint. iOS suspends the app seconds
+  after backgrounding and forbids the long-lived background networking Hyperswarm
+  needs. BGTaskScheduler runs too rarely and briefly to coincide with a peer being
+  online in a serverless mesh (near-useless). The only mechanism that wakes a
+  killed iOS app is a push server (APNs), a centralized dependency the suite
+  rejects. iPhones therefore stay "open-to-sync" (notify only while running),
+  matching the suite pattern (PearGuard's Android foreground-service backbone; iOS
+  has no background).
+Rejected: an APNs/FCM push relay, even a content-blind or E2E-encrypted one. It is
+still a server to run, against the no-server principle.
+Deferred (serverless, not built): an on-open "while you were away" in-app catch-up
+digest (not a notification). It would need a since-last-seen watermark separate
+from maybeNotify's 60s freshness window, which deliberately suppresses the
+catch-up burst to avoid replay spam.
+Status: backlog item CLOSED as as-designed. Reopen only if the no-server principle
+is ever revisited.
+
 ## 2026-07-07 - Completion notifications (P2) + notifications ON by default
 Tier: T2 (additive app-local schema + notification policy). Second phase of
 proposals/2026-07-07-list-categories-completion-notify.md; builds on the kind
