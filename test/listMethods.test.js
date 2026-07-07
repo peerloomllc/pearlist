@@ -364,6 +364,27 @@ test('list category: create carries a kind, defaults to list, normalizes junk, s
   await engine.close()
 })
 
+test('list:setNotifyOnComplete stores a normalized mode; junk falls back to off', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Chores', kind: 'chore' })
+  const modeOf = async () => (await call('list:getAll', { groupId })).find((l) => l.id === listId).notifyOnComplete
+
+  // A fresh list has no explicit mode (the default is derived in the worklet).
+  assert.equal(await modeOf(), undefined)
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'each' })
+  assert.equal(await modeOf(), 'each')
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'done' })
+  assert.equal(await modeOf(), 'done')
+  // Junk normalizes to 'off', never stored as-is.
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'bogus' })
+  assert.equal(await modeOf(), 'off')
+  // Missing list rejects.
+  await assert.rejects(() => call('list:setNotifyOnComplete', { groupId, listId: 'nope', mode: 'each' }))
+  await engine.close()
+})
+
 test('deleting a list hides it from list:getAll', async () => {
   const { engine, call } = driver()
   await call('init', {})

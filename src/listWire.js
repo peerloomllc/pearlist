@@ -35,6 +35,20 @@ const inNamespace = (key) => typeof key === 'string' && NAMESPACES.some((n) => k
 const LIST_KINDS = ['grocery', 'chore', 'todo', 'list']
 function normalizeKind (k) { return LIST_KINDS.includes(k) ? k : 'list' }
 
+// Completion-notification mode for a list (the return leg of the assign loop:
+// when someone checks an item, notify the list's overseer = list.assignee).
+//   'off'  - never
+//   'each' - on every item completion
+//   'done' - once, when the last open item is checked ("all done")
+// Optional + additive on the list row. Absent -> derive a default: chore lists
+// default to 'done', everything else to 'off'.
+const NOTIFY_MODES = ['off', 'each', 'done']
+function normalizeNotifyMode (m) { return NOTIFY_MODES.includes(m) ? m : null }
+function effectiveNotifyMode (list) {
+  if (!list) return 'off'
+  return normalizeNotifyMode(list.notifyOnComplete) || (list.kind === 'chore' ? 'done' : 'off')
+}
+
 // Accept / reject decision for a list:, item:, or member: row. Pure: takes the
 // incoming signed value and whatever (if anything) is already stored at that key.
 //   'accept' -> caller should view.put(key, incoming)
@@ -99,7 +113,7 @@ async function applyListOp (op, ctx) {
   const existing = (await view.get(op.key))?.value
   if (rowApplyDecision(op.key, op.value, existing) === 'accept') {
     await view.put(op.key, op.value)
-    maybeNotify(ctx, op.key, op.value, existing)
+    try { await maybeNotify(ctx, op.key, op.value, existing) } catch {}
   }
 }
 
@@ -110,15 +124,15 @@ async function applyListOp (op, ctx) {
 // window skips the burst of historical rows applied during an initial catch-up
 // sync, so joining/reopening a space does not replay old assignments as alerts.
 const NOTIFY_FRESH_MS = 60 * 1000
-function maybeNotify (ctx, key, value, existing) {
-  const { emit, selfKey } = ctx
+async function maybeNotify (ctx, key, value, existing) {
+  const { emit, selfKey, view, groupId } = ctx
   if (typeof emit !== 'function' || !selfKey) return
   if (typeof value.updatedAt !== 'number' || value.updatedAt < Date.now() - NOTIFY_FRESH_MS) return
   if (value.pubkey === selfKey) return // our own change never notifies us
   if (value.deleted) return
   if (key.startsWith('member:')) {
     // A member row we have never seen before = someone joined the space.
-    if (!existing) { try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey, groupId: ctx.groupId }) } catch {} }
+    if (!existing) { try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey, groupId }) } catch {} }
     return
   }
   // Someone assigned an item OR a whole list to me (and it was not already mine).
@@ -133,9 +147,29 @@ function maybeNotify (ctx, key, value, existing) {
       const text = String((isItem ? value.text : value.name) || (isItem ? 'an item' : 'a list'))
       // item key = item:{listId}:{itemId}; list key = list:{listId}
       const listId = isItem ? key.split(':')[1] : key.slice('list:'.length)
-      try { emit('notify:assigned', { kind, text, by: value.pubkey, groupId: ctx.groupId, listId }) } catch {}
+      try { emit('notify:assigned', { kind, text, by: value.pubkey, groupId, listId }) } catch {}
+    }
+  }
+  // Completion (the return leg): someone else just checked an item on a list I
+  // oversee (I am list.assignee). Fires on my own device when I apply their
+  // check, per the list's notify mode. `done` scans the list and only fires once
+  // the last open item is checked; the just-checked item is already in the view.
+  if (isItem && value.checked === true && !(existing && existing.checked === true) && view) {
+    const listId = key.split(':')[1]
+    const list = (await view.get('list:' + listId))?.value
+    if (list && !list.deleted && list.assignee === selfKey) {
+      const mode = effectiveNotifyMode(list)
+      if (mode === 'each') {
+        try { emit('notify:completed', { text: String(value.text || 'an item'), by: value.pubkey, groupId, listId, allDone: false }) } catch {}
+      } else if (mode === 'done') {
+        let anyOpen = false
+        for await (const { value: it } of view.createReadStream(itemRange(listId))) {
+          if (it && !it.deleted && !it.checked) { anyOpen = true; break }
+        }
+        if (!anyOpen) { try { emit('notify:completed', { text: String(list.name || 'a list'), by: value.pubkey, groupId, listId, allDone: true }) } catch {} }
+      }
     }
   }
 }
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind }
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode }

@@ -3,8 +3,10 @@
 **Status:** APPROVED 2026-07-07 (Tim). Backlog item #5 (member-mapped assignees +
 notify-the-assignee), completion half. Decisions locked: completion notifications
 target the list overseer (`list.assignee`) only; granularity is a per-list
-user choice (`off | each | done`). **P1 (categories, presentation-only) built on
-`feature/list-categories`**; P2 (completion notifications) not yet started.
+user choice (`off | each | done`). **P1 (categories, presentation-only) and P2
+(completion notifications) both built on `feature/list-categories`.** Note:
+notifications were also flipped to ON by default in the same branch (reverses
+the 2026-06-30 opt-in policy; see DECISIONS 2026-07-07).
 
 **Goal**
 

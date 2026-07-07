@@ -110,6 +110,7 @@ const mockMethods = {
   },
   'list:rename': async ({ groupId, listId, name }) => { mockGroup(groupId).lists.get(listId).name = name; return { ok: true } },
   'list:setKind': async ({ groupId, listId, kind }) => { mockGroup(groupId).lists.get(listId).kind = kind || 'list'; return { ok: true } },
+  'list:setNotifyOnComplete': async ({ groupId, listId, mode }) => { mockGroup(groupId).lists.get(listId).notifyOnComplete = mode || 'off'; return { ok: true } },
   'list:delete': async ({ groupId, listId }) => { mockGroup(groupId).lists.get(listId).deleted = true; return { ok: true } },
   'list:assign': async ({ groupId, listId, assignee }) => { mockGroup(groupId).lists.get(listId).assignee = assignee || null; return { ok: true } },
   'list:getAll': async ({ groupId }) => [...mockGroup(groupId).lists.values()].filter(l => !l.deleted),

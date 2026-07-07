@@ -34,6 +34,17 @@ const CATEGORIES = [
 ]
 const categoryOf = (kind) => CATEGORIES.find((x) => x.key === kind) || CATEGORIES[CATEGORIES.length - 1]
 
+// Completion-notification modes (see listWire.js). When someone checks items on
+// a list, its overseer (list.assignee) is notified per this mode. Absent ->
+// derive: chore lists default to 'done', everything else to 'off'.
+const NOTIFY_MODES = [
+  { key: 'done', label: 'When all done', hint: 'One alert when the last item is checked' },
+  { key: 'each', label: 'Every completion', hint: 'An alert each time an item is checked' },
+  { key: 'off', label: 'Off', hint: 'No completion alerts' },
+]
+const notifyModeOf = (key) => NOTIFY_MODES.find((m) => m.key === key) || NOTIFY_MODES[0]
+const effectiveNotifyMode = (list) => (['off', 'each', 'done'].includes(list?.notifyOnComplete) ? list.notifyOnComplete : (list?.kind === 'chore' ? 'done' : 'off'))
+
 // Invite links. The raw invite is an opaque base64url blob (from the core
 // encoder); we present it as a real https link so a plain text/QR share opens
 // the app via the deep-link intent filter (see app.json). The blob rides in the
@@ -693,11 +704,17 @@ export default function App () {
   }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers])
 
   // In-app banner when a peer assigns me an item (foreground case). The OS
-  // notification, if the user opted in, is raised separately by the shell.
+  // notification, if enabled, is raised separately by the shell.
   useEffect(() => on('notify:assigned', (d) => setBanner(
     d?.kind === 'list'
       ? `You were assigned the list "${d?.text || 'a list'}"`
       : `You were assigned "${d?.text || 'an item'}"`
+  )), [])
+  // In-app banner when someone completes an item on a list I oversee.
+  useEffect(() => on('notify:completed', (d) => setBanner(
+    d?.allDone
+      ? `"${d?.text || 'a list'}" is all done`
+      : `"${d?.text || 'an item'}" was completed`
   )), [])
 
   // Show the brief guided tour once, the first time the user reaches home.
@@ -894,9 +911,9 @@ export default function App () {
     await call('list:setKind', { groupId: gid, listId, kind })
     await loadLists(gid); setSheet(null)
   }
-  async function setListKind (listId, kind) {
+  async function setNotifyMode (listId, mode) {
     if (!gid || !listId) return
-    await call('list:setKind', { groupId: gid, listId, kind })
+    await call('list:setNotifyOnComplete', { groupId: gid, listId, mode })
     await loadLists(gid); setSheet(null)
   }
   async function renameList (name) {
@@ -977,10 +994,12 @@ export default function App () {
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} onClose={() => setSheet(null)}
         onRename={() => setSheet('renameList')}
         onCategory={() => setSheet('category')}
+        onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
+      <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} hasOverseer={!!openList?.assignee} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
@@ -1172,8 +1191,9 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
   )
 }
 
-// List options (rename / assign / delete), opened from the detail header.
-function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory, onAssign, onDelete }) {
+// List options (rename / category / notify / assign / delete), opened from the
+// detail header. The completion-notify row shows only on chore lists.
+function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory, onNotify, onAssign, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -1185,7 +1205,30 @@ function ListOptionsSheet ({ open, list, members, onClose, onRename, onCategory,
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename list</span></Row>
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
+      {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
       <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row>
+    </BottomSheet>
+  )
+}
+
+// Pick a chore list's completion-notify mode. The overseer (list.assignee) is
+// the notify target, so we hint when none is set (the alerts go nowhere).
+function NotifySheet ({ open, current, hasOverseer, onClose, onSave }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Notify when completed'>
+      {!hasOverseer ? <p style={{ color: c.text.muted, fontSize: 13, textAlign: 'center', margin: `0 0 ${sp.sm}px` }}>Assign an overseer to the list to receive these.</p> : null}
+      {NOTIFY_MODES.map((m) => {
+        const on = m.key === current
+        return (
+          <button key={m.key} onClick={() => onSave(m.key)} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: on ? 400 : 300 }}>
+            <span style={{ flex: 1, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span>{m.label}</span>
+              <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>{m.hint}</span>
+            </span>
+            {on ? <Check size={18} color={c.primary} weight='bold' /> : null}
+          </button>
+        )
+      })}
     </BottomSheet>
   )
 }

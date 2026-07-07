@@ -81,6 +81,14 @@ function mockView (initial = {}) {
   return {
     async get (k) { return m.has(k) ? { value: m.get(k) } : null },
     async put (k, v) { m.set(k, v) },
+    async * createReadStream (range = {}) {
+      const { gt, lt } = range
+      for (const [k, v] of m) {
+        if (gt != null && !(k > gt)) continue
+        if (lt != null && !(k < lt)) continue
+        yield { key: k, value: v }
+      }
+    },
   }
 }
 async function apply (op, extra = {}) {
@@ -125,4 +133,69 @@ test('notify:joined fires for a new member row from a peer', async () => {
   const val = signValue({ pubkey: OTHERPUB, updatedAt: Date.now(), displayName: 'Sam' }, OTHER.secretKey)
   const events = await apply({ type: 'put', key: 'member:' + OTHERPUB, value: val })
   assert.ok(events.some(([e, d]) => e === 'notify:joined' && d.name === 'Sam'))
+})
+
+// --- completion notifications (the return leg; overseer = list.assignee) -----
+
+// A chore list I oversee (assignee = me), keyed by listId.
+function choreList (listId, extra = {}) {
+  return signValue({ pubkey: PUB, updatedAt: Date.now() - 2000, id: listId, name: 'Chores', kind: 'chore', assignee: PUB, deleted: false, ...extra }, KP.secretKey)
+}
+// A peer's item at a checked state (defaults to a fresh check).
+function peerItem (listId, id, checked, ts = Date.now()) {
+  return signValue({ pubkey: OTHERPUB, updatedAt: ts, id, text: id, checked, deleted: false }, OTHER.secretKey)
+}
+
+test('notify:completed (each) fires when a peer checks an item on a chore list I oversee', async () => {
+  const initial = { [listKey('L')]: choreList('L', { notifyOnComplete: 'each' }), [itemKey('L', 'I')]: peerItem('L', 'I', false, Date.now() - 500) }
+  const events = await apply({ type: 'put', key: itemKey('L', 'I'), value: peerItem('L', 'I', true) }, { initial })
+  assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === false && d.text === 'I' && d.by === OTHERPUB && d.listId === 'L' && d.groupId === 'g'))
+})
+
+test('notify:completed (done) fires only when the LAST open item is checked', async () => {
+  // Item A already checked; checking the last open item B -> all done.
+  const initial = {
+    [listKey('L2')]: choreList('L2', { notifyOnComplete: 'done' }),
+    [itemKey('L2', 'A')]: peerItem('L2', 'A', true, Date.now() - 800),
+    [itemKey('L2', 'B')]: peerItem('L2', 'B', false, Date.now() - 700),
+  }
+  const events = await apply({ type: 'put', key: itemKey('L2', 'B'), value: peerItem('L2', 'B', true) }, { initial })
+  assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === true && d.text === 'Chores'))
+})
+
+test('no notify:completed (done) while other items remain open', async () => {
+  const initial = {
+    [listKey('L3')]: choreList('L3', { notifyOnComplete: 'done' }),
+    [itemKey('L3', 'A')]: peerItem('L3', 'A', false, Date.now() - 700),
+    [itemKey('L3', 'B')]: peerItem('L3', 'B', false, Date.now() - 600),
+  }
+  const events = await apply({ type: 'put', key: itemKey('L3', 'A'), value: peerItem('L3', 'A', true) }, { initial })
+  assert.ok(!events.some(([e]) => e === 'notify:completed'))
+})
+
+test('chore list with no explicit mode defaults to done-mode completion notify', async () => {
+  const initial = { [listKey('L4')]: choreList('L4'), [itemKey('L4', 'I')]: peerItem('L4', 'I', false, Date.now() - 500) }
+  const events = await apply({ type: 'put', key: itemKey('L4', 'I'), value: peerItem('L4', 'I', true) }, { initial })
+  assert.ok(events.some(([e, d]) => e === 'notify:completed' && d.allDone === true))
+})
+
+test('no notify:completed when I do not oversee the list (assignee is someone else)', async () => {
+  const list = signValue({ pubkey: OTHERPUB, updatedAt: Date.now() - 2000, name: 'Chores', kind: 'chore', assignee: OTHERPUB, notifyOnComplete: 'each' }, OTHER.secretKey)
+  const initial = { [listKey('L5')]: list, [itemKey('L5', 'I')]: peerItem('L5', 'I', false, Date.now() - 500) }
+  const events = await apply({ type: 'put', key: itemKey('L5', 'I'), value: peerItem('L5', 'I', true) }, { initial })
+  assert.ok(!events.some(([e]) => e === 'notify:completed'))
+})
+
+test('non-chore list fires no completion notify by default', async () => {
+  const list = signValue({ pubkey: PUB, updatedAt: Date.now() - 2000, name: 'Groceries', kind: 'grocery', assignee: PUB }, KP.secretKey)
+  const initial = { [listKey('L6')]: list, [itemKey('L6', 'I')]: peerItem('L6', 'I', false, Date.now() - 500) }
+  const events = await apply({ type: 'put', key: itemKey('L6', 'I'), value: peerItem('L6', 'I', true) }, { initial })
+  assert.ok(!events.some(([e]) => e === 'notify:completed'))
+})
+
+test('no notify:completed when I complete an item myself', async () => {
+  const initial = { [listKey('L7')]: choreList('L7', { notifyOnComplete: 'each' }), [itemKey('L7', 'I')]: signValue({ pubkey: PUB, updatedAt: Date.now() - 500, text: 'mine', checked: false }, KP.secretKey) }
+  const mine = signValue({ pubkey: PUB, updatedAt: Date.now(), text: 'mine', checked: true }, KP.secretKey)
+  const events = await apply({ type: 'put', key: itemKey('L7', 'I'), value: mine }, { initial })
+  assert.ok(!events.some(([e]) => e === 'notify:completed'))
 })

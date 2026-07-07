@@ -18,10 +18,12 @@ import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
 
-// --- local notifications (assignment + join; opt-in, off by default) --------
-// Policy: assignment-only + join, LOCAL (no server/push), OFF by default. The
-// worklet emits notify:* when it applies a fresh peer change; the shell raises
-// an OS notification if the user has opted in. Suppress the OS banner while the
+// --- local notifications (assignment + join + completion; ON by default) ----
+// Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
+// default (permission requested on first run; user can turn it off in Profile).
+// The worklet emits notify:* when it applies a fresh peer change; the shell
+// raises an OS notification if the user has it enabled. Suppress the OS banner
+// while the
 // app is foreground (the WebView shows its own in-app banner); the OS still
 // shows it when we are backgrounded. No background sync yet, so this fires while
 // the app is running (foreground + its brief background window).
@@ -34,7 +36,20 @@ Notifications.setNotificationHandler({
 const NOTIF_KEY = 'pearlist:notifications'
 let _notifEnabled = false
 async function loadNotifEnabled () {
-  try { _notifEnabled = (await AsyncStorage.getItem(NOTIF_KEY)) === '1' } catch { _notifEnabled = false }
+  let stored: string | null = null
+  try { stored = await AsyncStorage.getItem(NOTIF_KEY) } catch { stored = null }
+  if (stored === null) {
+    // On by default: on first run request the OS permission and enable if
+    // granted. Persist the result so a later explicit toggle-off is honored and
+    // we never re-prompt on our own.
+    try {
+      await ensureNotifPermission()
+      _notifEnabled = (await Notifications.getPermissionsAsync()).status === 'granted'
+      await AsyncStorage.setItem(NOTIF_KEY, _notifEnabled ? '1' : '0')
+    } catch { _notifEnabled = false }
+  } else {
+    _notifEnabled = stored === '1'
+  }
   return _notifEnabled
 }
 async function ensureNotifPermission () {
@@ -46,6 +61,10 @@ async function ensureNotifPermission () {
     await Notifications.setNotificationChannelAsync('membership', {
       name: 'Space membership', importance: Notifications.AndroidImportance.DEFAULT,
       description: 'When someone joins a space',
+    })
+    await Notifications.setNotificationChannelAsync('completion', {
+      name: 'Completed items', importance: Notifications.AndroidImportance.DEFAULT,
+      description: 'When someone completes an item on a list you oversee',
     })
   }
   const s = await Notifications.getPermissionsAsync()
@@ -134,6 +153,15 @@ async function startWorklet () {
           fireNotify('membership', 'Someone joined', `${msg.data?.name ?? 'Someone'} joined a space`,
             { groupId: msg.data?.groupId }) // tap -> open the space
           // join already surfaces in-app via the roster diff; no WebView forward
+        }
+        else if (msg.event === 'notify:completed') {
+          const allDone = !!msg.data?.allDone
+          const text = msg.data?.text ?? (allDone ? 'a list' : 'an item')
+          fireNotify('completion',
+            allDone ? 'All done' : 'Item completed',
+            allDone ? `"${text}" is all done` : `"${text}" was completed`,
+            { groupId: msg.data?.groupId, listId: msg.data?.listId }) // tap -> open the list
+          emitEvent('notify:completed', msg.data) // WebView shows an in-app banner too
         }
         else if (msg.event) emitEvent(msg.event, msg.data)
       } catch {}
@@ -228,8 +256,10 @@ export default function Shell () {
       // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
       // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
       requestLocalNetworkPermission()
-      // Load the notifications opt-in so fireNotify gates correctly from boot.
-      loadNotifEnabled()
+      // Notifications are ON by default: this requests the OS permission on first
+      // run (and gates fireNotify from boot). Awaited before bgsync so the two
+      // paths do not race on the permission prompt.
+      await loadNotifEnabled()
       // Keep-syncing-in-background (Android, default ON): start the foreground
       // service so the worklet stays connected while backgrounded. Ensure the
       // notification permission first (the service needs a visible notification).

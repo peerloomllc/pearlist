@@ -2,6 +2,39 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-07 - Completion notifications (P2) + notifications ON by default
+Tier: T2 (additive app-local schema + notification policy). Second phase of
+proposals/2026-07-07-list-categories-completion-notify.md; builds on the kind
+field below.
+Context: the notify loop was one-directional (assign -> notify:assigned to the
+assignee, already shipped) but completing work fired nothing. A chore board wants
+the return leg: when someone checks items, tell the person who oversees the list.
+Choice (P2): the worklet's maybeNotify (listWire.js) gained a completion branch.
+When a peer's item goes checked false->true and I am the list's overseer
+(list.assignee === my key) and it was not my own change, my device emits
+notify:completed per the list's mode. New optional list field `notifyOnComplete`
+(`off | each | done`), additive + LWW like `kind`; absent -> derived default
+(chore lists -> 'done', else 'off'), so existing chore lists get all-done alerts
+with no migration. 'each' fires per completion; 'done' scans the list's items and
+fires once when the last open one is checked (the just-checked item is already in
+the view). maybeNotify is now async (reads the list row + item range) and awaited
+in applyListOp inside try/catch so a read error never breaks apply. New IPC
+list:setNotifyOnComplete; UI exposes it on chore lists (list options -> "Notify
+when completed"), with a hint that an overseer must be assigned to receive them.
+Shell (app/index.tsx) raises the OS notification on a new 'completion' channel and
+forwards an in-app banner. Overseer-only, no createdBy fallback (per Tim).
+Choice (policy reversal): notifications are now ON by default. loadNotifEnabled
+requests the OS permission on first run and enables if granted, persisted so a
+later explicit toggle-off is honored and we never re-prompt. This REVERSES the
+2026-06-30 "opt-in, OFF by default" decision (per Tim). Watch: App Store review
+may question a cold-start notification prompt; the Profile toggle still lets users
+turn it off, and permission is only requested once.
+Verified: `npm run verify` green (40 tests incl. 7 completion-branch unit tests +
+setNotifyOnComplete round-trip; all builds). PENDING: on-device check of the
+end-to-end assign->complete->notify loop across two phones.
+Alternatives: per-item only or all-done only (rejected - shipped both via the
+per-list toggle, Tim's call); notifying item createdBy (rejected - overseer only).
+
 ## 2026-07-07 - List categories (kind) + planned completion notifications
 Tier: T2 (additive, app-local). Adds an optional `kind` field to the `list:`
 record and new notification semantics later; touches only PearList's own
