@@ -935,6 +935,18 @@ export default function App () {
     await call('list:delete', { groupId: gid, listId: openListId })
     setOpenListId(null); setSheet(null); await loadLists(gid)
   }
+  // Reset a list: uncheck every checked item (the recurring-chore action - re-open
+  // the list for a new round). Unchecks are shared item edits, so they replicate to
+  // everyone, which is the point for a shared chore list.
+  async function resetOpenList () {
+    if (!gid || !openListId) return
+    const checked = items.filter((i) => i.checked)
+    setSheet(null)
+    if (!checked.length) return
+    setItems((cur) => cur.map((i) => ({ ...i, checked: false }))) // optimistic
+    for (const it of checked) await call('item:toggle', { groupId: gid, listId: openListId, itemId: it.id, checked: false })
+    await loadItems(gid, openListId)
+  }
   async function applyTheme (mode) { setTheme(mode); setThemeMode(mode) }
 
   if (phase === 'loading') {
@@ -1000,11 +1012,12 @@ export default function App () {
         onDelete={(s) => { setDeleteTarget(s); setSheet('deleteSpace') }} />
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
-      <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
+      <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} canReset={items.some((i) => i.checked)} onClose={() => setSheet(null)}
         onRename={() => setSheet('renameList')}
         onCategory={() => setSheet('category')}
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
+        onReset={resetOpenList}
         onDelete={deleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
@@ -1206,7 +1219,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 
 // List options (rename / category / notify / assign / delete), opened from the
 // detail header. The completion-notify row shows only on chore lists.
-function ListOptionsSheet ({ open, list, members, selfPubkey, onClose, onRename, onCategory, onNotify, onAssign, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, onClose, onRename, onCategory, onNotify, onAssign, onReset, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -1223,6 +1236,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, onClose, onRename,
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
+      {canReset ? <Row onClick={onReset}><span style={{ flex: 1, textAlign: 'left' }}>Uncheck all</span></Row> : null}
       {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row> : null}
     </BottomSheet>
   )
