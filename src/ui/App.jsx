@@ -4,6 +4,7 @@ import jsQR from 'jsqr'
 import { call, on, isMock, haptic } from './ipc.js'
 import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
+import { APP_ICON } from './appIcon.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
@@ -446,7 +447,7 @@ function Onboarding ({ onStart, onJoin }) {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: sp.xl, gap: sp.base, maxWidth: 460, margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
-        <div style={{ fontSize: 40, marginBottom: sp.sm }}>🍐</div>
+        <img src={APP_ICON} alt='' width={64} height={64} style={{ marginBottom: sp.sm, borderRadius: r.xl }} />
         <h1 style={{ fontSize: 28, fontWeight: 400, margin: 0, color: c.text.primary }}>PearList</h1>
         <p style={{ color: c.text.secondary, fontSize: 15, fontWeight: 300, marginTop: sp.sm }}>Shared lists, one private space per group. No account, no server.</p>
       </div>
@@ -488,7 +489,7 @@ function NameSetup ({ profile, onDone }) {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: sp.xl, gap: sp.base, maxWidth: 460, margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: sp.md }}>
-        <div style={{ fontSize: 40, marginBottom: sp.sm }}>🍐</div>
+        <img src={APP_ICON} alt='' width={64} height={64} style={{ marginBottom: sp.sm, borderRadius: r.xl }} />
         <h1 style={{ fontSize: 26, fontWeight: 400, margin: 0, color: c.text.primary }}>Welcome to PearList</h1>
         <p style={{ color: c.text.secondary, fontSize: 15, fontWeight: 300, marginTop: sp.sm }}>Set your name so the people you share with know who's who.</p>
       </div>
