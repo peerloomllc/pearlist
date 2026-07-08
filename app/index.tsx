@@ -13,6 +13,7 @@ import { Asset } from 'expo-asset'
 import * as FileSystem from 'expo-file-system/legacy'
 import * as Linking from 'expo-linking'
 import * as Haptics from 'expo-haptics'
+import * as Clipboard from 'expo-clipboard'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
@@ -336,6 +337,20 @@ export default function Shell () {
         case 'shell:canOpenURL': {
           const can = await Linking.canOpenURL(args?.url ?? '').catch(() => false)
           return reply(id, { ok: true, can: !!can })
+        }
+        case 'shell:clipboard': {
+          // Copy to the OS clipboard. navigator.clipboard is unreliable in the
+          // about:blank WebView, so the donation sheet routes copies through here.
+          const text = args?.text
+          if (typeof text !== 'string' || text.length === 0) {
+            return reply(id, { ok: false, error: 'text must be a non-empty string' })
+          }
+          try {
+            await Clipboard.setStringAsync(text)
+            return reply(id, { ok: true })
+          } catch (err: any) {
+            return reply(id, { ok: false, error: err?.message ?? String(err) })
+          }
         }
         case 'shell:haptic': {
           const k = args?.kind

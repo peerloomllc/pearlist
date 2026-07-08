@@ -155,6 +155,7 @@ const mockMethods = {
   'shell:openUrl': async ({ url }) => { try { window.open(url, '_blank', 'noopener') } catch {} return { ok: true } },
   'shell:share': async ({ title, text }) => { try { if (navigator.share) await navigator.share({ title, text }); else alert('Share:\n\n' + text) } catch {} return { ok: true } },
   'shell:canOpenURL': async () => ({ can: false }),
+  'shell:clipboard': async ({ text }) => { try { await navigator.clipboard?.writeText?.(text) } catch {} return { ok: true } },
   'shell:haptic': async () => ({ ok: true }),
   'shell:navState': async () => ({ ok: true }),
   'shell:notifications:get': async () => ({ enabled: false }),
