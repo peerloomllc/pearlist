@@ -65,5 +65,10 @@
     "bare-pack": "^2.0.0",
     "esbuild": "^0.27.3",
     "typescript": "^5.3.3"
+  },
+  "comment:overrides": "Native addons pinned so the worklet bundle (which resolves core's requires into @peerloom/core's own node_modules) references the SAME versions the iOS build links as top-level frameworks. iOS matches native addons by EXACT framework version (<name>.<ver>.framework); any drift -> ADDON_NOT_FOUND at engine init, which nulls localDb and every worklet method fails (Android's linked bundling tolerates it, so it only breaks iOS). Keep these in lockstep with @peerloom/core's overrides. See peerloom-core PR #12 and pearpetal DECISIONS 2026-07-07.",
+  "overrides": {
+    "rocksdb-native": "3.17.2",
+    "bare-fs": "4.7.3"
   }
 }
