@@ -11,16 +11,29 @@ const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode } = require('./listWire')
-const { classifyAisle, normalizeAisle } = require('./aisles')
+const { AISLES, classifyAisle, normalizeAisle } = require('./aisles') // AISLES: used by the QVAC completion prompt when the model seam is wired
 
 // --- on-device categorization: the QVAC model seam ---------------------------
 // `classifyItem` is the single swap point for the on-device AI spike
 // (2026-07-11). TODAY it delegates to the offline keyword classifier in
-// aisles.js. To wire QVAC's llamacpp addon, replace the body: lazily loadModel()
-// a small GGUF, run a completion() constraining the answer to the AISLES list,
-// then normalizeAisle() the reply and fall back to classifyAisle() when the
-// model is unavailable or returns something off-list. Kept async so that swap
-// needs no call-site changes. See aisles.js header + DECISIONS.md 2026-07-11.
+// aisles.js. To wire QVAC (verified API, see proposals/2026-07-11-qvac-
+// integration-notes.md):
+//
+//   const { plugins, loadModel, completion } = require('@qvac/bare-sdk')
+//   const { llamacppCompletion } = require('@qvac/bare-sdk/llamacpp-completion/plugin')
+//   let _modelId // lazily loaded once
+//   async function classifyItem (_ctx, text) {
+//     try {
+//       if (!_modelId) { plugins([llamacppCompletion]); _modelId = await loadModel({ modelType: 'llamacpp-completion', /* files/config */ }) }
+//       const run = completion({ modelId: _modelId, history: [{ role: 'user',
+//         content: `Which aisle is "${text}"? Answer exactly one of: ${AISLES.join(', ')}.` }] })
+//       return normalizeAisle((await run.final).text) || classifyAisle(text)
+//     } catch { return classifyAisle(text) } // offline fallback: model missing/off-list
+//   }
+//
+// Requires `npm i @qvac/bare-sdk @qvac/llm-llamacpp` + an on-device build (the
+// prebuilt .bare addon is auto-linked by react-native-bare-kit). Kept async so
+// the swap needs no call-site changes. See aisles.js header + DECISIONS.md.
 async function classifyItem (_ctx, text) {
   return classifyAisle(text)
 }
