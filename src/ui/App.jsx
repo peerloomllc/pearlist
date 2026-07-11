@@ -464,6 +464,42 @@ function AisleGroupedItems ({ items, renderRow }) {
   )
 }
 
+// Consent prompt shown atop a grocery list when the keyword sorter left items
+// under "Other" and the user has not yet opted into the on-device AI. Explains
+// the one-time download + on-device privacy before anything is fetched. Once
+// enabled, it shows download progress instead.
+function AiConsentBanner ({ status, otherCount, onEnable, onDismiss }) {
+  if (!status) return null
+  const gb = (status.model.sizeMB / 1024).toFixed(1)
+  const wrap = { margin: `${sp.md}px ${sp.base}px`, padding: sp.base, background: c.surface.elevated, border: `1px solid ${c.border}`, borderRadius: r.lg }
+  if (status.consent) {
+    if (status.state === 'downloading') {
+      return (
+        <div style={wrap}>
+          <span style={{ color: c.text.primary, fontSize: 14, fontWeight: 400 }}>Downloading AI sorter… {status.pct}%</span>
+          <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: sp.sm, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${status.pct}%`, background: c.primary, transition: 'width 400ms ease' }} />
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
+  if (!otherCount) return null
+  return (
+    <div style={wrap}>
+      <div style={{ color: c.text.primary, fontSize: 15, fontWeight: 400, marginBottom: 4 }}>Sort {otherCount} item{otherCount > 1 ? 's' : ''} with on-device AI?</div>
+      <p style={{ color: c.text.secondary, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: `0 0 ${sp.md}px` }}>
+        PearList couldn't place {otherCount > 1 ? 'these' : 'this'} by name. A small AI model can. It's a one-time ~{gb}GB download and runs entirely on your phone - nothing is ever sent anywhere.
+      </p>
+      <div style={{ display: 'flex', gap: sp.sm }}>
+        <button onClick={onEnable} style={{ flex: 1, padding: '10px 14px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Download & enable</button>
+        <button onClick={onDismiss} style={{ padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Not now</button>
+      </div>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Screens
 // ---------------------------------------------------------------------------
@@ -858,19 +894,32 @@ export default function App () {
     return () => { cancelled = true }
   }, [openList?.kind, gid, openListId, items, loadItems])
 
+  // On-device AI status (consent + model download state), from the RN shell.
+  // Drives the Settings row and the in-list consent prompt; live-updated via the
+  // ai:status event (download progress, ready).
+  const [aiStatus, setAiStatus] = useState(null)
+  const [aiPromptDismissed, setAiPromptDismissed] = useState(false)
+  useEffect(() => {
+    call('shell:aiStatus', {}).then(setAiStatus).catch(() => {})
+    return on('ai:status', setAiStatus)
+  }, [])
+  useEffect(() => { setAiPromptDismissed(false) }, [openListId])
+  const enableAi = useCallback(() => { call('shell:aiConsent', { enabled: true }).then(setAiStatus).catch(() => {}) }, [])
+
   // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
-  // it doesn't know) get sent to the on-device LLM in the RN shell. Slow + lazy
-  // (first use downloads the model), so it runs in the background; the shell
-  // emits ai:recategorized when any land, and we reload. Each item is sent once.
+  // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
+  // once the user has opted in and the model is downloaded. Until then the
+  // consent prompt (below) handles it. Re-runs when the model becomes ready.
   const aiSentRef = useRef(new Set())
   useEffect(() => { aiSentRef.current = new Set() }, [openListId])
   useEffect(() => {
     if (openList?.kind !== 'grocery' || !gid || !openListId) return
+    if (!(aiStatus?.consent && aiStatus?.state === 'ready')) return
     const others = items.filter((i) => i.category === 'Other' && !aiSentRef.current.has(i.id))
     if (!others.length) return
     others.forEach((i) => aiSentRef.current.add(i.id))
     call('shell:aiCategorize', { groupId: gid, listId: openListId, items: others.map((i) => ({ itemId: i.id, text: i.text })) }).catch(() => {})
-  }, [openList?.kind, gid, openListId, items])
+  }, [openList?.kind, gid, openListId, items, aiStatus?.consent, aiStatus?.state])
   useEffect(() => {
     return on('ai:recategorized', (d) => { if (d?.listId === openListId && gid) loadItems(gid, openListId) })
   }, [openListId, gid, loadItems])
@@ -1055,6 +1104,9 @@ export default function App () {
         <>
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+            {openList?.kind === 'grocery' && !aiPromptDismissed
+              ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onDismiss={() => setAiPromptDismissed(true)} />
+              : null}
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
               : (() => {
@@ -1432,6 +1484,16 @@ function MenuSheet ({ open, onClose, profile, onProfile, onAbout }) {
   )
 }
 
+// One-line description of the on-device AI model state for the Settings row.
+function aiSubtitle (ai) {
+  if (!ai) return 'Sorts unusual grocery items into aisles, on your device.'
+  const gb = (ai.model.sizeMB / 1024).toFixed(1)
+  if (ai.state === 'downloading') return `Downloading model… ${ai.pct}%`
+  if (ai.state === 'ready') return `Ready · ${ai.model.name} (~${gb} GB stored on device)`
+  if (ai.state === 'error') return 'Download failed - toggle off then on to retry.'
+  return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`
+}
+
 function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -1452,6 +1514,11 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   async function toggleBgSync (v) {
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
+  const [ai, setAi] = useState(null)
+  useEffect(() => { if (open) call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [open])
+  useEffect(() => on('ai:status', setAi), [])
+  async function toggleAi (v) { try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
+  async function removeAi () { try { setAi(await call('shell:aiRemoveModel', {})) } catch {} }
 
   async function commitAvatar (value) {
     setBusy(true)
@@ -1521,6 +1588,14 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
             <Toggle on={bgSync} onChange={toggleBgSync} />
           </div>
         ) : null}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
+          <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+            <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>On-device sorting (AI)</span>
+            <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
+            {ai?.state === 'ready' ? <button onClick={removeAi} style={{ alignSelf: 'flex-start', marginTop: 4, background: 'none', border: 'none', padding: 0, color: c.error, fontSize: 12, cursor: 'pointer' }}>Remove model to free space</button> : null}
+          </span>
+          <Toggle on={!!ai?.consent} onChange={toggleAi} />
+        </div>
       </div>
     </FullScreen>
   )

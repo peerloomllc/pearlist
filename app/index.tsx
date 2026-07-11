@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
-import { classifyAisleAI } from './qvac'
+import { classifyAisleAI, getAiStatus, setAiConsent, removeAiModel, setProgressSink } from './qvac'
 
 // --- local notifications (assignment + join + completion; ON by default) ----
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
@@ -107,6 +107,10 @@ function callRaw (method: string, args: any = {}): Promise<any> {
 function emitEvent (event: string, data?: any) {
   _webViewRef?.current?.injectJavaScript(`window.__pearEvent(${JSON.stringify(event)}, ${JSON.stringify(data ?? null)}); true;`)
 }
+
+// Push QVAC model download progress / state to the WebView (Settings + the
+// in-list consent prompt subscribe to ai:status).
+setProgressSink((s) => emitEvent('ai:status', s))
 
 // Diagnostic: tee the worklet's pairing trace to Documents/pair-trace.log so we
 // can pull it off an iOS device (worklet console.warn does not reach a remote
@@ -397,6 +401,18 @@ export default function Shell () {
         case 'shell:navState': {
           canBackRef.current = !!args?.canBack
           return reply(id, { ok: true })
+        }
+        case 'shell:aiStatus': {
+          return reply(id, await getAiStatus())
+        }
+        case 'shell:aiConsent': {
+          // Turning on downloads the model in the background; progress + the
+          // eventual 'ready' arrive via ai:status events (the UI re-runs the AI
+          // pass when it sees ready). Returns the current status immediately.
+          return reply(id, await setAiConsent(!!args?.enabled))
+        }
+        case 'shell:aiRemoveModel': {
+          return reply(id, await removeAiModel())
         }
         case 'shell:aiCategorize': {
           // Hybrid AI fallback: the worklet's keyword pass already ran and left
