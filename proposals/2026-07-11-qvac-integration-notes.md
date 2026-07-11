@@ -135,6 +135,53 @@ Leading hypotheses for the blocker (next dig, in rough priority):
 This is now a Holepunch/bare-kit addon-loading investigation, not app wiring.
 Consult the holepunch-p2p-architect skill / p2p-wiki before the next device cycle.
 
+## Step-3: ROOT CAUSE FOUND (2026-07-11)
+
+The blocker is not a bug - it is that the probe used the WRONG integration path.
+
+Evidence ruled out: version gate (Bare 1.27.0 OK), APK compression (.so is
+`Stored`), missing NEEDED deps (all resolve), name mismatch (bundle keys QVAC's
+addon `"."` -> `"linked:libqvac__llm-llamacpp.0.36.3.so"` exactly like the working
+sodium-native), and there is zero linker/dlopen error in the device log. The
+addon resolves but the linked load returns not-found.
+
+Reading tetherto/qvac source settles it. QVAC's supported mobile integration is
+NOT "require @qvac/bare-sdk inside your own worklet + plain bare-pack." It is:
+- `@qvac/sdk` (the full SDK) + its Expo config plugin `@qvac/sdk/expo-plugin`
+  (`withMobileBundle`), which during `expo prebuild`:
+  - runs QVAC's OWN bundler (`bundleSdk`) to emit `worker.mobile.bundle.js`,
+  - runs `verifyBundle` (ABI check against the Bare runtime version),
+  - PATCHES react-native-bare-kit's android/ios `link.mjs` to be
+    addons-manifest-aware (`qvac/addons.manifest.json` allowlist).
+- QVAC then runs as its OWN Bare worker (react-native-bare-kit Worklet, managed
+  by the SDK's `expo-rpc-client` over `bare-rpc`); the app talks to it via RPC.
+- Physical device only ("QVAC currently does not run on emulators").
+
+My spike loaded @qvac/bare-sdk inside PearList's P2P worklet and packed it with
+stock `bare-pack --linked` + stock bare-kit linker - skipping bundleSdk,
+verifyBundle, and the linker patch. That is why the addon never loads.
+
+### Corrected integration (the real plan)
+
+Architecturally this is "QVAC on the RN side" (the Option B from the original
+assessment), running as a SECOND worker alongside PearList's P2P worklet:
+1. `npm i @qvac/sdk bare-rpc` (drop the direct `@qvac/bare-sdk` +
+   `@qvac/llm-llamacpp` deps and the in-worklet probe).
+2. `npx expo install expo-device` (expo-file-system/build-properties already in).
+3. app.json plugins: add `"@qvac/sdk/expo-plugin"` (minSdkVersion 29 already set).
+   Pass the Bare runtime version explicitly for ABI checks: **1.27.0** (bare-kit
+   0.12.3 does not expose it; we measured it on-device).
+4. `npx expo prebuild` -> QVAC bundles + verifies + patches the linkers.
+5. From the RN shell (App.jsx), use the `@qvac/sdk` API (loadModel/completion or
+   embed) to classify, then persist via the existing `ai:categorize`/`item:edit`
+   worklet method so the category still syncs P2P. `classifyAisle` (aisles.js)
+   stays as the offline fallback + today's shipping behavior.
+6. Retest on the TCL (physical device required).
+
+Revert from the branch before the corrected path: the `QVAC_PROBE` block in
+bare.js, `src/qvacProbe.mjs`, and the direct @qvac/bare-sdk/@qvac/llm-llamacpp
+deps. Keep aisles.js, the worklet ai:* methods, and the UI grouping.
+
 ## First spike steps (in order)
 
 1. `npm i @qvac/bare-sdk @qvac/llm-llamacpp` in pearlist.
