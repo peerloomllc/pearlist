@@ -440,11 +440,19 @@ function ItemRow ({ item, members, onToggle, onOpen }) {
   )
 }
 
+// Device-local view preferences for a grocery list (collapsed aisles + custom
+// order), stored in localStorage keyed by list id. Purely presentational, never
+// synced (see 2026-07-11 hybrid decision: reorder/collapse are per-device).
+const aisleViewKey = (listId) => `pearlist:aisleview:${listId}`
+function loadAisleView (listId) { try { return JSON.parse(localStorage.getItem(aisleViewKey(listId)) || '{}') || {} } catch { return {} } }
+function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(listId), ...patch }; localStorage.setItem(aisleViewKey(listId), JSON.stringify(v)); return v } catch { return patch } }
+
 // Grocery lists render their items grouped under aisle headers (Produce, Dairy,
-// ...) in aisles.js order. The `category` field is filled in the background by
-// the ai:categorize pass; until it lands an item groups under 'Other'. `renderRow`
-// is the same SwipeRow+ItemRow used for the flat list, so behavior is identical.
-function AisleGroupedItems ({ items, renderRow }) {
+// ...) in aisles.js order. The `category` field is filled by the keyword pass +
+// the AI fallback; until it lands an item groups under 'Other'. Headers are
+// tappable to collapse/expand (state per device) and show an open/total count.
+// `renderRow` is the same SwipeRow+ItemRow used for the flat list.
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle }) {
   const buckets = new Map()
   for (const it of items) {
     const key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
@@ -454,12 +462,20 @@ function AisleGroupedItems ({ items, renderRow }) {
   const sections = aisles.AISLES.filter((a) => buckets.has(a)).map((a) => ({ aisle: a, items: buckets.get(a) }))
   return (
     <>
-      {sections.map(({ aisle, items: rows }) => (
-        <div key={aisle}>
-          <div style={{ position: 'sticky', top: 0, zIndex: 1, background: c.surface.base, padding: `${sp.sm}px ${sp.base}px`, fontSize: 12, fontWeight: 500, letterSpacing: 0.4, textTransform: 'uppercase', color: c.text.secondary, borderBottom: `1px solid ${c.divider}` }}>{aisle}</div>
-          {rows.map(renderRow)}
-        </div>
-      ))}
+      {sections.map(({ aisle, items: rows }) => {
+        const isCollapsed = !!collapsed?.has(aisle)
+        const open = rows.filter((it) => !it.checked).length
+        return (
+          <div key={aisle}>
+            <button onClick={() => onToggle?.(aisle)} style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px`, cursor: 'pointer' }}>
+              <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
+              <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary }}>{aisle}</span>
+              <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px' }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
+            </button>
+            {isCollapsed ? null : rows.map(renderRow)}
+          </div>
+        )
+      })}
     </>
   )
 }
@@ -906,6 +922,18 @@ export default function App () {
   useEffect(() => { setAiPromptDismissed(false) }, [openListId])
   const enableAi = useCallback(() => { call('shell:aiConsent', { enabled: true }).then(setAiStatus).catch(() => {}) }, [])
 
+  // Collapsed aisles (device-local, per list). Tapping a section header toggles.
+  const [collapsedAisles, setCollapsedAisles] = useState(new Set())
+  useEffect(() => { setCollapsedAisles(new Set(openListId ? (loadAisleView(openListId).collapsed || []) : [])) }, [openListId])
+  const toggleAisle = useCallback((aisle) => {
+    setCollapsedAisles((prev) => {
+      const next = new Set(prev)
+      next.has(aisle) ? next.delete(aisle) : next.add(aisle)
+      if (openListId) saveAisleView(openListId, { collapsed: [...next] })
+      return next
+    })
+  }, [openListId])
+
   // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
   // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
   // once the user has opted in and the model is downloaded. Until then the
@@ -1116,7 +1144,7 @@ export default function App () {
                   </SwipeRow>
                 )
                 return openList?.kind === 'grocery'
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} />
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedAisles} onToggle={toggleAisle} />
                   : items.map(renderRow)
               })()}
           </div>
