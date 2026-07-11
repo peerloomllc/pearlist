@@ -182,6 +182,37 @@ Revert from the branch before the corrected path: the `QVAC_PROBE` block in
 bare.js, `src/qvacProbe.mjs`, and the direct @qvac/bare-sdk/@qvac/llm-llamacpp
 deps. Keep aisles.js, the worklet ai:* methods, and the UI grouping.
 
+## Step-4: corrected integration WORKS on-device (2026-07-11)
+
+Adopted the supported path: dropped @qvac/bare-sdk, added `@qvac/sdk` + `bare-rpc`
++ `expo-device`, added `@qvac/sdk/expo-plugin` to app.json, and a `qvac.config.json`
+(`plugins: ["@qvac/sdk/llamacpp-completion/plugin"]`, `bareRuntimeVersion: "1.27.0"`).
+`expo prebuild` then bundled QVAC's own worker, ABI-verified it against Bare
+1.27.0, and patched bare-kit's linker (addons manifest scoped to llm-llamacpp +
+core/P2P addons only - no whisper/ocr/diffusion). A smoke test in the RN shell
+(app/qvacSmoke.ts) downloaded + loaded LLAMA_3_2_1B_INST_Q4_0 (cpu) and classified
+5 items. Full run on the TCL (arm64, Android 15): download 100% -> model loaded ->
+5 classifications -> DONE OK. **No ADDON_NOT_FOUND. The blocker is resolved.**
+
+But the practical result is mixed:
+- Classification QUALITY (zero-shot, 1B, naive prompt) was 2/5 correct:
+  cilantro->Pantry (want Produce), whole milk->Meat&Seafood (want Dairy),
+  chicken->Meat&Seafood (ok), toilet paper->Pantry (want Household),
+  ice cream->Frozen (ok). The offline keyword classifier gets all 5 right.
+- MEMORY: loading the 1B model caused severe low-memory-killer thrash on the TCL
+  (it culled ~everything; our foreground app survived). Low-end devices are at
+  their limit with a 1B model.
+- LATENCY: ~1.7-3.4s per item on CPU. Fine for background, not instant.
+- COST: ~0.8GB model download on first run, +~13-15MB app native size.
+
+Conclusion: QVAC is technically viable and correctly integrated, but a 1B LLM
+with a zero-shot prompt is WORSE than the free deterministic classifier for fixed
+aisle labels. To make the LLM worth it: few-shot / grammar-constrained decoding to
+the aisle set, or the smaller embeddings model (nearest-label), or a better model
+on capable devices only. Recommendation: keep aisles.js as the shipping path; treat
+QVAC as opt-in / capable-device-only, and only if constrained decoding beats the
+keyword classifier in an A/B. QVAC_SMOKE left OFF in the code.
+
 ## First spike steps (in order)
 
 1. `npm i @qvac/bare-sdk @qvac/llm-llamacpp` in pearlist.

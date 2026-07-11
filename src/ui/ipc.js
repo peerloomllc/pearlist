@@ -146,6 +146,11 @@ const mockMethods = {
     const it = mockGroup(groupId).items.get(itemId)
     it.category = aisles.classifyAisle(it.text); return { category: it.category }
   },
+  'ai:setCategory': async ({ groupId, itemId, category }) => {
+    const it = mockGroup(groupId).items.get(itemId)
+    if (it && aisles.AISLES.includes(category)) it.category = category
+    return { category: it?.category }
+  },
   'ai:categorizeList': async ({ groupId, listId, force }) => {
     let categorized = 0
     for (const it of mockGroup(groupId).items.values()) {

@@ -11,29 +11,14 @@ const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode } = require('./listWire')
-const { AISLES, classifyAisle, normalizeAisle } = require('./aisles') // AISLES: used by the QVAC completion prompt when the model seam is wired
+const { classifyAisle, normalizeAisle } = require('./aisles')
 
-// --- on-device categorization: the QVAC model seam ---------------------------
-// `classifyItem` is the single swap point for the on-device AI spike
-// (2026-07-11). TODAY it delegates to the offline keyword classifier in
-// aisles.js. To wire QVAC (verified API, see proposals/2026-07-11-qvac-
-// integration-notes.md):
-//
-//   const { plugins, loadModel, completion } = require('@qvac/bare-sdk')
-//   const { llamacppCompletion } = require('@qvac/bare-sdk/llamacpp-completion/plugin')
-//   let _modelId // lazily loaded once
-//   async function classifyItem (_ctx, text) {
-//     try {
-//       if (!_modelId) { plugins([llamacppCompletion]); _modelId = await loadModel({ modelType: 'llamacpp-completion', /* files/config */ }) }
-//       const run = completion({ modelId: _modelId, history: [{ role: 'user',
-//         content: `Which aisle is "${text}"? Answer exactly one of: ${AISLES.join(', ')}.` }] })
-//       return normalizeAisle((await run.final).text) || classifyAisle(text)
-//     } catch { return classifyAisle(text) } // offline fallback: model missing/off-list
-//   }
-//
-// Requires `npm i @qvac/bare-sdk @qvac/llm-llamacpp` + an on-device build (the
-// prebuilt .bare addon is auto-linked by react-native-bare-kit). Kept async so
-// the swap needs no call-site changes. See aisles.js header + DECISIONS.md.
+// Offline aisle classifier for the worklet-side ai:categorize methods. This is
+// the always-available baseline (and today's shipping behavior). Smarter
+// on-device categorization is done by QVAC in the RN shell (which runs QVAC as
+// its own Bare worker - see proposals/2026-07-11-qvac-integration-notes.md); the
+// shell persists its result via ai:setCategory below, so both paths write the
+// same signed, synced `category` field.
 async function classifyItem (_ctx, text) {
   return classifyAisle(text)
 }
@@ -487,6 +472,20 @@ const methods = {
     const category = normalizeAisle(await classifyItem(ctx, existing.text)) || 'Other'
     await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, category })
     return { category }
+  },
+
+  // Persist a category computed elsewhere (the RN shell's QVAC worker) as a
+  // normal signed op, so one capable device's classification syncs to every
+  // peer. The category is validated against the known aisles; an unknown value
+  // is dropped rather than written. Re-reads to avoid clobbering a concurrent edit.
+  'ai:setCategory': async ({ groupId, listId, itemId, category }, ctx) => {
+    const aisle = normalizeAisle(category)
+    if (!aisle) throw new Error('unknown aisle: ' + category)
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, itemKey(listId, itemId))
+    if (!existing || existing.deleted) throw new Error('item not found')
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, category: aisle })
+    return { category: aisle }
   },
 
   // Categorize every item in a list that lacks a category (or all of them when
