@@ -2,6 +2,28 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-11 - Grocery aisle categorization scaffold (QVAC spike seam)
+Tier: T1 (additive field + new read-only-ish methods; no pairing/topic/encryption
+change).
+Context: evaluating tetherto/qvac (on-device AI on the same Holepunch/Bare stack)
+for the suite. PearList's backlogged "categories/aisles" feature is the lowest-risk
+place to spike it.
+Choice: add an optional `category` aisle label to the item row, written by new
+`ai:categorize` / `ai:categorizeList` worklet methods, and group grocery lists by
+aisle in the UI. The classifier lives behind a single seam (`classifyItem` in
+listMethods.js -> `classifyAisle` in aisles.js). Ship it now backed by a pure
+offline keyword classifier; the QVAC llamacpp model plugs into that one seam once
+its on-device binary is proven, with the keyword pass kept as the fallback.
+`category` is additive: old peers accept + ignore it, non-grocery lists never show
+it, so no merge rule changes.
+Alternatives: compute categories per-device as presentation only (rejected -
+low-end devices could not run a model, so categorize once and sync the result);
+embeddings model instead of an LLM (still open, cheaper - decide after the binary
+loads on-device).
+Consequences: wiring the actual QVAC model is a follow-up and, because it pulls a
+native addon into the Bare build, gets its own verify pass on real hardware. No
+model ships in this scaffold.
+
 ## 2026-07-07 - @peerloom/core stays one package with subpath exports (split CLOSED)
 Tier: T0 (design decision + documentation; no code change). Resolves the open
 question in proposals/2026-06-30-pearlist-core-extraction.md and the "core package

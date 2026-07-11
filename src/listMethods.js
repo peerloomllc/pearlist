@@ -11,6 +11,19 @@ const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode } = require('./listWire')
+const { classifyAisle, normalizeAisle } = require('./aisles')
+
+// --- on-device categorization: the QVAC model seam ---------------------------
+// `classifyItem` is the single swap point for the on-device AI spike
+// (2026-07-11). TODAY it delegates to the offline keyword classifier in
+// aisles.js. To wire QVAC's llamacpp addon, replace the body: lazily loadModel()
+// a small GGUF, run a completion() constraining the answer to the AISLES list,
+// then normalizeAisle() the reply and fall back to classifyAisle() when the
+// model is unavailable or returns something off-list. Kept async so that swap
+// needs no call-site changes. See aisles.js header + DECISIONS.md 2026-07-11.
+async function classifyItem (_ctx, text) {
+  return classifyAisle(text)
+}
 
 // Grace before the owner tears down a just-deleted space, so the `space`
 // tombstone can replicate to connected members first.
@@ -446,6 +459,43 @@ const methods = {
       if (value && !value.deleted) out.push(value)
     }
     return out
+  },
+
+  // --- ai: on-device categorization --------------------------------------
+  // Classify one item into a grocery aisle and write it onto the item row as a
+  // normal signed op, so the category replicates to every peer (only ONE
+  // capable device need run the classifier). `category` is additive: old peers
+  // and non-grocery lists just ignore it. Re-reads before writing so a
+  // concurrent edit is not clobbered.
+  'ai:categorize': async ({ groupId, listId, itemId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, itemKey(listId, itemId))
+    if (!existing || existing.deleted) throw new Error('item not found')
+    const category = normalizeAisle(await classifyItem(ctx, existing.text)) || 'Other'
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, category })
+    return { category }
+  },
+
+  // Categorize every item in a list that lacks a category (or all of them when
+  // `force`). Returns how many rows were written. This is the call the UI fires
+  // in the background when a grocery list opens; it is a no-op once everything
+  // is categorized, so it is safe to call on every load.
+  'ai:categorizeList': async ({ groupId, listId, force }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    await base.update()
+    const todo = []
+    for await (const { value } of base.view.createReadStream(itemRange(listId))) {
+      if (value && !value.deleted && (force || !value.category)) todo.push(value)
+    }
+    let categorized = 0
+    for (const it of todo) {
+      const category = normalizeAisle(await classifyItem(ctx, it.text)) || 'Other'
+      const cur = await readRow(base, itemKey(listId, it.id)) // re-read: skip if edited/deleted meanwhile
+      if (!cur || cur.deleted) continue
+      await putRow(ctx, groupId, itemKey(listId, it.id), { ...cur, category })
+      categorized++
+    }
+    return { categorized }
   },
 }
 

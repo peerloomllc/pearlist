@@ -5,6 +5,7 @@
 // mirrors the worklet methods, so the screens are fully clickable without a phone.
 
 import { SCREENSHOT_SCENE, screenshotCall, installScreenshotEnv } from './screenshot-fixtures.js'
+import aisles from '../aisles.js'
 
 const inShell = typeof window !== 'undefined' && !!window.ReactNativeWebView
 
@@ -139,6 +140,20 @@ const mockMethods = {
   'item:assign': async ({ groupId, listId, itemId, assignee }) => { mockGroup(groupId).items.get(itemId).assignee = assignee || null; return { ok: true } },
   'item:delete': async ({ groupId, listId, itemId }) => { mockGroup(groupId).items.get(itemId).deleted = true; return { ok: true } },
   'item:getAll': async ({ groupId, listId }) => [...mockGroup(groupId).items.values()].filter(i => i.listId === listId && !i.deleted),
+  // Mirrors the worklet's ai:* methods using the same offline classifier, so the
+  // browser preview groups a grocery list by aisle without a phone.
+  'ai:categorize': async ({ groupId, itemId }) => {
+    const it = mockGroup(groupId).items.get(itemId)
+    it.category = aisles.classifyAisle(it.text); return { category: it.category }
+  },
+  'ai:categorizeList': async ({ groupId, listId, force }) => {
+    let categorized = 0
+    for (const it of mockGroup(groupId).items.values()) {
+      if (it.listId !== listId || it.deleted || (!force && it.category)) continue
+      it.category = aisles.classifyAisle(it.text); categorized++
+    }
+    return { categorized }
+  },
   'profile:get': async () => mock.profile,
   'profile:set': async ({ displayName, ...rest }) => {
     if (!displayName || !displayName.trim()) throw new Error('displayName required')
@@ -175,14 +190,14 @@ function seedIfRequested () {
   if (!/(?:\?|&)seed/.test(window.location.search || '')) return
   const me = (g) => g.members.set(MOCK_SELF, { pubkey: MOCK_SELF, displayName: mock.profile?.displayName || 'You', avatar: mock.profile?.avatar || null })
   const member = (g, pk, name) => g.members.set(pk, { pubkey: pk, displayName: name, avatar: null })
-  const list = (g, name, assignee = null) => { const id = rid(); g.lists.set(id, { id, name, assignee, deleted: false }); return id }
+  const list = (g, name, assignee = null, kind = 'list') => { const id = rid(); g.lists.set(id, { id, name, assignee, kind, deleted: false }); return id }
   const item = (g, listId, text, extra = {}) => { const id = rid(); g.items.set(id, { id, listId, text, qty: 1, checked: false, assignee: null, deleted: false, ...extra }) }
 
   // Space 1: Family
   const SAM = '5a'.repeat(32); const ALEX = 'a1'.repeat(32)
   const fam = newGroup(rid(22), 'Family', 'mock-fam')
   me(fam); member(fam, SAM, 'Sam'); member(fam, ALEX, 'Alex')
-  const groceries = list(fam, 'Groceries'); const chores = list(fam, 'Chores', ALEX)
+  const groceries = list(fam, 'Groceries', null, 'grocery'); const chores = list(fam, 'Chores', ALEX, 'chore')
   item(fam, groceries, 'Oat milk', { qty: 2 }); item(fam, groceries, 'Sourdough'); item(fam, groceries, 'Coffee beans', { checked: true })
   item(fam, groceries, 'Spinach', { assignee: SAM }); item(fam, groceries, 'Lemons', { qty: 6, checked: true })
   item(fam, chores, 'Water the plants', { assignee: ALEX }); item(fam, chores, 'Take out recycling', { checked: true })

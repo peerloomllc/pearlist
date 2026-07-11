@@ -5,6 +5,7 @@ import { call, on, isMock, haptic } from './ipc.js'
 import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
+import aisles from '../aisles.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
@@ -439,6 +440,30 @@ function ItemRow ({ item, members, onToggle, onOpen }) {
   )
 }
 
+// Grocery lists render their items grouped under aisle headers (Produce, Dairy,
+// ...) in aisles.js order. The `category` field is filled in the background by
+// the ai:categorize pass; until it lands an item groups under 'Other'. `renderRow`
+// is the same SwipeRow+ItemRow used for the flat list, so behavior is identical.
+function AisleGroupedItems ({ items, renderRow }) {
+  const buckets = new Map()
+  for (const it of items) {
+    const key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key).push(it)
+  }
+  const sections = aisles.AISLES.filter((a) => buckets.has(a)).map((a) => ({ aisle: a, items: buckets.get(a) }))
+  return (
+    <>
+      {sections.map(({ aisle, items: rows }) => (
+        <div key={aisle}>
+          <div style={{ position: 'sticky', top: 0, zIndex: 1, background: c.surface.base, padding: `${sp.sm}px ${sp.base}px`, fontSize: 12, fontWeight: 500, letterSpacing: 0.4, textTransform: 'uppercase', color: c.text.secondary, borderBottom: `1px solid ${c.divider}` }}>{aisle}</div>
+          {rows.map(renderRow)}
+        </div>
+      ))}
+    </>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Screens
 // ---------------------------------------------------------------------------
@@ -819,6 +844,21 @@ export default function App () {
 
   const openList = lists.find(l => l.id === openListId) || null
 
+  // Grocery aisle categorization (QVAC spike, 2026-07-11): when a grocery list
+  // is open and has items lacking a category, ask the worklet to classify them
+  // in the background, then reload so they regroup under aisle headers. The
+  // worklet no-ops once everything is categorized, so this settles after one
+  // pass and does not loop.
+  useEffect(() => {
+    if (openList?.kind !== 'grocery' || !gid || !openListId) return
+    if (!items.some((i) => !i.category)) return
+    let cancelled = false
+    call('ai:categorizeList', { groupId: gid, listId: openListId })
+      .then(() => { if (!cancelled) loadItems(gid, openListId) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [openList?.kind, gid, openListId, items, loadItems])
+
   async function createSpace (name) {
     const { groupId } = await call('group:create', { name })
     await call('space:init', { groupId, name }).catch(() => {}) // claim ownership before anyone joins
@@ -1001,11 +1041,16 @@ export default function App () {
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
-              : items.map((it) => (
-                <SwipeRow key={it.id} onDelete={() => swipeDeleteItem(it)}>
-                  <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />
-                </SwipeRow>
-              ))}
+              : (() => {
+                const renderRow = (it) => (
+                  <SwipeRow key={it.id} onDelete={() => swipeDeleteItem(it)}>
+                    <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />
+                  </SwipeRow>
+                )
+                return openList?.kind === 'grocery'
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} />
+                  : items.map(renderRow)
+              })()}
           </div>
           {pendingUndo ? <UndoToast onUndo={undoDelete} /> : null}
           <div style={{ position: 'sticky', bottom: 0, background: c.surface.base }}>
