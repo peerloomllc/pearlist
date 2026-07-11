@@ -213,6 +213,42 @@ on capable devices only. Recommendation: keep aisles.js as the shipping path; tr
 QVAC as opt-in / capable-device-only, and only if constrained decoding beats the
 keyword classifier in an A/B. QVAC_SMOKE left OFF in the code.
 
+## Step-5: grammar-constrained decoding (2026-07-11)
+
+Re-ran with `responseFormat: json_schema` whose `aisle` is an `enum` of the 11
+aisles (llama.cpp compiles the enum into a decode grammar, so an off-list answer
+is impossible). Same 1B model on the TCL, 10 items. Grammar params only touch
+app/qvacSmoke.ts (Metro-served) - no rebuild, model cached.
+
+Result: AI 7/10 clearly correct (+1 debatable), vs keyword 9/10.
+  item             AI (grammar)      keyword         truth
+  cilantro         Produce ✓         Produce ✓       Produce
+  whole milk       Dairy & Eggs ✓    Dairy & Eggs ✓  Dairy & Eggs
+  chicken thighs   Meat & Seafood ✓  Meat & Seafood ✓Meat & Seafood
+  toilet paper     Personal Care ~   Household ✓     (borderline)
+  ice cream        Bakery ✗          Frozen ✓        Frozen
+  bananas          Produce ✓         Produce ✓       Produce
+  cheddar cheese   Dairy & Eggs ✓    Dairy & Eggs ✓  Dairy & Eggs
+  dish soap        Personal Care ✗   Household ✓     Household
+  sourdough bread  Bakery ✓          Bakery ✓        Bakery
+  orange juice     Beverages ✓       Produce ✗       Beverages
+
+Takeaways:
+- Grammar FIXED the off-list problem: every answer is now a valid aisle (unconstrained
+  was 2/5 with garbage like made-up answers). Big reliability win - output is always usable.
+- Accuracy jumped (2/5 -> 7/10) but is still below the keyword sorter (9/10).
+- The two have COMPLEMENTARY failure modes: keyword misses word-collisions
+  ("orange juice" -> Produce because "orange" outranks "juice"); the AI makes
+  semantic slips ("ice cream" -> Bakery, "dish soap" -> Personal Care via "soap").
+- Latency got WORSE with grammar + the TCL's memory thrash: 2.5-21s/item (vs 1.7-3.4s
+  unconstrained). The 12-21s spikes coincide with low-memory swapping.
+
+Best design (recommended): HYBRID. Keyword sorter first (instant, 9/10); only when it
+returns 'Other' (a word it doesn't know) fall back to the grammar-constrained LLM. That
+keeps the common case instant and accurate, uses the AI only for the novel items it's
+actually needed for, and dodges the AI's semantic errors on easy items. Still opt-in /
+capable-device-only. QVAC_SMOKE left OFF.
+
 ## First spike steps (in order)
 
 1. `npm i @qvac/bare-sdk @qvac/llm-llamacpp` in pearlist.

@@ -20,7 +20,18 @@ import {
 
 const AISLES = ['Produce', 'Dairy & Eggs', 'Meat & Seafood', 'Bakery', 'Frozen',
   'Pantry', 'Snacks', 'Beverages', 'Household', 'Personal Care', 'Other']
-const SAMPLES = ['cilantro', 'whole milk', 'chicken thighs', 'toilet paper', 'ice cream']
+const SAMPLES = ['cilantro', 'whole milk', 'chicken thighs', 'toilet paper', 'ice cream',
+  'bananas', 'cheddar cheese', 'dish soap', 'sourdough bread', 'orange juice']
+
+// Grammar-constrained decoding: force the reply to be JSON whose `aisle` is one
+// of the exact aisle strings. llama.cpp compiles the enum into a decode-time
+// grammar, so the model physically cannot emit an off-list answer.
+const AISLE_SCHEMA = {
+  type: 'object',
+  properties: { aisle: { type: 'string', enum: AISLES } },
+  required: ['aisle'],
+  additionalProperties: false,
+}
 
 const LOG = FileSystem.documentDirectory + 'qvac-smoke.log'
 
@@ -36,21 +47,22 @@ async function log (line: string) {
 async function classify (modelId: string, item: string): Promise<string> {
   const run = completion({
     modelId,
-    history: [{
-      role: 'user',
-      content: `Which grocery aisle is "${item}"? Answer with exactly one of: ${AISLES.join(', ')}. Answer with only the aisle name.`,
-    }],
-    stream: true,
+    history: [
+      { role: 'system', content: 'You assign a grocery item to the single best supermarket aisle. Reply with JSON only.' },
+      { role: 'user', content: `Item: "${item}"` },
+    ],
+    stream: false,
+    responseFormat: { type: 'json_schema', json_schema: { name: 'aisle', schema: AISLE_SCHEMA, strict: true } },
   })
-  let acc = ''
-  for await (const token of run.tokenStream) acc += token
-  return acc.trim()
+  const final = await run.final
+  const txt = (final.contentText || '').trim()
+  try { return String(JSON.parse(txt).aisle) } catch { return txt }
 }
 
 export async function runQvacSmoke (): Promise<void> {
   try {
     await FileSystem.writeAsStringAsync(LOG, '').catch(() => {})
-    await log('start (device=cpu, model=LLAMA_3_2_1B_INST_Q4_0)')
+    await log('start (device=cpu, model=LLAMA_3_2_1B_INST_Q4_0, grammar-constrained json_schema enum)')
 
     let lastPct = -1
     await log('downloading model...')
