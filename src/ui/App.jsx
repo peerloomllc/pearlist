@@ -447,32 +447,186 @@ const aisleViewKey = (listId) => `pearlist:aisleview:${listId}`
 function loadAisleView (listId) { try { return JSON.parse(localStorage.getItem(aisleViewKey(listId)) || '{}') || {} } catch { return {} } }
 function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(listId), ...patch }; localStorage.setItem(aisleViewKey(listId), JSON.stringify(v)); return v } catch { return patch } }
 
-// Grocery lists render their items grouped under aisle headers (Produce, Dairy,
-// ...) in aisles.js order. The `category` field is filled by the keyword pass +
-// the AI fallback; until it lands an item groups under 'Other'. Headers are
-// tappable to collapse/expand (state per device) and show an open/total count.
-// `renderRow` is the same SwipeRow+ItemRow used for the flat list.
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle }) {
+// Long-press drag controller for the grouped grocery view. Coexists with the
+// row swipe-to-delete: a horizontal move before the hold-timer cancels the drag
+// (so swipe still works); holding still ~320ms activates a drag. Items reorder
+// within their aisle or drop into another aisle to re-file (recategorize);
+// headers reorder aisles. All device-local. Returns handlers + live drag state +
+// a floating ghost to render. Pointer events (works in the WebView on touch).
+const HOLD_MS = 320
+function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderAisles, onRecategorize }) {
+  const [dragOver, setDragOver] = useState(null) // { kind, dragId, aisle, beforeId }
+  const [ghost, setGhost] = useState(null)       // { x, y, label, kind }
+  const data = useRef({ items, aisleView })
+  data.current = { items, aisleView }
+  const S = useRef({})
+  const justDragged = useRef(false) // swallow the click a header emits after a drag
+
+  const cleanup = () => {
+    const s = S.current
+    window.removeEventListener('pointermove', s.onMove)
+    window.removeEventListener('pointerup', s.onUp)
+    window.removeEventListener('pointercancel', s.onUp)
+    if (s.timer) clearTimeout(s.timer)
+    if (s.raf) cancelAnimationFrame(s.raf)
+    S.current = {}
+    setDragOver(null); setGhost(null)
+  }
+
+  const autoscroll = () => {
+    const s = S.current
+    const el = scrollRef?.current
+    if (s.active && el) {
+      const r = el.getBoundingClientRect()
+      if (s.y < r.top + 70) el.scrollTop -= 8
+      else if (s.y > r.bottom - 90) el.scrollTop += 8
+    }
+    if (s.active) s.raf = requestAnimationFrame(autoscroll)
+  }
+
+  const updateTarget = () => {
+    const s = S.current
+    const el = document.elementFromPoint(s.x, s.y)
+    if (!el) return
+    if (s.kind === 'item') {
+      const overItem = el.closest('[data-item-id]')
+      const container = el.closest('[data-aisle]')
+      const aisle = container?.getAttribute('data-aisle') || s.aisle
+      const beforeId = overItem && overItem.getAttribute('data-item-id') !== s.id ? overItem.getAttribute('data-item-id') : null
+      setDragOver({ kind: 'item', dragId: s.id, aisle, beforeId })
+      s.targetAisle = aisle; s.beforeId = beforeId
+    } else {
+      const overHeader = el.closest('[data-aisle-header]')
+      const aisle = overHeader?.getAttribute('data-aisle-header')
+      if (aisle) { setDragOver({ kind: 'aisle', aisle }); s.targetAisle = aisle }
+    }
+  }
+
+  const dragProps = useCallback((kind, id, aisle) => ({
+    onPointerDown: (e) => {
+      if (e.button != null && e.button !== 0) return
+      const s = S.current = { kind, id, aisle, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false }
+      const label = kind === 'aisle' ? aisle : (data.current.items.find((it) => it.id === id)?.text || '')
+      s.onMove = (ev) => {
+        s.x = ev.clientX; s.y = ev.clientY
+        if (!s.active) {
+          if (Math.hypot(ev.clientX - s.startX, ev.clientY - s.startY) > 10) cleanup() // moved first -> scroll/swipe
+          return
+        }
+        ev.preventDefault()
+        setGhost((g) => g ? { ...g, x: s.x, y: s.y } : g)
+        updateTarget()
+      }
+      s.onUp = () => {
+        if (s.active) { commit(s); justDragged.current = true; setTimeout(() => { justDragged.current = false }, 350) }
+        cleanup()
+      }
+      window.addEventListener('pointermove', s.onMove, { passive: false })
+      window.addEventListener('pointerup', s.onUp)
+      window.addEventListener('pointercancel', s.onUp)
+      s.timer = setTimeout(() => {
+        s.active = true
+        try { haptic('medium') } catch {}
+        setGhost({ x: s.x, y: s.y, label, kind })
+        setDragOver({ kind, dragId: id, aisle, beforeId: null })
+        s.raf = requestAnimationFrame(autoscroll)
+      }, HOLD_MS)
+    },
+  }), [])
+
+  const commit = (s) => {
+    const { items: its, aisleView: av } = data.current
+    if (s.kind === 'aisle') {
+      const present = [...new Set(its.map((it) => aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK))]
+      const ordered = orderAisles(present, av.aisleOrder).filter((a) => a !== s.id)
+      const at = s.targetAisle && s.targetAisle !== s.id ? ordered.indexOf(s.targetAisle) : ordered.length
+      ordered.splice(at < 0 ? ordered.length : at, 0, s.id)
+      onReorderAisles(ordered)
+      return
+    }
+    // item drag
+    if (s.targetAisle && s.targetAisle !== s.aisle) { onRecategorize(s.id, s.targetAisle); return }
+    // same-aisle reorder: pin the full current display order with the item moved
+    const buckets = new Map()
+    for (const it of its) { const k = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK; (buckets.get(k) || buckets.set(k, []).get(k)).push(it) }
+    const flat = orderAisles([...buckets.keys()], av.aisleOrder).flatMap((a) => orderRows(buckets.get(a), av.itemOrder).map((it) => it.id))
+    const without = flat.filter((id) => id !== s.id)
+    const at = s.beforeId ? without.indexOf(s.beforeId) : -1
+    without.splice(at < 0 ? without.length : at, 0, s.id)
+    onReorderItems(without)
+  }
+
+  return { dragProps, dragOver, ghost, didDrag: () => justDragged.current }
+}
+
+// The floating element that follows the finger during a drag.
+function DragGhost ({ ghost }) {
+  if (!ghost) return null
+  return (
+    <div style={{ position: 'fixed', left: 0, top: 0, transform: `translate(${ghost.x + 12}px, ${ghost.y - 18}px)`, zIndex: 100, pointerEvents: 'none', maxWidth: '70%', padding: `${sp.sm}px ${sp.base}px`, background: c.surface.elevated, border: `1px solid ${c.primary}`, borderRadius: r.md, boxShadow: '0 8px 24px rgba(0,0,0,0.4)', color: c.text.primary, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textTransform: ghost.kind === 'aisle' ? 'uppercase' : 'none' }}>
+      {ghost.label}
+    </div>
+  )
+}
+
+// Order the present aisles: any in the device-local `aisleOrder` first (that
+// sequence), then the rest in canonical AISLES order.
+function orderAisles (present, aisleOrder) {
+  const set = new Set(present)
+  const first = (aisleOrder || []).filter((a) => set.has(a))
+  const rest = aisles.AISLES.filter((a) => set.has(a) && !first.includes(a))
+  return [...first, ...rest]
+}
+// Order items within an aisle: those in `itemOrder` first (that sequence), then
+// the rest by createdAt (stable original order).
+function orderRows (rows, itemOrder) {
+  const idx = new Map((itemOrder || []).map((id, i) => [id, i]))
+  return rows.slice().sort((a, b) => {
+    const ia = idx.has(a.id) ? idx.get(a.id) : Infinity
+    const ib = idx.has(b.id) ? idx.get(b.id) : Infinity
+    if (ia !== ib) return ia - ib
+    return (a.createdAt || 0) - (b.createdAt || 0)
+  })
+}
+
+// Grocery lists render items grouped under aisle headers in device-local order.
+// Headers collapse/expand (tap) and show an open/total count. Long-press an item
+// or a header to drag: items reorder within their aisle, or drop into another
+// aisle to re-file them there; headers reorder the aisles. All order is
+// per-device (see the 2026-07-11 hybrid decision). `dragProps(kind,id,aisle)`
+// wires the long-press handlers from the parent's drag controller.
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, didDrag }) {
   const buckets = new Map()
   for (const it of items) {
     const key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(it)
   }
-  const sections = aisles.AISLES.filter((a) => buckets.has(a)).map((a) => ({ aisle: a, items: buckets.get(a) }))
+  const sections = orderAisles([...buckets.keys()], aisleOrder).map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
   return (
     <>
       {sections.map(({ aisle, items: rows }) => {
         const isCollapsed = !!collapsed?.has(aisle)
         const open = rows.filter((it) => !it.checked).length
+        const aisleTarget = dragOver?.aisle === aisle && dragOver?.kind === 'item'
         return (
-          <div key={aisle}>
-            <button onClick={() => onToggle?.(aisle)} style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px`, cursor: 'pointer' }}>
+          <div key={aisle} data-aisle={aisle} style={aisleTarget ? { background: 'rgba(127,127,127,0.08)' } : undefined}>
+            <button
+              onClick={() => { if (didDrag?.()) return; onToggle?.(aisle) }}
+              {...(dragProps ? dragProps('aisle', aisle, aisle) : {})}
+              data-aisle-header={aisle}
+              style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: dragOver?.kind === 'aisle' && dragOver?.aisle === aisle ? c.surface.input : c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px`, cursor: 'pointer', touchAction: 'pan-y' }}
+            >
               <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
               <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary }}>{aisle}</span>
               <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px' }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
             </button>
-            {isCollapsed ? null : rows.map(renderRow)}
+            {isCollapsed ? null : rows.map((it) => (
+              <div key={it.id} data-item-id={it.id} data-aisle={aisle} {...(dragProps ? dragProps('item', it.id, aisle) : {})}
+                style={{ borderTop: dragOver?.kind === 'item' && dragOver?.beforeId === it.id ? `2px solid ${c.primary}` : undefined, opacity: dragOver?.dragId === it.id ? 0.4 : 1 }}>
+                {renderRow(it)}
+              </div>
+            ))}
           </div>
         )
       })}
@@ -922,17 +1076,34 @@ export default function App () {
   useEffect(() => { setAiPromptDismissed(false) }, [openListId])
   const enableAi = useCallback(() => { call('shell:aiConsent', { enabled: true }).then(setAiStatus).catch(() => {}) }, [])
 
-  // Collapsed aisles (device-local, per list). Tapping a section header toggles.
-  const [collapsedAisles, setCollapsedAisles] = useState(new Set())
-  useEffect(() => { setCollapsedAisles(new Set(openListId ? (loadAisleView(openListId).collapsed || []) : [])) }, [openListId])
-  const toggleAisle = useCallback((aisle) => {
-    setCollapsedAisles((prev) => {
-      const next = new Set(prev)
-      next.has(aisle) ? next.delete(aisle) : next.add(aisle)
-      if (openListId) saveAisleView(openListId, { collapsed: [...next] })
-      return next
-    })
+  // Device-local grocery view prefs (collapsed aisles + custom aisle/item order),
+  // per list, persisted to localStorage. Tapping a header toggles collapse;
+  // long-press drag reorders (see useAisleDrag).
+  const [aisleView, setAisleViewState] = useState({ collapsed: [], aisleOrder: [], itemOrder: [] })
+  useEffect(() => { setAisleViewState({ collapsed: [], aisleOrder: [], itemOrder: [], ...(openListId ? loadAisleView(openListId) : {}) }) }, [openListId])
+  const patchAisleView = useCallback((patch) => {
+    setAisleViewState((prev) => ({ ...prev, ...patch }))
+    if (openListId) saveAisleView(openListId, patch)
   }, [openListId])
+  const collapsedSet = new Set(aisleView.collapsed || [])
+  const toggleAisle = useCallback((aisle) => {
+    const cur = aisleView.collapsed || []
+    patchAisleView({ collapsed: cur.includes(aisle) ? cur.filter((a) => a !== aisle) : [...cur, aisle] })
+  }, [aisleView.collapsed, patchAisleView])
+
+  // Drag: reorder items/aisles (device-local) or drop an item into another aisle
+  // to re-file it (recategorize, which syncs via ai:setCategory).
+  const listScrollRef = useRef(null)
+  const recategorizeItem = useCallback((itemId, aisle) => {
+    if (!gid || !openListId) return
+    call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle }).then(() => loadItems(gid, openListId)).catch(() => {})
+  }, [gid, openListId, loadItems])
+  const { dragProps, dragOver, ghost, didDrag } = useAisleDrag({
+    items, aisleView, scrollRef: listScrollRef,
+    onReorderItems: (order) => patchAisleView({ itemOrder: order }),
+    onReorderAisles: (order) => patchAisleView({ aisleOrder: order }),
+    onRecategorize: recategorizeItem,
+  })
 
   // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
   // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
@@ -1131,7 +1302,7 @@ export default function App () {
         // ===== List detail: the items of the open list + add-item bar =====
         <>
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
-          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+          <div ref={listScrollRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
             {openList?.kind === 'grocery' && !aiPromptDismissed
               ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onDismiss={() => setAiPromptDismissed(true)} />
               : null}
@@ -1144,7 +1315,7 @@ export default function App () {
                   </SwipeRow>
                 )
                 return openList?.kind === 'grocery'
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedAisles} onToggle={toggleAisle} />
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} didDrag={didDrag} />
                   : items.map(renderRow)
               })()}
           </div>
@@ -1174,6 +1345,7 @@ export default function App () {
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
+      <DragGhost ghost={ghost} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
         onAbout={() => { setSheet(null); setView('about') }} />
