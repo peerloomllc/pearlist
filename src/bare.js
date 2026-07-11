@@ -45,3 +45,19 @@ const engine = createGroupEngine({
 _engine = engine
 
 engine.start()
+
+// QVAC on-device AI probe (spike, 2026-07-11). Flip to false (or delete this
+// block) to build a clean worklet with no QVAC dependency in the bundle. When
+// on, it dynamically imports the ESM probe (bare-sdk plugin subpaths are
+// import-only, so it cannot be require()d from this CommonJS worklet) and marks
+// the result into the boot trace so it reaches the on-device log. Fully guarded:
+// it never throws into boot and the app runs identically whether or not QVAC is
+// installed or loads. See src/qvacProbe.mjs + proposals/2026-07-11-qvac-
+// integration-notes.md.
+const QVAC_PROBE = true
+if (QVAC_PROBE) {
+  import('./qvacProbe.mjs')
+    .then((m) => m.probeQvac())
+    .then((r) => mark('qvac:probe', r))
+    .catch((e) => mark('qvac:probe-error', String(e && e.message)))
+}

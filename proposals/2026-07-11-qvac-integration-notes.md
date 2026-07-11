@@ -71,6 +71,27 @@ This was the scary unknown. It mostly is not one.
    7.8, hyperswarm 4.17), same ecosystem, so low risk, but `npm ls` after install
    to confirm no duplicate-instance split of corestore/hypercore.
 
+## Step-1 results (local, done 2026-07-11)
+
+Installed `@qvac/bare-sdk` + `@qvac/llm-llamacpp` and wired a guarded boot probe
+(`src/qvacProbe.mjs`, called from `src/bare.js` behind `QVAC_PROBE`). Findings
+from packing the worklet locally:
+
+- **bare-sdk plugin subpaths are import-only.** `@qvac/bare-sdk/llamacpp-completion/plugin`
+  declares only an `import` condition in `exports` (no `require`/`default`), so
+  `require()` from our CommonJS worklet fails with `PACKAGE_PATH_NOT_EXPORTED`.
+  The plain `.` export has both conditions and requires fine; only the plugin
+  subpaths are ESM-only. FIX we adopted: keep the worklet CJS, put QVAC-touching
+  code in an `.mjs`, load it via dynamic `import('./qvacProbe.mjs')`. bare-pack
+  resolves and bundles that chain cleanly.
+- **Worklet bundle grows ~1-2MB -> 11.4MB** (bare-sdk pulls hyperdrive/hyperswarm/
+  corestore JS into the worklet). `npm run verify` stays green: 48 tests pass,
+  both Bare presets + UI build.
+- `@qvac/llm-llamacpp` install footprint is **579MB** (all-platform prebuilds).
+  bare-sdk itself is 8.9MB.
+- NOT yet proven: the native `.bare` dlopening its ggml backend on-device (needs
+  a model). That is the device build below.
+
 ## First spike steps (in order)
 
 1. `npm i @qvac/bare-sdk @qvac/llm-llamacpp` in pearlist.
