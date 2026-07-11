@@ -146,6 +146,8 @@ const mockMethods = {
     const it = mockGroup(groupId).items.get(itemId)
     it.category = aisles.classifyAisle(it.text); return { category: it.category }
   },
+  // Browser preview has no RN shell / QVAC; the AI fallback is a no-op here.
+  'shell:aiCategorize': async () => ({ ok: true, queued: 0 }),
   'ai:setCategory': async ({ groupId, itemId, category }) => {
     const it = mockGroup(groupId).items.get(itemId)
     if (it && aisles.AISLES.includes(category)) it.category = category

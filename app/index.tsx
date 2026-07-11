@@ -18,14 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
-import { runQvacSmoke } from './qvacSmoke'
-
-// QVAC on-device AI smoke test (spike, 2026-07-11). VALIDATED on the TCL then
-// switched OFF (it downloads a ~0.8GB model on boot). Flip to true to re-run;
-// downloads + loads a small LLM and classifies a few grocery items, logging to
-// Documents/qvac-smoke.log. See qvacSmoke.ts + proposals/2026-07-11-qvac-
-// integration-notes.md for the on-device result.
-const QVAC_SMOKE = false
+import { classifyAisleAI } from './qvac'
 
 // --- local notifications (assignment + join + completion; ON by default) ----
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
@@ -278,7 +271,6 @@ export default function Shell () {
       bgSyncEnabled().then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) })
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
       if (!cancelled) setHtml(await loadUiHtml())
-      if (QVAC_SMOKE) runQvacSmoke() // fire-and-forget; logs to Documents/qvac-smoke.log
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
     return () => { cancelled = true }
   }, [])
@@ -405,6 +397,27 @@ export default function Shell () {
         case 'shell:navState': {
           canBackRef.current = !!args?.canBack
           return reply(id, { ok: true })
+        }
+        case 'shell:aiCategorize': {
+          // Hybrid AI fallback: the worklet's keyword pass already ran and left
+          // these items as 'Other'. Classify each with the on-device LLM (lazy
+          // model load + download on first use) and persist any real aisle via
+          // the worklet, then tell the UI to reload. Reply immediately so the UI
+          // is not blocked on the (slow) model; the recategorization streams in.
+          const { groupId, listId, items: batch } = args || {}
+          reply(id, { ok: true, queued: Array.isArray(batch) ? batch.length : 0 })
+          ;(async () => {
+            let changed = 0
+            for (const it of (Array.isArray(batch) ? batch : [])) {
+              const aisle = await classifyAisleAI(String(it?.text || ''))
+              if (aisle && aisle !== 'Other') {
+                await callRaw('ai:setCategory', { groupId, listId, itemId: it.itemId, category: aisle }).catch(() => {})
+                changed++
+              }
+            }
+            if (changed) emitEvent('ai:recategorized', { listId })
+          })().catch(() => {})
+          return
         }
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')

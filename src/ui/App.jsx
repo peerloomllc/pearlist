@@ -844,11 +844,10 @@ export default function App () {
 
   const openList = lists.find(l => l.id === openListId) || null
 
-  // Grocery aisle categorization (QVAC spike, 2026-07-11): when a grocery list
-  // is open and has items lacking a category, ask the worklet to classify them
-  // in the background, then reload so they regroup under aisle headers. The
-  // worklet no-ops once everything is categorized, so this settles after one
-  // pass and does not loop.
+  // Grocery aisle categorization, step 1 (keyword pass): when a grocery list is
+  // open with items lacking a category, ask the worklet to classify them with the
+  // fast offline keyword classifier, then reload so they regroup under aisle
+  // headers. No-ops once every item has a category, so it settles after one pass.
   useEffect(() => {
     if (openList?.kind !== 'grocery' || !gid || !openListId) return
     if (!items.some((i) => !i.category)) return
@@ -858,6 +857,23 @@ export default function App () {
       .catch(() => {})
     return () => { cancelled = true }
   }, [openList?.kind, gid, openListId, items, loadItems])
+
+  // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
+  // it doesn't know) get sent to the on-device LLM in the RN shell. Slow + lazy
+  // (first use downloads the model), so it runs in the background; the shell
+  // emits ai:recategorized when any land, and we reload. Each item is sent once.
+  const aiSentRef = useRef(new Set())
+  useEffect(() => { aiSentRef.current = new Set() }, [openListId])
+  useEffect(() => {
+    if (openList?.kind !== 'grocery' || !gid || !openListId) return
+    const others = items.filter((i) => i.category === 'Other' && !aiSentRef.current.has(i.id))
+    if (!others.length) return
+    others.forEach((i) => aiSentRef.current.add(i.id))
+    call('shell:aiCategorize', { groupId: gid, listId: openListId, items: others.map((i) => ({ itemId: i.id, text: i.text })) }).catch(() => {})
+  }, [openList?.kind, gid, openListId, items])
+  useEffect(() => {
+    return on('ai:recategorized', (d) => { if (d?.listId === openListId && gid) loadItems(gid, openListId) })
+  }, [openListId, gid, loadItems])
 
   async function createSpace (name) {
     const { groupId } = await call('group:create', { name })
