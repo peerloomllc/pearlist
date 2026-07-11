@@ -92,6 +92,49 @@ from packing the worklet locally:
 - NOT yet proven: the native `.bare` dlopening its ggml backend on-device (needs
   a model). That is the device build below.
 
+## Step-2 results (on-device, TCL, done 2026-07-11)
+
+Built arm64 standalone release + debug APKs, installed on the TCL (T513Z,
+Android 15, arm64-v8a), ran the boot probe. Debug build needed because bare-kit
+forwards worklet console to logcat only in debug (release is silent + not
+debuggable, so pair-trace.log is unreachable). Probe line captured:
+
+```
+[pair worklet+2155ms] qvac:probe {
+  "bareVersions":{"bare":"1.27.0","uv":"1.51.0","v8":"14.4.258.16"},
+  "sdkImported":false, "pluginRegistered":false, "llamacppImported":false,
+  "error":"import bare-sdk/plugin: ADDON_NOT_FOUND: Cannot find addon '.'
+    imported from '.../@qvac/llm-llamacpp/binding.js'
+    Candidates: - linked:libqvac__llm-llamacpp.0.36.3.so"
+}
+```
+
+What this settles:
+- ✅ **Bare version gate PASSES.** bare-kit 0.12.3 embeds Bare **1.27.0** (>= 1.24.0).
+- ✅ Install + bundle + native link + boot all work on real arm64 hardware. No
+  crash, no dlopen failure at app load. `libqvac__llm-llamacpp.0.36.3.so` + the 7
+  CPU backends are packaged in the APK (confirmed via `unzip -l`), and bare-kit's
+  `link.mjs` placed them as proper `lib/arm64-v8a/*.so`.
+- ❌ **BLOCKER: Bare cannot load the linked addon at runtime.** binding.js runs and
+  calls `require-addon('.')`, which computes the right candidate name
+  (`linked:libqvac__llm-llamacpp.0.36.3.so`) but reports ADDON_NOT_FOUND. The .so
+  is in the APK but the Bare runtime does not resolve/load it as a linked addon.
+
+Leading hypotheses for the blocker (next dig, in rough priority):
+1. **Versioned soname + `extractNativeLibs`.** Android may not load a multi-dot
+   soname (`...0.36.3.so`) when native libs are not extracted (modern default).
+   Try `android.useLegacyPackaging=true` / an extract-native-libs manifest flag.
+2. **bare-kit third-party linked-addon resolution.** bare-kit statically ships its
+   own bare-* core addons; a third-party prebuilt `.bare` shipped as a separate
+   .so may not be registered in the `linked:` registry. PearList uses no non-core
+   native addon today, so QVAC is the first to exercise this path. May need a
+   newer bare-kit or an explicit addon-registration step.
+3. Probe uses dynamic `import()` of the addon; a static top-level import in the
+   .mjs might change how bare-pack registers the linked addon (cheap to try).
+
+This is now a Holepunch/bare-kit addon-loading investigation, not app wiring.
+Consult the holepunch-p2p-architect skill / p2p-wiki before the next device cycle.
+
 ## First spike steps (in order)
 
 1. `npm i @qvac/bare-sdk @qvac/llm-llamacpp` in pearlist.
