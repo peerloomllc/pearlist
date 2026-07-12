@@ -6,7 +6,7 @@ import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -288,22 +288,41 @@ function Collapsible ({ title, open, onToggle, children }) {
 }
 
 // Full-screen slide-up panel with a centered back-bar (primary navigation).
-function FullScreen ({ open, title, onBack, children }) {
-  const [render, setRender] = useState(open)
-  const [shown, setShown] = useState(false)
-  useEffect(() => {
-    if (open) { setRender(true); const t = setTimeout(() => setShown(true), 20); return () => clearTimeout(t) }
-    setShown(false); const t = setTimeout(() => setRender(false), 280); return () => clearTimeout(t)
-  }, [open])
-  if (!render) return null
+// Inline panel for a bottom-nav section (Settings, About). Header + scrollable
+// body; no back button - the bottom TabBar switches sections. Returns a fragment
+// so its header + scroll slot in as flex children of the app shell, with the
+// TabBar sitting below them.
+function FullScreen ({ title, children }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: c.surface.base, transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `calc(var(--pear-safe-top) + ${sp.md}px) ${sp.base}px ${sp.md}px`, borderBottom: `1px solid ${c.border}` }}>
-        <button onClick={onBack} aria-label='Back' style={{ width: 36, height: 36, background: 'none', border: 'none', color: c.text.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CaretLeft size={24} weight='regular' /></button>
-        <h1 style={{ flex: 1, textAlign: 'center', fontSize: 20, fontWeight: 400, margin: 0, color: c.text.primary }}>{title}</h1>
-        <span style={{ width: 36 }} />
+    <>
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: `calc(var(--pear-safe-top) + ${sp.md}px) ${sp.base}px ${sp.md}px`, borderBottom: `1px solid ${c.border}` }}>
+        <h1 style={{ fontSize: 20, fontWeight: 400, margin: 0, color: c.text.primary }}>{title}</h1>
       </header>
-      <div style={{ flex: 1, overflowY: 'auto', padding: sp.base, maxWidth: 600, width: '100%', margin: '0 auto' }}>{children}</div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: sp.base, maxWidth: 600, width: '100%', margin: '0 auto' }}>{children}</div>
+    </>
+  )
+}
+
+// Bottom navigation, suite-standard (mirrors PearGuard's TabBar): switches the
+// top-level sections. Rendered as the shell's last flex child on top-level
+// screens; hidden while a list is open (that is a drill-down).
+function TabBar ({ active, onChange }) {
+  const tabs = [
+    { key: 'lists', label: 'Lists', Icon: House },
+    { key: 'settings', label: 'Settings', Icon: GearSix },
+    { key: 'about', label: 'About', Icon: Info },
+  ]
+  return (
+    <div style={{ display: 'flex', borderTop: `1px solid ${c.border}`, background: c.surface.card, paddingBottom: 'var(--pear-safe-bottom)' }}>
+      {tabs.map(({ key, label, Icon }) => {
+        const on = active === key
+        return (
+          <button key={key} onClick={() => { haptic('light'); onChange(key) }} aria-label={label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: `${sp.sm}px 0`, border: 'none', background: 'none', cursor: 'pointer' }}>
+            <Icon size={22} weight={on ? 'fill' : 'regular'} color={on ? c.primary : c.text.muted} />
+            <span style={{ fontSize: 11, fontWeight: on ? 500 : 400, color: on ? c.primary : c.text.muted }}>{label}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -1012,7 +1031,7 @@ export default function App () {
   const [openListId, setOpenListId] = useState(null)
   const [items, setItems] = useState([])
   const [theme, setThemeMode] = useState('dark')
-  const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'menu'|'wallet'|'spaces'|'listOptions'|'renameList'|{type:'item',item}
+  const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'wallet'|'spaces'|'listOptions'|'renameList'|{type:'item',item}
   const [view, setView] = useState(null) // full-screen: 'profile' | 'about'
   const [profile, setProfile] = useState(null)
   const [donateReminder, setDonateReminder] = useState(false)
@@ -1503,6 +1522,9 @@ export default function App () {
     await loadItems(gid, openListId)
   }
   async function applyTheme (mode) { setTheme(mode); setThemeMode(mode) }
+  // Bottom-nav tab switch: always leave any open list (the tab bar only shows on
+  // top-level screens) and map the tab to the view state.
+  const goTab = useCallback((key) => { setOpenListId(null); setView(key === 'settings' ? 'profile' : key === 'about' ? 'about' : null) }, [])
 
   if (phase === 'loading') {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spinner size={28} /></div>
@@ -1524,23 +1546,7 @@ export default function App () {
   return (
     <div style={{ height: '100dvh', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 600, margin: '0 auto' }}>
       {banner ? <Banner text={banner} onClose={() => setBanner(null)} /> : null}
-      {openListId === null ? (
-        // ===== Lists overview: all lists in the space + persistent add-list bar =====
-        <>
-          <TopBar
-            title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><CaretDown size={16} color={c.text.muted} weight='regular' /></button>}
-            left={<button aria-label='Menu' onClick={() => setSheet('menu')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}><Avatar name={profile?.displayName} avatar={profile?.avatar} size={30} /></button>}
-            right={<IconButton label='Invite' onClick={() => setSheet('invite')}><ShareIcon /></IconButton>}
-          />
-          <MembersBar members={members} onOpen={() => setSheet('members')} />
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
-            {lists.length === 0
-              ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
-              : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
-          </div>
-          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' />
-        </>
-      ) : (
+      {openListId !== null ? (
         // ===== List detail: the items of the open list + add-item bar =====
         <>
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
@@ -1579,7 +1585,27 @@ export default function App () {
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
           </div>
         </>
+      ) : view === 'profile' ? (
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
+      ) : view === 'about' ? (
+        <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
+      ) : (
+        // ===== Lists overview: all lists in the space + persistent add-list bar =====
+        <>
+          <TopBar
+            title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><CaretDown size={16} color={c.text.muted} weight='regular' /></button>}
+            right={<IconButton label='Invite' onClick={() => setSheet('invite')}><ShareIcon /></IconButton>}
+          />
+          <MembersBar members={members} onOpen={() => setSheet('members')} />
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
+            {lists.length === 0
+              ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
+              : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
+          </div>
+          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' />
+        </>
       )}
+      {openListId === null ? <TabBar active={view === 'profile' ? 'settings' : view === 'about' ? 'about' : 'lists'} onChange={goTab} /> : null}
 
       <InviteSheet open={sheet === 'invite'} onClose={() => setSheet(null)} inviteKey={activeSpace?.inviteKey} spaceName={activeSpace?.name} />
       <SpaceSwitcherSheet open={sheet === 'spaces'} onClose={() => setSheet(null)} spaces={spaces} activeId={activeSpaceId}
@@ -1601,16 +1627,10 @@ export default function App () {
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
-      <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
-        onProfile={() => { setSheet(null); setView('profile') }}
-        onAbout={() => { setSheet(null); setView('about') }} />
       <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} />
       <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => { setSheet(null); setDeleteTarget(null) }} spaceName={deleteTarget?.name} onConfirm={() => deleteSpace(deleteTarget?.groupId)} />
-      <ProfileView open={view === 'profile'} onBack={() => setView(null)} profile={profile} theme={theme} onTheme={applyTheme}
-        onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
-      <AboutView open={view === 'about'} onBack={() => setView(null)} onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       <LightningWalletModal open={sheet === 'wallet'} detected={lnDetected} onClose={() => setSheet(null)} />
-      <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); setView('about') }} />
+      <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); goTab('about') }} />
       <GuidedTour open={showTour} onDone={dismissTour} />
       <ItemSheet
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
@@ -1923,23 +1943,6 @@ function ListCompleteSheet ({ open, listName, onDelete, onKeep, onClose }) {
   )
 }
 
-function MenuSheet ({ open, onClose, profile, onProfile, onAbout }) {
-  const Row = ({ onClick, children }) => (
-    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
-  )
-  return (
-    <BottomSheet open={open} onClose={onClose}>
-      <button onClick={onProfile} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.sm, width: '100%', padding: `${sp.xs}px ${sp.xs}px ${sp.base}px`, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'center' }}>
-        <Avatar name={profile?.displayName} avatar={profile?.avatar} size={64} />
-        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ color: c.text.primary, fontSize: 17, fontWeight: 400 }}>{profile?.displayName || 'Set up profile'}</span>
-          <span style={{ color: c.text.muted, fontSize: 13 }}>Name and photo</span>
-        </span>
-      </button>
-      <Row onClick={onAbout}><span style={{ flex: 1 }}>About PearList</span><CaretRight size={16} color={c.text.muted} weight='regular' /></Row>
-    </BottomSheet>
-  )
-}
 
 // One-line description of the on-device AI model state for the Settings row.
 function aiSubtitle (ai) {
@@ -1952,16 +1955,16 @@ function aiSubtitle (ai) {
   return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`
 }
 
-function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
+function ProfileView ({ profile, theme, onTheme, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [notif, setNotif] = useState(false)
   const [bgSync, setBgSync] = useState(false)
   const [bgSyncSupported, setBgSyncSupported] = useState(false)
-  useEffect(() => { if (open) setName(profile?.displayName || '') }, [open, profile])
-  useEffect(() => { if (open) call('shell:notifications:get', {}).then((r) => setNotif(!!r?.enabled)).catch(() => {}) }, [open])
-  useEffect(() => { if (open) call('shell:bgsync:get', {}).then((r) => { setBgSyncSupported(!!r?.supported); setBgSync(!!r?.enabled) }).catch(() => {}) }, [open])
+  useEffect(() => { setName(profile?.displayName || '') }, [profile])
+  useEffect(() => { call('shell:notifications:get', {}).then((r) => setNotif(!!r?.enabled)).catch(() => {}) }, [])
+  useEffect(() => { call('shell:bgsync:get', {}).then((r) => { setBgSyncSupported(!!r?.supported); setBgSync(!!r?.enabled) }).catch(() => {}) }, [])
   async function toggleNotif (v) {
     try {
       const r = await call('shell:notifications:set', { enabled: v })
@@ -1973,11 +1976,11 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
   const [ai, setAi] = useState(null)
-  useEffect(() => { if (open) call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [open])
+  useEffect(() => { call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [])
   useEffect(() => on('ai:status', setAi), [])
   async function toggleAi (v) { try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
   const [learned, setLearned] = useState(0)
-  useEffect(() => { if (open) setLearned(overrideCount()) }, [open])
+  useEffect(() => { setLearned(overrideCount()) }, [])
   function clearLearned () {
     if (!learned) return
     if (typeof window !== 'undefined' && window.confirm && !window.confirm(`Forget ${learned} learned aisle${learned > 1 ? 's' : ''}? New items will be sorted automatically again.`)) return
@@ -1989,16 +1992,16 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   const [info, setInfo] = useState(null)
   const ABOUT = {
     Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
-    'Keep syncing in background': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
-    'On-device sorting (AI)': "Grocery lists group items by supermarket aisle. A fast built-in name matcher places common items instantly; for anything it can't recognize, an optional on-device AI model sorts it. The model is a one-time ~0.8 GB download and runs entirely on your phone - nothing about your lists is ever sent anywhere. Turn it off to delete the model and reclaim the space; the name matcher keeps working.",
-    'Learned aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
+    'Background Sync': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
+    'Local AI Sorting': "Grocery lists group items by supermarket aisle. A fast built-in name matcher places common items instantly; anything it can't recognize is sorted by a small AI model that runs entirely on your phone - nothing about your lists ever leaves the device. It is a one-time ~0.8 GB download; turn it off to delete the model and reclaim the space (the name matcher keeps working). Powered by QVAC, Tether's local AI SDK.",
+    'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
   }
-  const Setting = ({ title, about, control, extra, first }) => (
+  const Setting = ({ title, about, aboutLink, control, extra, first }) => (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
       <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 4 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
           <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{title}</span>
-          {about ? <button onClick={() => setInfo({ title, body: about })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
+          {about ? <button onClick={() => setInfo({ title, body: about, link: aboutLink })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
         </span>
         {extra}
       </span>
@@ -2037,7 +2040,7 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   const hasAvatar = !!avatarSrc(profile?.avatar)
   const nameDirty = name.trim() && name.trim() !== profile?.displayName
   return (
-    <FullScreen open={open} title='Profile' onBack={onBack}>
+    <FullScreen title='Settings'>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.base, padding: `${sp.lg}px 0` }}>
         <Avatar name={profile?.displayName || name} avatar={profile?.avatar} size={96} />
         <div style={{ display: 'flex', gap: sp.sm, width: '100%', maxWidth: 280 }}>
@@ -2056,8 +2059,8 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
       <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
         <Setting title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
-        {bgSyncSupported ? <Setting title='Keep syncing in background' about={ABOUT['Keep syncing in background']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
-        <Setting title='On-device sorting (AI)' about={ABOUT['On-device sorting (AI)']}
+        {bgSyncSupported ? <Setting title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+        <Setting title='Local AI Sorting' about={ABOUT['Local AI Sorting']} aboutLink={{ label: 'QVAC documentation', url: 'https://docs.qvac.tether.io/' }}
           control={<Toggle on={!!ai?.consent} onChange={toggleAi} />}
           extra={ai && (ai.state === 'downloading' || ai.state === 'loading' || ai.state === 'error') ? (
             <>
@@ -2069,18 +2072,25 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
               ) : null}
             </>
           ) : null} />
-        <Setting title='Learned aisles' about={ABOUT['Learned aisles']}
+        <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} style={{ padding: '8px 14px', borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: learned ? c.error : c.text.muted, fontSize: 14, cursor: learned ? 'pointer' : 'default', flexShrink: 0, opacity: learned ? 1 : 0.6 }}>Clear</button>} />
       </div>
       <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
+        {info?.link ? (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: sp.base }}>
+            <button onClick={() => openUrl(info.link.url)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.accent, fontSize: 14, fontWeight: 400 }}>
+              {info.link.label}<ArrowSquareOut size={16} weight='regular' />
+            </button>
+          </div>
+        ) : null}
       </BottomSheet>
     </FullScreen>
   )
 }
 
-function AboutView ({ open, onBack, onWallet }) {
+function AboutView ({ onWallet }) {
   const [section, setSection] = useState(null)
   const toggle = (id) => setSection((s) => s === id ? null : id)
   const ios = isIOS()
@@ -2094,7 +2104,7 @@ function AboutView ({ open, onBack, onWallet }) {
   const P = ({ children }) => <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.md}px` }}>{children}</p>
   const Pill = ({ onClick, children, primary }) => <button onClick={onClick} style={{ flex: 1, padding: '10px 12px', borderRadius: r.md, border: primary ? 'none' : `1px solid ${c.text.muted}`, background: primary ? c.primary : c.surface.input, color: primary ? c.text.onPrimary : c.text.primary, fontSize: 14, cursor: 'pointer' }}>{children}</button>
   return (
-    <FullScreen open={open} title='About' onBack={onBack}>
+    <FullScreen title='About'>
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
         <h2 style={{ fontSize: 22, fontWeight: 400, margin: 0, color: c.text.primary }}>PearList</h2>
         <p style={{ color: c.text.muted, fontSize: 14, marginTop: sp.xs }}>Private. Peer-to-Peer. No Servers.</p>
