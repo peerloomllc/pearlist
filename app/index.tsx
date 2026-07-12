@@ -11,6 +11,7 @@ import { Worklet } from 'react-native-bare-kit'
 import b4a from 'b4a'
 import { Asset } from 'expo-asset'
 import * as FileSystem from 'expo-file-system/legacy'
+import * as Device from 'expo-device'
 import * as Linking from 'expo-linking'
 import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
@@ -448,6 +449,20 @@ export default function Shell () {
           // via ai:status; reply with the final status.
           const s = await loadModelNow()
           return reply(id, { ok: true, status: s })
+        }
+        case 'shell:deviceCaps': {
+          // For the low-end-hardware warning before enabling the ~0.8GB AI model.
+          // Device.totalMemory is bytes (null if unknown -> don't flag). Thresholds
+          // are conservative: a 1B-param model wants a few GB of RAM to run, and
+          // the download+extract needs headroom on disk.
+          const totalMemMB = Math.round((Device.totalMemory || 0) / 1e6)
+          let freeStorageMB = 0
+          try { freeStorageMB = Math.round((await FileSystem.getFreeDiskStorageAsync()) / 1e6) } catch {}
+          // ~4600 MB warns 4GB-class devices (they report ~3.8-3.9GB) while 6GB+
+          // (report ~5.5GB+) pass. It's a warning, not a hard block.
+          const lowMem = totalMemMB > 0 && totalMemMB < 4600
+          const lowStorage = freeStorageMB > 0 && freeStorageMB < 1500
+          return reply(id, { ok: true, totalMemMB, freeStorageMB, lowMem, lowStorage, lowEnd: lowMem || lowStorage })
         }
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')
