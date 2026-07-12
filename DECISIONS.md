@@ -2,6 +2,28 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-12 - Manual user-defined sections for non-grocery lists
+Tier: T1 (reuses the existing `category` field + loosened validation; no new key
+type, pairing, or encryption change).
+Context: grouping like grocery aisles was requested for other list types. Aisle
+grouping only works for groceries because store aisles are a universal, stable,
+externally-defined taxonomy; chores/to-dos/generic lists have none. So AI grouping
+there is low value + inconsistent (see the cat/dog-food 1B-model wobble). Manual
+sections give the structure without a model.
+Choice: non-grocery lists (chore/todo/list) get user-defined SECTIONS, which are
+just the same `category` string on items (already synced) - no built-in taxonomy,
+no classifier, no AI. The grocery grouping stack was generalized (orderAisles /
+AisleGroupedItems / useAisleDrag / the picker take a `builtins` taxonomy + a
+fallback label + a noun) so both paths share one code path. A list renders flat
+until the first section exists, then switches to the grouped view (collapse +
+drag reused). Ungrouped items sit under an "Ungrouped" header. ai:setCategory now
+also CLEARS the category (empty/null on the user path) for a "No section"/"No
+aisle" option. Sections are per-list (derived from that list's items); no synced
+section registry (same lightweight call as custom aisles).
+Rejected: AI-driven grouping for non-grocery lists (low value, inconsistent); a
+synced section registry (more surface than the need). AI-for-lists (e.g. recipe
+-> grocery items) is tracked separately as a later exploration.
+
 ## 2026-07-12 - Custom aisles + 3 new built-ins + pin user choices
 Tier: T1 (additive/loosened validation on the existing `category` field + `catBy`
 marker; no new key type, pairing, topic, or encryption change).

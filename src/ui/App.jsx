@@ -242,21 +242,29 @@ function AssigneePickerSheet ({ open, onClose, members, selfPubkey, current, onP
 // aisle, so an item can be filed into one that has no items yet - which drag
 // cannot reach, since an empty aisle renders no drop target. Writes via the same
 // synced ai:setCategory path as the drag.
-function AislePickerSheet ({ open, onClose, current, onPick, custom = [] }) {
+// Generic group picker: grocery passes the built-in AISLES (noun 'aisle');
+// user-defined sections pass no built-ins (noun 'section'). onPick(null) clears
+// the item's group ("No aisle" / "No section"). New name creates a custom one.
+function AislePickerSheet ({ open, onClose, current, onPick, custom = [], noun = 'aisle', builtins = aisles.AISLES }) {
   const [newName, setNewName] = useState('')
   useEffect(() => { if (open) setNewName('') }, [open])
   const clean = aisles.sanitizeCustomAisle(newName)
   const add = () => { if (clean) { onPick(clean); onClose() } }
   const rowStyle = { display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }
-  // Built-ins + the user's custom aisles, sorted alphabetically for quick
-  // scanning (case-insensitive), with the 'Other' catch-all pinned last. (The
+  // Built-ins + the user's custom groups, sorted alphabetically for quick scanning
+  // (case-insensitive), with the 'Other' catch-all pinned last for grocery. (The
   // grouped list keeps canonical shelf order; this is just the picker.)
-  const extra = custom.filter((a) => !aisles.AISLES.includes(a))
-  const options = [...aisles.AISLES.filter((a) => a !== aisles.FALLBACK), ...extra]
+  const hasFallback = builtins.includes(aisles.FALLBACK)
+  const extra = custom.filter((a) => !builtins.includes(a))
+  const options = [...builtins.filter((a) => a !== aisles.FALLBACK), ...extra]
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-    .concat(aisles.FALLBACK)
+    .concat(hasFallback ? [aisles.FALLBACK] : [])
   return (
-    <BottomSheet open={open} onClose={onClose} title='Choose aisle'>
+    <BottomSheet open={open} onClose={onClose} title={`Choose ${noun}`}>
+      <button onClick={() => { onPick(null); onClose() }} style={{ ...rowStyle, color: c.text.secondary }}>
+        <span style={{ flex: 1, textAlign: 'left' }}>No {noun}</span>
+        {!current ? <Check size={18} color={c.primary} weight='bold' /> : null}
+      </button>
       {options.map((a) => (
         <button key={a} onClick={() => { onPick(a); onClose() }} style={rowStyle}>
           <span style={{ flex: 1, textAlign: 'left' }}>{a}</span>
@@ -264,7 +272,7 @@ function AislePickerSheet ({ open, onClose, current, onPick, custom = [] }) {
         </button>
       ))}
       <div style={{ display: 'flex', gap: sp.sm, borderTop: `1px solid ${c.divider}`, paddingTop: sp.md, marginTop: sp.xs }}>
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }} placeholder='New aisle' maxLength={24} autoCapitalize='words'
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }} placeholder={`New ${noun}`} maxLength={24} autoCapitalize='words'
           style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontFamily: FONT, outline: 'none' }} />
         <button onClick={add} disabled={!clean} style={{ padding: '0 16px', borderRadius: r.md, border: 'none', background: clean ? c.primary : c.surface.input, color: clean ? c.text.onPrimary : c.text.muted, cursor: clean ? 'pointer' : 'default', fontSize: 14, fontWeight: 500 }}>Add</button>
       </div>
@@ -556,7 +564,7 @@ const HOLD_TOL = 10 // px of finger movement allowed during the hold; within thi
 // scroll/swipe and released. Elevation (lift look) is driven by React via the
 // `lifted` state; the hook only ever sets `transform`/`pointerEvents` imperatively
 // (never React-managed props like background), so it can't wipe a header's colour.
-function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderAisles, onRecategorize }) {
+function useAisleDrag ({ items, aisleView, scrollRef, builtins, onReorderItems, onReorderAisles, onRecategorize }) {
   const [dragOver, setDragOver] = useState(null) // { kind, aisle } - cross-aisle / header target highlight
   const [lifted, setLifted] = useState(null)     // { kind, id } - the elevated element (React renders the lift)
   // dragProps is useCallback([]) (stable handlers), which freezes begin/commit -
@@ -565,7 +573,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
   // this per-render ref so the frozen commit always calls the CURRENT handlers.
   // Without this, cross-aisle recategorize silently no-ops (stale gid/openListId).
   const data = useRef({})
-  data.current = { items, aisleView, onReorderItems, onReorderAisles, onRecategorize }
+  data.current = { items, aisleView, builtins, onReorderItems, onReorderAisles, onRecategorize }
   const S = useRef({})
   const justDragged = useRef(false)
 
@@ -688,10 +696,10 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
   }
 
   const commit = (s) => {
-    const { items: its, aisleView: av, onReorderItems, onReorderAisles, onRecategorize } = data.current
+    const { items: its, aisleView: av, builtins: bi, onReorderItems, onReorderAisles, onRecategorize } = data.current
     if (s.kind === 'aisle') {
       const present = [...new Set(its.map((it) => aisles.bucketOf(it.category)))]
-      const ord = orderAisles(present, av.aisleOrder).filter((a) => a !== s.id)
+      const ord = orderAisles(present, av.aisleOrder, bi).filter((a) => a !== s.id)
       const at = s.targetAisle && s.targetAisle !== s.id ? ord.indexOf(s.targetAisle) : ord.length
       ord.splice(at < 0 ? ord.length : at, 0, s.id)
       onReorderAisles(ord)
@@ -702,7 +710,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
     for (const it of its) { const k = aisles.bucketOf(it.category); if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(it) }
     const aisleIds = orderRows(buckets.get(s.aisle) || [], av.itemOrder).map((it) => it.id).filter((id) => id !== s.id)
     aisleIds.splice(Math.max(0, Math.min(s.newIndex ?? aisleIds.length, aisleIds.length)), 0, s.id)
-    const flat = orderAisles([...buckets.keys()], av.aisleOrder).flatMap((a) => a === s.aisle ? aisleIds : orderRows(buckets.get(a), av.itemOrder).map((it) => it.id))
+    const flat = orderAisles([...buckets.keys()], av.aisleOrder, bi).flatMap((a) => a === s.aisle ? aisleIds : orderRows(buckets.get(a), av.itemOrder).map((it) => it.id))
     onReorderItems(flat)
   }
 
@@ -735,15 +743,17 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
   return { dragProps, dragOver, lifted, didDrag: () => justDragged.current }
 }
 
-// Order the present aisles: any in the device-local `aisleOrder` first (that
-// sequence), then the remaining built-ins in canonical AISLES order, then custom
-// (user-made) aisles alphabetically, and 'Other' always last.
-function orderAisles (present, aisleOrder) {
+// Order the present groups: any in the device-local order first (that sequence),
+// then the remaining built-ins in canonical order, then custom (user-made) groups
+// alphabetically, and the fallback ('Other'/'Ungrouped') always last. `builtins`
+// is the fixed taxonomy (grocery aisles); for user-defined sections it is empty,
+// so every group is "custom".
+function orderAisles (present, aisleOrder, builtins = aisles.AISLES) {
   const set = new Set(present)
   const first = (aisleOrder || []).filter((a) => set.has(a))
   const used = new Set(first)
-  const builtin = aisles.AISLES.filter((a) => a !== aisles.FALLBACK && set.has(a) && !used.has(a))
-  const custom = present.filter((a) => !aisles.AISLES.includes(a) && !used.has(a)).sort()
+  const builtin = builtins.filter((a) => a !== aisles.FALLBACK && set.has(a) && !used.has(a))
+  const custom = present.filter((a) => !builtins.includes(a) && a !== aisles.FALLBACK && !used.has(a)).sort()
   const other = (set.has(aisles.FALLBACK) && !used.has(aisles.FALLBACK)) ? [aisles.FALLBACK] : []
   return [...first, ...builtin, ...custom, ...other]
 }
@@ -784,7 +794,7 @@ function CollapsibleRows ({ collapsed, children }) {
 }
 
 const SORTING = '__sorting__'
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone, flashId }) {
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone, flashId, builtins = aisles.AISLES, fallbackLabel = aisles.FALLBACK }) {
   const buckets = new Map()
   for (const it of items) {
     let key = aisles.bucketOf(it.category)
@@ -795,7 +805,7 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(it)
   }
-  const ordered = orderAisles([...buckets.keys()].filter((k) => k !== SORTING), aisleOrder)
+  const ordered = orderAisles([...buckets.keys()].filter((k) => k !== SORTING), aisleOrder, builtins)
   const sections = [...(buckets.has(SORTING) ? [SORTING] : []), ...ordered].map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
   return (
     <>
@@ -823,7 +833,7 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
             >
               <button onClick={() => { if (didDrag?.()) return; onToggle?.(aisle) }} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp.sm, background: 'none', border: 'none', padding: 0, cursor: 'pointer', minWidth: 0 }}>
                 <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
-                <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{aisle}</span>
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{aisle === aisles.FALLBACK ? fallbackLabel : aisle}</span>
               </button>
               <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
               {dragProps ? <span {...dragProps('aisle', aisle, aisle)} onClick={(e) => e.stopPropagation()} aria-label='Reorder aisle' style={{ flexShrink: 0, padding: '4px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex' }}><DotsSixVertical size={18} weight='bold' /></span> : null}
@@ -1308,16 +1318,25 @@ export default function App () {
     patchAisleView({ collapsed: cur.includes(aisle) ? cur.filter((a) => a !== aisle) : [...cur, aisle] })
   }, [aisleView.collapsed, patchAisleView])
 
-  // Drag: reorder items/aisles (device-local) or drop an item into another aisle
+  // Grocery lists group by a fixed aisle taxonomy (+ AI); other lists group by
+  // user-defined SECTIONS (same category field, no built-ins, no AI) once the
+  // user makes one. Both reuse the same grouped view / drag / collapse machinery.
+  const isGroceryList = openList?.kind === 'grocery'
+  const groupBuiltins = isGroceryList ? aisles.AISLES : []
+  const fallbackLabel = isGroceryList ? aisles.FALLBACK : 'Ungrouped'
+  const groupNoun = isGroceryList ? 'aisle' : 'section'
+  const grouped = isGroceryList || items.some((i) => i.category) // sections in use
+
+  // Drag: reorder items/groups (device-local) or drop an item into another group
   // to re-file it (recategorize, which syncs via ai:setCategory).
   const listScrollRef = useRef(null)
   const recategorizeItem = useCallback((itemId, aisle) => {
     if (!gid || !openListId) return
-    rememberOverride(items.find((i) => i.id === itemId)?.text, aisle) // learn this correction
+    if (isGroceryList) rememberOverride(items.find((i) => i.id === itemId)?.text, aisle) // learn corrections (grocery classifier only)
     call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle, by: 'user' }).then(() => loadItems(gid, openListId)).catch(() => {})
-  }, [gid, openListId, loadItems, items])
+  }, [gid, openListId, loadItems, items, isGroceryList])
   const { dragProps, dragOver, lifted, didDrag } = useAisleDrag({
-    items, aisleView, scrollRef: listScrollRef,
+    items, aisleView, scrollRef: listScrollRef, builtins: groupBuiltins,
     onReorderItems: (order) => patchAisleView({ itemOrder: order }),
     onReorderAisles: (order) => patchAisleView({ aisleOrder: order }),
     onRecategorize: recategorizeItem,
@@ -1332,7 +1351,7 @@ export default function App () {
     // If the new item landed in a collapsed aisle, expand it first (so the row is
     // actually visible), then let the effect re-run to scroll + flash it.
     const it = items.find((i) => i.id === flashId)
-    if (it && openList?.kind === 'grocery') {
+    if (it && grouped) {
       const aisle = aisles.bucketOf(it.category)
       if ((aisleView.collapsed || []).includes(aisle)) {
         patchAisleView({ collapsed: (aisleView.collapsed || []).filter((a) => a !== aisle) })
@@ -1565,8 +1584,8 @@ export default function App () {
                     <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} dragHandle={handleProps} />
                   </SwipeRow>
                 )
-                return openList?.kind === 'grocery'
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} sortingActive={aiActive} aiDone={aiDone} flashId={flashId} />
+                return grouped
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} sortingActive={isGroceryList && aiActive} aiDone={aiDone} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
                   : items.map((it) => (
                     <div key={it.id} data-item-id={it.id} style={{ position: 'relative' }}>
                       {renderRow(it)}
@@ -1614,7 +1633,7 @@ export default function App () {
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} canReset={items.some((i) => i.checked)} onClose={() => setSheet(null)}
-        grouped={openList?.kind === 'grocery' && presentAisles.length > 1} allCollapsed={allCollapsed}
+        grouped={grouped && presentAisles.length > 1} allCollapsed={allCollapsed} groupNoun={groupNoun}
         onToggleCollapseAll={() => { toggleCollapseAll(); setSheet(null) }}
         onRename={() => setSheet('renameList')}
         onCategory={() => setSheet('category')}
@@ -1633,9 +1652,20 @@ export default function App () {
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); goTab('about') }} />
       <GuidedTour open={showTour} onDone={dismissTour} />
       <ItemSheet
-        open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
-        customAisles={[...new Set([...items.map((i) => i.category).filter((cat) => cat && !aisles.AISLES.includes(cat)), ...loadCustomAisles(gid)])]}
-        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); if (patch.category && (patch.category !== sheet.item.category || sheet.item.catBy !== 'user')) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: patch.category, by: 'user' }).catch(() => {}); if (patch.category) { if (!aisles.AISLES.includes(patch.category)) rememberCustomAisle(gid, patch.category); rememberOverride(patch.text || sheet.item.text, patch.category) } await loadItems(gid, openListId); setSheet(null) }}
+        open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} noun={groupNoun} builtins={groupBuiltins} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
+        customAisles={isGroceryList
+          ? [...new Set([...items.map((i) => i.category).filter((cat) => cat && !aisles.AISLES.includes(cat)), ...loadCustomAisles(gid)])]
+          : [...new Set(items.map((i) => i.category).filter(Boolean))]}
+        onSave={async (patch) => {
+          await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url })
+          await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee })
+          if (patch.catTouched) {
+            const cat = patch.category || ''
+            await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: cat, by: 'user' }).catch(() => {})
+            if (cat && isGroceryList) { if (!aisles.AISLES.includes(cat)) rememberCustomAisle(gid, cat); rememberOverride(patch.text || sheet.item.text, cat) }
+          }
+          await loadItems(gid, openListId); setSheet(null)
+        }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <QtySheet open={!!sheet && sheet.type === 'qty'}
@@ -1817,7 +1847,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 
 // List options (rename / category / notify / assign / delete), opened from the
 // detail header. The completion-notify row shows only on chore lists.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped, allCollapsed, onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -1834,7 +1864,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped,
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
-      {grouped ? <Row onClick={onToggleCollapseAll}><span style={{ flex: 1, textAlign: 'left' }}>{allCollapsed ? 'Expand all aisles' : 'Collapse all aisles'}</span></Row> : null}
+      {grouped ? <Row onClick={onToggleCollapseAll}><span style={{ flex: 1, textAlign: 'left' }}>{allCollapsed ? `Expand all ${groupNoun}s` : `Collapse all ${groupNoun}s`}</span></Row> : null}
       {canReset ? <Row onClick={onReset}><span style={{ flex: 1, textAlign: 'left' }}>Uncheck all</span></Row> : null}
       {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row> : null}
     </BottomSheet>
@@ -2298,7 +2328,7 @@ function QtySheet ({ open, onCommit }) {
   )
 }
 
-function ItemSheet ({ open, item, kind, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
+function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
   const [assignee, setAssignee] = useState(null)
@@ -2311,6 +2341,7 @@ function ItemSheet ({ open, item, kind, customAisles, members, selfPubkey, onClo
   useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false) } }, [open, item])
   if (!item) return null
   const isGrocery = kind === 'grocery'
+  const nounLabel = noun.charAt(0).toUpperCase() + noun.slice(1) // "Aisle" / "Section"
   return (
     <>
       <BottomSheet open={open} onClose={onClose} title='Edit item'>
@@ -2334,15 +2365,13 @@ function ItemSheet ({ open, item, kind, customAisles, members, selfPubkey, onClo
               <CaretRight size={16} color={c.text.muted} weight='regular' />
             </span>
           </button>
-          {isGrocery ? (
-            <button onClick={() => setPickingAisle(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, padding: '12px 14px', background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, cursor: 'pointer' }}>
-              <span style={{ color: c.text.secondary, fontSize: 14 }}>Aisle</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, color: c.text.primary, fontSize: 15 }}>
-                {category || aisles.FALLBACK}
-                <CaretRight size={16} color={c.text.muted} weight='regular' />
-              </span>
-            </button>
-          ) : null}
+          <button onClick={() => setPickingAisle(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, padding: '12px 14px', background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, cursor: 'pointer' }}>
+            <span style={{ color: c.text.secondary, fontSize: 14 }}>{nounLabel}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, color: c.text.primary, fontSize: 15 }}>
+              {category || (isGrocery ? aisles.FALLBACK : 'None')}
+              <CaretRight size={16} color={c.text.muted} weight='regular' />
+            </span>
+          </button>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder='Notes (optional)' rows={2} maxLength={2000}
             style={{ width: '100%', padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none', resize: 'vertical', minHeight: 44 }} />
           <div style={{ display: 'flex', gap: sp.sm }}>
@@ -2350,12 +2379,12 @@ function ItemSheet ({ open, item, kind, customAisles, members, selfPubkey, onClo
               style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
             {url.trim() ? <button onClick={() => openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim())} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
           </div>
-          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category: (isGrocery && catTouched) ? category : undefined })}>Save</Button>
+          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched })}>Save</Button>
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>
       <AssigneePickerSheet open={picking} onClose={() => setPicking(false)} members={members} selfPubkey={selfPubkey} current={assignee} onPick={(pk) => setAssignee(pk)} />
-      <AislePickerSheet open={pickingAisle} onClose={() => setPickingAisle(false)} current={category || aisles.FALLBACK} custom={customAisles} onPick={(a) => { setCategory(a); setCatTouched(true) }} />
+      <AislePickerSheet open={pickingAisle} onClose={() => setPickingAisle(false)} noun={noun} builtins={builtins} current={category} custom={customAisles} onPick={(a) => { setCategory(a); setCatTouched(true) }} />
     </>
   )
 }
