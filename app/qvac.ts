@@ -9,6 +9,7 @@
 // See proposals/2026-07-11-qvac-integration-notes.md.
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import * as FileSystem from 'expo-file-system/legacy'
 import {
   completion,
   deleteCache,
@@ -120,9 +121,11 @@ export async function removeAiModel (): Promise<AiStatus> {
     const id = _modelId || (_state === 'ready' ? await ensureReady().catch(() => null) : null)
     if (id) await unloadModel({ modelId: id, clearStorage: true })
   } catch {}
-  // Best-effort: also drop cached blobs so the ~0.8GB download is actually freed
-  // (unloadModel's clearStorage may only cover the loaded instance's files).
   try { await (deleteCache as any)({ all: true }) } catch {}
+  // The real ~0.8GB lives in the SDK's model store at <documentDirectory>.qvac/models
+  // (HOME_DIR = document dir). unloadModel/deleteCache don't remove it, so delete it
+  // directly - this is what actually reclaims the space.
+  try { await FileSystem.deleteAsync(FileSystem.documentDirectory + '.qvac/models', { idempotent: true }) } catch {}
   _modelId = null; _readyPromise = null; _state = 'none'; _pct = 0; _downloaded = 0; _total = 0; _error = null
   await AsyncStorage.setItem(READY_KEY, '0').catch(() => {})
   emit()

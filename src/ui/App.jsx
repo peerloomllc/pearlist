@@ -436,7 +436,11 @@ function ItemRow ({ item, members, onToggle, onOpen, dragHandle }) {
       </button>
       {item.url ? <button onClick={(e) => { e.stopPropagation(); openUrl(item.url) }} aria-label='Open link' style={{ width: 34, height: 34, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
       <AssigneeAvatar pubkey={item.assignee} members={members} size={24} />
-      {dragHandle ? <span {...dragHandle} onClick={(e) => e.stopPropagation()} aria-label='Reorder' style={{ flexShrink: 0, marginLeft: 2, padding: '6px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex', alignItems: 'center' }}><DotsSixVertical size={20} weight='bold' /></span> : null}
+      {dragHandle ? <span
+        onTouchStart={(e) => { e.stopPropagation(); dragHandle.onTouchStart?.(e) }}
+        onPointerDown={(e) => { e.stopPropagation(); dragHandle.onPointerDown?.(e) }}
+        onClick={(e) => e.stopPropagation()} aria-label='Reorder'
+        style={{ flexShrink: 0, marginLeft: 2, padding: '6px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex', alignItems: 'center' }}><DotsSixVertical size={20} weight='bold' /></span> : null}
     </div>
   )
 }
@@ -692,7 +696,7 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
             {isCollapsed ? null : rows.map((it) => {
               const itemLifted = lifted?.kind === 'item' && lifted.id === it.id
               return (
-                <div key={it.id} data-item-id={it.id} data-aisle={aisle}
+                <div key={it.id} data-item-id={it.id}
                   style={itemLifted ? { position: 'relative', zIndex: 50, background: c.surface.elevated, boxShadow: '0 10px 26px rgba(0,0,0,0.45)', borderRadius: r.md } : undefined}>
                   {renderRow(it, dragProps ? dragProps('item', it.id, aisle) : undefined)}
                 </div>
