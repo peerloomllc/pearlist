@@ -2,6 +2,27 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-11 - Grocery aisle categorization (category field + grouped UI)
+Tier: T1 (additive field + new read-only-ish methods; no pairing/topic/encryption
+change).
+Context: PearList's backlogged "categories/aisles" feature - group a grocery list
+by supermarket aisle so it maps to how you shop.
+Choice: add an optional `category` aisle label to the item row, written by new
+`ai:categorize` / `ai:categorizeList` / `ai:setCategory` worklet methods, and
+group grocery lists by aisle in the UI (collapsible sections + long-press
+drag-reorder). Classification goes through a single seam (`classifyItem` in
+listMethods.js -> `classifyAisle` in aisles.js), backed by a pure offline keyword
+classifier - instant, deterministic, works on every device, no dependencies.
+`category` is additive: old peers accept + ignore it, non-grocery lists never show
+it, so no merge rule changes. Aisle order + collapsed state are device-local
+(localStorage), NOT synced; dragging an item onto another aisle recategorizes it
+(via ai:setCategory, which does sync).
+Alternatives: compute categories per-device as presentation only (rejected -
+categorize once and sync the result so low-end/AI-less devices still see aisles).
+Consequences: the `classifyItem` seam is the swap point for a smarter classifier
+(an on-device LLM is layered in a separate follow-up branch, keeping the keyword
+pass as the always-available baseline).
+
 ## 2026-07-07 - @peerloom/core stays one package with subpath exports (split CLOSED)
 Tier: T0 (design decision + documentation; no code change). Resolves the open
 question in proposals/2026-06-30-pearlist-core-extraction.md and the "core package
