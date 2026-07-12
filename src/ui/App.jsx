@@ -825,17 +825,20 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
         const open = rows.filter((it) => !it.checked).length
         const aisleTarget = dragOver?.aisle === aisle && dragOver?.kind === 'item'
         const headerLifted = lifted?.kind === 'aisle' && lifted.id === aisle
+        const label = aisle === aisles.FALLBACK ? fallbackLabel : aisle
         return (
-          <div key={aisle} data-aisle={aisle} style={aisleTarget ? { background: 'rgba(127,127,127,0.08)' } : undefined}>
+          <div key={aisle} data-aisle={aisle} style={aisleTarget ? { background: 'color-mix(in srgb, var(--color-primary) 9%, transparent)' } : undefined}>
             <div
               data-aisle-header={aisle}
-              style={{ top: 0, width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: dragOver?.kind === 'aisle' && dragOver?.aisle === aisle ? c.surface.input : c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px`, position: headerLifted ? 'relative' : 'sticky', zIndex: headerLifted ? 50 : 1, boxShadow: headerLifted ? '0 10px 26px rgba(0,0,0,0.45)' : 'none' }}
+              style={{ top: 0, width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: aisleTarget ? 'color-mix(in srgb, var(--color-primary) 22%, transparent)' : (dragOver?.kind === 'aisle' && dragOver?.aisle === aisle ? c.surface.input : c.surface.elevated), borderTop: `1px solid ${aisleTarget ? c.primary : c.divider}`, borderBottom: `1px solid ${aisleTarget ? c.primary : c.divider}`, padding: `${sp.sm}px ${sp.base}px`, position: headerLifted ? 'relative' : 'sticky', zIndex: headerLifted ? 50 : 1, boxShadow: headerLifted ? '0 10px 26px rgba(0,0,0,0.45)' : 'none' }}
             >
               <button onClick={() => { if (didDrag?.()) return; onToggle?.(aisle) }} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp.sm, background: 'none', border: 'none', padding: 0, cursor: 'pointer', minWidth: 0 }}>
                 <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
-                <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{aisle === aisles.FALLBACK ? fallbackLabel : aisle}</span>
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
               </button>
-              <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
+              {aisleTarget
+                ? <span style={{ fontSize: 12, fontWeight: 600, color: c.primary, flexShrink: 0, maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Move to {label}</span>
+                : <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>}
               {dragProps ? <span {...dragProps('aisle', aisle, aisle)} onClick={(e) => e.stopPropagation()} aria-label='Reorder aisle' style={{ flexShrink: 0, padding: '4px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex' }}><DotsSixVertical size={18} weight='bold' /></span> : null}
             </div>
             <CollapsibleRows collapsed={isCollapsed}>
