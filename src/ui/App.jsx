@@ -649,17 +649,33 @@ function orderRows (rows, itemOrder) {
 // aisle to re-file them there; headers reorder the aisles. All order is
 // per-device (see the 2026-07-11 hybrid decision). `dragProps(kind,id,aisle)`
 // wires the long-press handlers from the parent's drag controller.
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag }) {
+const SORTING = '__sorting__'
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone }) {
   const buckets = new Map()
   for (const it of items) {
-    const key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
+    let key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
+    // A yet-to-be-classified 'Other' item shows under a transient "Sorting…"
+    // group (with a spinner) instead of flashing in Other and then jumping.
+    if (key === aisles.FALLBACK && sortingActive && aiDone && !aiDone.has(it.id)) key = SORTING
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(it)
   }
-  const sections = orderAisles([...buckets.keys()], aisleOrder).map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
+  const ordered = orderAisles([...buckets.keys()].filter((k) => k !== SORTING), aisleOrder)
+  const sections = [...(buckets.has(SORTING) ? [SORTING] : []), ...ordered].map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
   return (
     <>
       {sections.map(({ aisle, items: rows }) => {
+        if (aisle === SORTING) {
+          return (
+            <div key={SORTING}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, background: c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px` }}>
+                <span style={{ width: 12, height: 12, borderRadius: '50%', border: `2px solid ${c.text.muted}`, borderTopColor: c.primary, display: 'inline-block', animation: 'pearlist-spin 0.7s linear infinite' }} />
+                <span style={{ flex: 1, fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.secondary }}>Sorting…</span>
+              </div>
+              {rows.map((it) => <div key={it.id} style={{ opacity: 0.6 }}>{renderRow(it)}</div>)}
+            </div>
+          )
+        }
         const isCollapsed = !!collapsed?.has(aisle)
         const open = rows.filter((it) => !it.checked).length
         const aisleTarget = dragOver?.aisle === aisle && dragOver?.kind === 'item'
@@ -693,6 +709,45 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
   )
 }
 
+// Consent prompt shown atop a grocery list when the keyword sorter left items
+// under "Other" and the user has not yet opted into the on-device AI. Explains
+// the one-time download + on-device privacy before anything is fetched. Once
+// enabled, it shows download progress instead.
+function AiConsentBanner ({ status, otherCount, onEnable, onDismiss }) {
+  if (!status) return null
+  const gb = (status.model.sizeMB / 1024).toFixed(1)
+  const wrap = { margin: `${sp.md}px ${sp.base}px`, padding: sp.base, background: c.surface.elevated, border: `1px solid ${c.border}`, borderRadius: r.lg }
+  if (status.consent) {
+    if (status.state === 'downloading' || status.state === 'loading') {
+      const loading = status.state === 'loading'
+      // Bar from MB (smooth) rather than the coarse percentage; full + pulsing
+      // while the model loads into memory.
+      const frac = loading ? 1 : (status.totalMB ? Math.min(1, (status.downloadedMB || 0) / status.totalMB) : (status.pct || 0) / 100)
+      return (
+        <div style={wrap}>
+          <span style={{ color: c.text.primary, fontSize: 14, fontWeight: 400 }}>{loading ? 'Loading AI model into memory…' : `Downloading AI sorter… ${status.downloadedMB || 0} / ${status.totalMB || Math.round(status.model.sizeMB)} MB`}</span>
+          <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: sp.sm, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.round(frac * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: loading ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
+  if (!otherCount) return null
+  return (
+    <div style={wrap}>
+      <div style={{ color: c.text.primary, fontSize: 15, fontWeight: 400, marginBottom: 4 }}>Sort {otherCount} item{otherCount > 1 ? 's' : ''} with on-device AI?</div>
+      <p style={{ color: c.text.secondary, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: `0 0 ${sp.md}px` }}>
+        PearList couldn't place {otherCount > 1 ? 'these' : 'this'} by name. A small AI model can. It's a one-time ~{gb}GB download and runs entirely on your phone - nothing is ever sent anywhere.
+      </p>
+      <div style={{ display: 'flex', gap: sp.sm }}>
+        <button onClick={onEnable} style={{ flex: 1, padding: '10px 14px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Download & enable</button>
+        <button onClick={onDismiss} style={{ padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Not now</button>
+      </div>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Screens
@@ -1088,6 +1143,18 @@ export default function App () {
     return () => { cancelled = true }
   }, [openList?.kind, gid, openListId, items, loadItems])
 
+  // On-device AI status (consent + model download state), from the RN shell.
+  // Drives the Settings row and the in-list consent prompt; live-updated via the
+  // ai:status event (download progress, ready).
+  const [aiStatus, setAiStatus] = useState(null)
+  const [aiPromptDismissed, setAiPromptDismissed] = useState(false)
+  useEffect(() => {
+    call('shell:aiStatus', {}).then(setAiStatus).catch(() => {})
+    return on('ai:status', setAiStatus)
+  }, [])
+  useEffect(() => { setAiPromptDismissed(false) }, [openListId])
+  const enableAi = useCallback(() => { call('shell:aiConsent', { enabled: true }).then(setAiStatus).catch(() => {}) }, [])
+
   // Device-local grocery view prefs (collapsed aisles + custom aisle/item order),
   // per list, persisted to localStorage. Tapping a header toggles collapse;
   // long-press drag reorders (see useAisleDrag).
@@ -1116,6 +1183,32 @@ export default function App () {
     onReorderAisles: (order) => patchAisleView({ aisleOrder: order }),
     onRecategorize: recategorizeItem,
   })
+
+  // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
+  // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
+  // once the user has opted in and the model is downloaded. Until then the
+  // consent prompt (below) handles it. Re-runs when the model becomes ready.
+  const aiActive = !!(aiStatus?.consent && aiStatus?.state === 'ready')
+  const aiSentRef = useRef(new Set())
+  // Items the AI has finished with (found an aisle or not). An 'Other' item that
+  // is NOT yet done shows as "Sorting…" while the model is active, so it never
+  // visibly sits in "Other" and then jumps.
+  const [aiDone, setAiDone] = useState(new Set())
+  useEffect(() => { aiSentRef.current = new Set(); setAiDone(new Set()) }, [openListId])
+  useEffect(() => {
+    if (openList?.kind !== 'grocery' || !gid || !openListId || !aiActive) return
+    const others = items.filter((i) => i.category === 'Other' && !aiSentRef.current.has(i.id))
+    if (!others.length) return
+    others.forEach((i) => aiSentRef.current.add(i.id))
+    call('shell:aiCategorize', { groupId: gid, listId: openListId, items: others.map((i) => ({ itemId: i.id, text: i.text })) }).catch(() => {})
+  }, [openList?.kind, gid, openListId, items, aiActive])
+  useEffect(() => {
+    return on('ai:recategorized', (d) => {
+      if (d?.listId !== openListId) return
+      if (d?.done?.length) setAiDone((prev) => { const n = new Set(prev); d.done.forEach((x) => n.add(x)); return n })
+      if (gid) loadItems(gid, openListId)
+    })
+  }, [openListId, gid, loadItems])
 
   async function createSpace (name) {
     const { groupId } = await call('group:create', { name })
@@ -1297,6 +1390,9 @@ export default function App () {
         <>
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
           <div ref={listScrollRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+            {openList?.kind === 'grocery' && !aiPromptDismissed
+              ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onDismiss={() => setAiPromptDismissed(true)} />
+              : null}
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
               : (() => {
@@ -1306,7 +1402,7 @@ export default function App () {
                   </SwipeRow>
                 )
                 return openList?.kind === 'grocery'
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} />
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} sortingActive={aiActive} aiDone={aiDone} />
                   : items.map((it) => renderRow(it))
               })()}
           </div>
@@ -1674,6 +1770,17 @@ function MenuSheet ({ open, onClose, profile, onProfile, onAbout }) {
   )
 }
 
+// One-line description of the on-device AI model state for the Settings row.
+function aiSubtitle (ai) {
+  if (!ai) return 'Sorts unusual grocery items into aisles, on your device.'
+  const gb = (ai.model.sizeMB / 1024).toFixed(1)
+  if (ai.state === 'downloading') return `Downloading model… ${ai.downloadedMB || 0} / ${ai.totalMB || Math.round(ai.model.sizeMB)} MB`
+  if (ai.state === 'loading') return 'Loading model into memory…'
+  if (ai.state === 'ready') return `Ready · ${ai.model.name} (~${gb} GB stored on device)`
+  if (ai.state === 'error') return 'Download failed - toggle off then on to retry.'
+  return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`
+}
+
 function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -1694,6 +1801,10 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   async function toggleBgSync (v) {
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
+  const [ai, setAi] = useState(null)
+  useEffect(() => { if (open) call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [open])
+  useEffect(() => on('ai:status', setAi), [])
+  async function toggleAi (v) { try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
 
   async function commitAvatar (value) {
     setBusy(true)
@@ -1763,6 +1874,18 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
             <Toggle on={bgSync} onChange={toggleBgSync} />
           </div>
         ) : null}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
+          <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+            <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>On-device sorting (AI)</span>
+            <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
+            {ai && (ai.state === 'downloading' || ai.state === 'loading') ? (
+              <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
+              </div>
+            ) : null}
+          </span>
+          <Toggle on={!!ai?.consent} onChange={toggleAi} />
+        </div>
       </div>
     </FullScreen>
   )

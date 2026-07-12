@@ -89,7 +89,8 @@
       "./plugins/with-android-queries",
       "./plugins/with-android-debug-app-id",
       "./plugins/with-android-release-signing",
-      "./plugins/with-strip-aps"
+      "./plugins/with-strip-aps",
+      "@qvac/sdk/expo-plugin"
     ],
     "assets": [
       "./assets/bare-universal.bundle",
