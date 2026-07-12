@@ -32,3 +32,6 @@ expo-env.d.ts
 
 # Local Expo module native build output
 modules/*/android/build/
+
+# QVAC generated worker bundle + addons manifest (from expo prebuild); qvac.config.json is source
+/qvac/

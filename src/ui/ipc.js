@@ -75,7 +75,7 @@ const MOCK_SELF = 'ab'.repeat(32) // this preview device's pubkey
 // A few common groceries so the preview shows suggestions before you add anything.
 const MOCK_RECENTS = ['Milk', 'Eggs', 'Bread', 'Bananas', 'Coffee beans', 'Butter', 'Chicken', 'Spinach']
   .map((text, i) => ({ norm: text.toLowerCase(), text, count: 10 - i, lastAt: 0 }))
-const mock = { groups: new Map(), profile: null, recents: MOCK_RECENTS.slice() }
+const mock = { groups: new Map(), profile: null, recents: MOCK_RECENTS.slice(), ai: { consent: false, state: 'none', pct: 0, downloadedMB: 0, totalMB: 808, error: null, model: { name: 'Llama 3.2 1B', sizeMB: 808 } } }
 function mockGroup (groupId) {
   const g = mock.groups.get(groupId)
   if (!g) throw new Error('unknown group: ' + groupId)
@@ -146,6 +146,13 @@ const mockMethods = {
     const it = mockGroup(groupId).items.get(itemId)
     it.category = aisles.classifyAisle(it.text); return { category: it.category }
   },
+  // Browser preview has no RN shell / QVAC. Simulate the status/consent surface
+  // so Settings + the consent prompt are reviewable; consent flips to "ready"
+  // instantly (no real download) and the AI categorize pass is a no-op.
+  'shell:aiStatus': async () => mock.ai,
+  'shell:aiConsent': async ({ enabled }) => { mock.ai = { ...mock.ai, consent: !!enabled, state: enabled ? 'ready' : mock.ai.state, pct: enabled ? 100 : mock.ai.pct, downloadedMB: enabled ? mock.ai.totalMB : mock.ai.downloadedMB }; return mock.ai },
+  'shell:aiRemoveModel': async () => { mock.ai = { ...mock.ai, state: 'none', pct: 0, downloadedMB: 0 }; return mock.ai },
+  'shell:aiCategorize': async () => ({ ok: true, queued: 0 }),
   'ai:setCategory': async ({ groupId, itemId, category }) => {
     const it = mockGroup(groupId).items.get(itemId)
     if (it && aisles.AISLES.includes(category)) it.category = category

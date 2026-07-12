@@ -52,6 +52,7 @@ button{font-family:${FONT};transition:transform 120ms cubic-bezier(0.2,0,0,1)}
 button:active{transform:scale(0.97)}
 @keyframes pearlist-spin{to{transform:rotate(360deg)}}
 @keyframes pearlist-pop{0%{transform:scale(0.7)}60%{transform:scale(1.12)}100%{transform:scale(1)}}
+@keyframes pearlist-pulse{0%,100%{opacity:0.45}50%{opacity:1}}
 `
 
 export function injectGlobalStyles () {

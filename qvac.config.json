@@ -1,0 +1,4 @@
+{
+  "plugins": ["@qvac/sdk/llamacpp-completion/plugin"],
+  "bareRuntimeVersion": "1.27.0"
+}
