@@ -478,13 +478,20 @@ const methods = {
   // peer. The category is validated against the known aisles; an unknown value
   // is dropped rather than written. Re-reads to avoid clobbering a concurrent edit.
   'ai:setCategory': async ({ groupId, listId, itemId, category, by }, ctx) => {
-    // A built-in aisle, or - only when the user chose it by hand - a sanitized
-    // custom aisle name. The classifier (by omitted) stays locked to built-ins.
-    const aisle = normalizeAisle(category) || (by === 'user' ? sanitizeCustomAisle(category) : null)
-    if (!aisle) throw new Error('unknown aisle: ' + category)
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))
     if (!existing || existing.deleted) throw new Error('item not found')
+    // User cleared the category (pulled the item out of its aisle/section): drop
+    // both the label and the manual-pin marker so it groups as un-filed again.
+    if (by === 'user' && (category == null || category === '')) {
+      const { category: _c, catBy: _b, ...rest } = existing
+      await putRow(ctx, groupId, itemKey(listId, itemId), rest)
+      return { category: null }
+    }
+    // A built-in aisle, or - only when the user chose it by hand - a sanitized
+    // custom aisle/section name. The classifier (by omitted) stays locked to built-ins.
+    const aisle = normalizeAisle(category) || (by === 'user' ? sanitizeCustomAisle(category) : null)
+    if (!aisle) throw new Error('unknown aisle: ' + category)
     // A user-chosen aisle (drag or the item-detail picker) is pinned via catBy so
     // the AI fallback never re-sorts it - notably so an item can rest under 'Other'
     // on purpose. The AI path omits `by`, leaving any existing pin (and its value)
