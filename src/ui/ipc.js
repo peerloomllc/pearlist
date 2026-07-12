@@ -152,7 +152,16 @@ const mockMethods = {
   'shell:aiStatus': async () => mock.ai,
   'shell:aiConsent': async ({ enabled }) => { mock.ai = { ...mock.ai, consent: !!enabled, state: enabled ? 'ready' : mock.ai.state, pct: enabled ? 100 : mock.ai.pct, downloadedMB: enabled ? mock.ai.totalMB : mock.ai.downloadedMB }; return mock.ai },
   'shell:aiRemoveModel': async () => { mock.ai = { ...mock.ai, state: 'none', pct: 0, downloadedMB: 0 }; return mock.ai },
+  'shell:aiLoad': async () => { mock.ai = { ...mock.ai, state: 'ready' }; return { ok: true, status: mock.ai } },
   'shell:aiCategorize': async () => ({ ok: true, queued: 0 }),
+  // Preview stub for recipe -> items (real generation is the RN shell / QVAC).
+  'shell:aiExpand': async ({ description }) => {
+    const d = String(description || '').toLowerCase()
+    const canned = d.includes('taco') ? ['Ground beef', 'Taco shells', 'Shredded cheese', 'Lettuce', 'Tomatoes', 'Salsa', 'Sour cream']
+      : d.includes('spaghetti') || d.includes('pasta') ? ['Spaghetti', 'Marinara sauce', 'Ground beef', 'Parmesan', 'Garlic', 'Onion']
+        : ['Milk', 'Eggs', 'Bread']
+    return { ok: true, items: canned }
+  },
   'ai:setCategory': async ({ groupId, itemId, category, by }) => {
     const it = mockGroup(groupId).items.get(itemId)
     if (it && by === 'user' && (category == null || category === '')) { delete it.category; delete it.catBy; return { category: null } }
