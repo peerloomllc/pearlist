@@ -6,7 +6,7 @@ import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -501,6 +501,28 @@ function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(list
 const customAislesKey = (spaceId) => `pearlist:customaisles:${spaceId}`
 function loadCustomAisles (spaceId) { try { return spaceId ? (JSON.parse(localStorage.getItem(customAislesKey(spaceId)) || '[]') || []) : [] } catch { return [] } }
 function rememberCustomAisle (spaceId, name) { try { if (!spaceId || !name) return; const cur = loadCustomAisles(spaceId); if (!cur.includes(name)) localStorage.setItem(customAislesKey(spaceId), JSON.stringify([...cur, name].slice(-50))) } catch {} }
+
+// Learn from manual aisle corrections: a device-local item-text -> aisle memory.
+// When the user drags an item to another aisle or picks one by hand, remember it;
+// next time an item with the same text is added it is pre-filed there (pinned,
+// by:'user'), ahead of the keyword/LLM classifier. Device-local only (a personal
+// shopping habit, not a household rule) - a synced version is a later option.
+// Capped, most-recent-wins.
+const OVERRIDES_KEY = 'pearlist:aisleOverrides'
+const normItemText = (t) => String(t || '').trim().toLowerCase().replace(/\s+/g, ' ')
+function loadOverrides () { try { return JSON.parse(localStorage.getItem(OVERRIDES_KEY) || '{}') || {} } catch { return {} } }
+function rememberOverride (text, aisle) {
+  try {
+    const n = normItemText(text); if (!n || !aisle) return
+    const m = loadOverrides(); if (m[n] === aisle) return
+    delete m[n]; m[n] = aisle // re-insert so it counts as most-recently-used
+    const keys = Object.keys(m); if (keys.length > 500) delete m[keys[0]]
+    localStorage.setItem(OVERRIDES_KEY, JSON.stringify(m))
+  } catch {}
+}
+function overrideFor (text) { try { return loadOverrides()[normItemText(text)] || null } catch { return null } }
+function overrideCount () { try { return Object.keys(loadOverrides()).length } catch { return 0 } }
+function clearOverrides () { try { localStorage.removeItem(OVERRIDES_KEY) } catch {} }
 
 // Long-press drag controller for the grouped grocery view. Coexists with the
 // row swipe-to-delete: a horizontal move before the hold-timer cancels the drag
@@ -1272,8 +1294,9 @@ export default function App () {
   const listScrollRef = useRef(null)
   const recategorizeItem = useCallback((itemId, aisle) => {
     if (!gid || !openListId) return
+    rememberOverride(items.find((i) => i.id === itemId)?.text, aisle) // learn this correction
     call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle, by: 'user' }).then(() => loadItems(gid, openListId)).catch(() => {})
-  }, [gid, openListId, loadItems])
+  }, [gid, openListId, loadItems, items])
   const { dragProps, dragOver, lifted, didDrag } = useAisleDrag({
     items, aisleView, scrollRef: listScrollRef,
     onReorderItems: (order) => patchAisleView({ itemOrder: order }),
@@ -1592,11 +1615,11 @@ export default function App () {
       <ItemSheet
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
         customAisles={[...new Set([...items.map((i) => i.category).filter((cat) => cat && !aisles.AISLES.includes(cat)), ...loadCustomAisles(gid)])]}
-        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); if (patch.category && (patch.category !== sheet.item.category || sheet.item.catBy !== 'user')) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: patch.category, by: 'user' }).catch(() => {}); if (patch.category && !aisles.AISLES.includes(patch.category)) rememberCustomAisle(gid, patch.category); await loadItems(gid, openListId); setSheet(null) }}
+        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); if (patch.category && (patch.category !== sheet.item.category || sheet.item.catBy !== 'user')) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: patch.category, by: 'user' }).catch(() => {}); if (patch.category) { if (!aisles.AISLES.includes(patch.category)) rememberCustomAisle(gid, patch.category); rememberOverride(patch.text || sheet.item.text, patch.category) } await loadItems(gid, openListId); setSheet(null) }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <QtySheet open={!!sheet && sheet.type === 'qty'}
-        onCommit={async (qty) => { const t = sheet?.text; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
+        onCommit={async (qty) => { const t = sheet?.text; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); const ov = overrideFor(t); if (itemId && ov) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: ov, by: 'user' }).catch(() => {}); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
       />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
@@ -1953,6 +1976,35 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   useEffect(() => { if (open) call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [open])
   useEffect(() => on('ai:status', setAi), [])
   async function toggleAi (v) { try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
+  const [learned, setLearned] = useState(0)
+  useEffect(() => { if (open) setLearned(overrideCount()) }, [open])
+  function clearLearned () {
+    if (!learned) return
+    if (typeof window !== 'undefined' && window.confirm && !window.confirm(`Forget ${learned} learned aisle${learned > 1 ? 's' : ''}? New items will be sorted automatically again.`)) return
+    clearOverrides(); setLearned(0)
+  }
+
+  // Longer explanations, shown in a modal from each row's info dot (kept out of
+  // the row so the settings list stays scannable).
+  const [info, setInfo] = useState(null)
+  const ABOUT = {
+    Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
+    'Keep syncing in background': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
+    'On-device sorting (AI)': "Grocery lists group items by supermarket aisle. A fast built-in name matcher places common items instantly; for anything it can't recognize, an optional on-device AI model sorts it. The model is a one-time ~0.8 GB download and runs entirely on your phone - nothing about your lists is ever sent anywhere. Turn it off to delete the model and reclaim the space; the name matcher keeps working.",
+    'Learned aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
+  }
+  const Setting = ({ title, about, control, extra, first }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
+      <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 4 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+          <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{title}</span>
+          {about ? <button onClick={() => setInfo({ title, body: about })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
+        </span>
+        {extra}
+      </span>
+      {control}
+    </div>
+  )
 
   async function commitAvatar (value) {
     setBusy(true)
@@ -2002,39 +2054,28 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
       </div>
 
       <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.md}px 0` }}>
-          <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Dark mode</span>
-          <Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
-          <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-            <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Notifications</span>
-            <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>When someone assigns you an item or joins</span>
-          </span>
-          <Toggle on={notif} onChange={toggleNotif} />
-        </div>
-        {bgSyncSupported ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
-            <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-              <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Keep syncing in background</span>
-              <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Updates arrive while the app is closed. Shows a permanent notification.</span>
-            </span>
-            <Toggle on={bgSync} onChange={toggleBgSync} />
-          </div>
-        ) : null}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
-          <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-            <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>On-device sorting (AI)</span>
-            <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
-            {ai && (ai.state === 'downloading' || ai.state === 'loading') ? (
-              <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
-              </div>
-            ) : null}
-          </span>
-          <Toggle on={!!ai?.consent} onChange={toggleAi} />
-        </div>
+        <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
+        <Setting title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        {bgSyncSupported ? <Setting title='Keep syncing in background' about={ABOUT['Keep syncing in background']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+        <Setting title='On-device sorting (AI)' about={ABOUT['On-device sorting (AI)']}
+          control={<Toggle on={!!ai?.consent} onChange={toggleAi} />}
+          extra={ai && (ai.state === 'downloading' || ai.state === 'loading' || ai.state === 'error') ? (
+            <>
+              <span style={{ color: ai.state === 'error' ? c.error : c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
+              {(ai.state === 'downloading' || ai.state === 'loading') ? (
+                <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
+                </div>
+              ) : null}
+            </>
+          ) : null} />
+        <Setting title='Learned aisles' about={ABOUT['Learned aisles']}
+          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
+          control={<button onClick={clearLearned} disabled={!learned} style={{ padding: '8px 14px', borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: learned ? c.error : c.text.muted, fontSize: 14, cursor: learned ? 'pointer' : 'default', flexShrink: 0, opacity: learned ? 1 : 0.6 }}>Clear</button>} />
       </div>
+      <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
+        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
+      </BottomSheet>
     </FullScreen>
   )
 }
@@ -2265,12 +2306,16 @@ function ItemSheet ({ open, item, kind, customAisles, members, selfPubkey, onClo
       <BottomSheet open={open} onClose={onClose} title='Edit item'>
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
           <Field value={text} onChange={setText} placeholder='Item' />
-          <div style={{ display: 'flex', alignItems: 'center', gap: sp.md }}>
-            <span style={{ color: c.text.secondary, fontSize: 14, width: 70 }}>Quantity</span>
-            <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Minus size={18} weight='bold' /></button>
-            <span style={{ fontFamily: MONO, fontSize: 16, color: c.text.primary, minWidth: 24, textAlign: 'center' }}>{qty}</span>
-            <button onClick={() => setQty((q) => q + 1)} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={18} weight='bold' /></button>
-          </div>
+          {/* Quantity is a grocery notion; chores/to-dos/generic lists have no use
+              for it, so the stepper is grocery-only (the qty value is preserved). */}
+          {isGrocery ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: sp.md }}>
+              <span style={{ color: c.text.secondary, fontSize: 14, width: 70 }}>Quantity</span>
+              <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Minus size={18} weight='bold' /></button>
+              <span style={{ fontFamily: MONO, fontSize: 16, color: c.text.primary, minWidth: 24, textAlign: 'center' }}>{qty}</span>
+              <button onClick={() => setQty((q) => q + 1)} style={{ width: 36, height: 36, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={18} weight='bold' /></button>
+            </div>
+          ) : null}
           <button onClick={() => setPicking(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, padding: '12px 14px', background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, cursor: 'pointer' }}>
             <span style={{ color: c.text.secondary, fontSize: 14 }}>Assigned to</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, color: c.text.primary, fontSize: 15 }}>
