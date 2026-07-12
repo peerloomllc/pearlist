@@ -551,6 +551,45 @@ function overrideFor (text) { try { return loadOverrides()[normItemText(text)] |
 function overrideCount () { try { return Object.keys(loadOverrides()).length } catch { return 0 } }
 function clearOverrides () { try { localStorage.removeItem(OVERRIDES_KEY) } catch {} }
 
+// Imperative confirm backed by a themed bottom sheet (ConfirmHost registers the
+// handler on mount), replacing the native window.confirm ("JavaScript" title).
+// Falls open to true if no host is mounted.
+let _askConfirm = null
+function askConfirm (opts) { return _askConfirm ? _askConfirm(opts) : Promise.resolve(true) }
+
+// Before enabling the ~0.8GB on-device AI, warn on low-end hardware (little RAM
+// or free storage) so the user knows it may be slow or fail. Returns true to
+// proceed. On any detection failure we don't block (assume capable).
+async function aiEnableConfirmed () {
+  let caps
+  try { caps = await call('shell:deviceCaps', {}) } catch { return true }
+  if (!caps || !caps.lowEnd) return true
+  const parts = []
+  if (caps.lowMem) parts.push(`only ~${(caps.totalMemMB / 1000).toFixed(1)} GB of RAM`)
+  if (caps.lowStorage) parts.push(`~${(caps.freeStorageMB / 1000).toFixed(1)} GB of free storage`)
+  return askConfirm({
+    title: 'Enable AI on this device?',
+    message: `This device has ${parts.join(' and ')}. The on-device AI is a ~0.8 GB download and needs a few GB of memory to run, so it may be slow or fail here. The fast name-matcher sorts most groceries without it.`,
+    confirmLabel: 'Enable anyway',
+  })
+}
+
+// Single themed confirm dialog for the whole app (see askConfirm). Rendered once.
+function ConfirmHost () {
+  const [state, setState] = useState(null)
+  useEffect(() => { _askConfirm = (opts) => new Promise((resolve) => setState({ ...opts, resolve })); return () => { _askConfirm = null } }, [])
+  const done = (v) => { const s = state; setState(null); s?.resolve(v) }
+  return (
+    <BottomSheet open={!!state} onClose={() => done(false)} title={state?.title}>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.base}px` }}>{state?.message}</p>
+      <div style={{ display: 'flex', gap: sp.sm }}>
+        <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
+        <button onClick={() => done(false)} style={{ padding: '0 18px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </BottomSheet>
+  )
+}
+
 // Long-press drag controller for the grouped grocery view. Coexists with the
 // row swipe-to-delete: a horizontal move before the hold-timer cancels the drag
 // (so swipe still works); holding still ~320ms activates a drag. Items reorder
@@ -1320,7 +1359,7 @@ export default function App () {
     return on('ai:status', setAiStatus)
   }, [])
   useEffect(() => { setAiPromptDismissed(false) }, [openListId])
-  const enableAi = useCallback(() => { call('shell:aiConsent', { enabled: true }).then(setAiStatus).catch(() => {}) }, [])
+  const enableAi = useCallback(() => { aiEnableConfirmed().then((ok) => { if (ok) call('shell:aiConsent', { enabled: true }).then(setAiStatus).catch(() => {}) }) }, [])
 
   // Device-local grocery view prefs (collapsed aisles + custom aisle/item order),
   // per list, persisted to localStorage. Tapping a header toggles collapse;
@@ -1674,6 +1713,7 @@ export default function App () {
       <LightningWalletModal open={sheet === 'wallet'} detected={lnDetected} onClose={() => setSheet(null)} />
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); goTab('about') }} />
       <GuidedTour open={showTour} onDone={dismissTour} />
+      <ConfirmHost />
       <ItemSheet
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} noun={groupNoun} builtins={groupBuiltins} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
         customAisles={isGroceryList
@@ -2035,12 +2075,13 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
   const [ai, setAi] = useState(null)
   useEffect(() => { call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [])
   useEffect(() => on('ai:status', setAi), [])
-  async function toggleAi (v) { try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
+  async function toggleAi (v) { if (v && !(await aiEnableConfirmed())) return; try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
   const [learned, setLearned] = useState(0)
   useEffect(() => { setLearned(overrideCount()) }, [])
-  function clearLearned () {
+  async function clearLearned () {
     if (!learned) return
-    if (typeof window !== 'undefined' && window.confirm && !window.confirm(`Forget ${learned} learned aisle${learned > 1 ? 's' : ''}? New items will be sorted automatically again.`)) return
+    const ok = await askConfirm({ title: 'Clear learned aisles?', message: `Forget ${learned} learned aisle${learned > 1 ? 's' : ''}? New items will be sorted automatically again.`, confirmLabel: 'Clear', danger: true })
+    if (!ok) return
     clearOverrides(); setLearned(0)
   }
 

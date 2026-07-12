@@ -153,6 +153,7 @@ const mockMethods = {
   'shell:aiConsent': async ({ enabled }) => { mock.ai = { ...mock.ai, consent: !!enabled, state: enabled ? 'ready' : mock.ai.state, pct: enabled ? 100 : mock.ai.pct, downloadedMB: enabled ? mock.ai.totalMB : mock.ai.downloadedMB }; return mock.ai },
   'shell:aiRemoveModel': async () => { mock.ai = { ...mock.ai, state: 'none', pct: 0, downloadedMB: 0 }; return mock.ai },
   'shell:aiLoad': async () => { mock.ai = { ...mock.ai, state: 'ready' }; return { ok: true, status: mock.ai } },
+  'shell:deviceCaps': async () => ({ ok: true, totalMemMB: 8000, freeStorageMB: 20000, lowMem: false, lowStorage: false, lowEnd: false }),
   'shell:aiCategorize': async () => ({ ok: true, queued: 0 }),
   // Preview stub for recipe -> items (real generation is the RN shell / QVAC).
   'shell:aiExpand': async ({ description }) => {
