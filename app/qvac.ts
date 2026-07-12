@@ -11,6 +11,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
   completion,
+  deleteCache,
   downloadAsset,
   LLAMA_3_2_1B_INST_Q4_0,
   loadModel,
@@ -114,10 +115,15 @@ export async function setAiConsent (enabled: boolean): Promise<AiStatus> {
 export async function removeAiModel (): Promise<AiStatus> {
   await init()
   try {
+    // unloadModel needs a loaded id to clear its storage; load it (from disk,
+    // fast) if it was downloaded-but-not-loaded this session, then unload+clear.
     const id = _modelId || (_state === 'ready' ? await ensureReady().catch(() => null) : null)
     if (id) await unloadModel({ modelId: id, clearStorage: true })
   } catch {}
-  _modelId = null; _readyPromise = null; _state = 'none'; _pct = 0; _error = null
+  // Best-effort: also drop cached blobs so the ~0.8GB download is actually freed
+  // (unloadModel's clearStorage may only cover the loaded instance's files).
+  try { await (deleteCache as any)({ all: true }) } catch {}
+  _modelId = null; _readyPromise = null; _state = 'none'; _pct = 0; _downloaded = 0; _total = 0; _error = null
   await AsyncStorage.setItem(READY_KEY, '0').catch(() => {})
   emit()
   return status()

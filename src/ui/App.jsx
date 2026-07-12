@@ -6,7 +6,7 @@ import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -419,7 +419,7 @@ function UndoToast ({ onUndo }) {
   )
 }
 
-function ItemRow ({ item, members, onToggle, onOpen }) {
+function ItemRow ({ item, members, onToggle, onOpen, dragHandle }) {
   const checked = !!item.checked
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}` }}>
@@ -436,6 +436,7 @@ function ItemRow ({ item, members, onToggle, onOpen }) {
       </button>
       {item.url ? <button onClick={(e) => { e.stopPropagation(); openUrl(item.url) }} aria-label='Open link' style={{ width: 34, height: 34, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
       <AssigneeAvatar pubkey={item.assignee} members={members} size={24} />
+      {dragHandle ? <span {...dragHandle} onClick={(e) => e.stopPropagation()} aria-label='Reorder' style={{ flexShrink: 0, marginLeft: 2, padding: '6px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex', alignItems: 'center' }}><DotsSixVertical size={20} weight='bold' /></span> : null}
     </div>
   )
 }
@@ -453,29 +454,38 @@ function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(list
 // within their aisle or drop into another aisle to re-file (recategorize);
 // headers reorder aisles. All device-local. Returns handlers + live drag state +
 // a floating ghost to render. Pointer events (works in the WebView on touch).
-const HOLD_MS = 300
+const HOLD_MS = 130 // short: drags start from an explicit grip handle (touch-action:none),
+const HOLD_TOL = 10 // px of finger movement allowed during the hold; within this we
+// block the browser's native scroll so the long-press can complete (fixes the
+// "scroll steals the gesture" conflict). Move past it and it's treated as a
+// scroll/swipe and released. Elevation (lift look) is driven by React via the
+// `lifted` state; the hook only ever sets `transform`/`pointerEvents` imperatively
+// (never React-managed props like background), so it can't wipe a header's colour.
 function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderAisles, onRecategorize }) {
   const [dragOver, setDragOver] = useState(null) // { kind, aisle } - cross-aisle / header target highlight
+  const [lifted, setLifted] = useState(null)     // { kind, id } - the elevated element (React renders the lift)
   const data = useRef({ items, aisleView })
   data.current = { items, aisleView }
   const S = useRef({})
-  const justDragged = useRef(false) // swallow the click a header emits after a drag
+  const justDragged = useRef(false)
 
-  const clearStyles = () => {
+  const clearImperative = () => {
     const s = S.current
-    if (s.el) { const st = s.el.style; st.transition = ''; st.transform = ''; st.zIndex = ''; st.position = ''; st.boxShadow = ''; st.background = ''; st.borderRadius = ''; st.pointerEvents = '' }
-    ;(s.rows || []).forEach((row) => { if (row.el !== s.el) { row.el.style.transition = ''; row.el.style.transform = '' } })
+    if (s.el) { s.el.style.transform = ''; s.el.style.transition = ''; s.el.style.pointerEvents = '' }
+    ;(s.rows || []).forEach((row) => { if (row.el !== s.el) { row.el.style.transform = ''; row.el.style.transition = '' } })
   }
   const cleanup = () => {
     const s = S.current
-    window.removeEventListener('pointermove', s.onMove)
-    window.removeEventListener('pointerup', s.onUp)
-    window.removeEventListener('pointercancel', s.onUp)
+    window.removeEventListener('touchmove', s.onTouchMove, { passive: false })
+    window.removeEventListener('touchend', s.onEnd)
+    window.removeEventListener('touchcancel', s.onEnd)
+    window.removeEventListener('pointermove', s.onPointerMove)
+    window.removeEventListener('pointerup', s.onEnd)
     if (s.timer) clearTimeout(s.timer)
     if (s.raf) cancelAnimationFrame(s.raf)
-    clearStyles()
+    clearImperative()
     S.current = {}
-    setDragOver(null)
+    setLifted(null); setDragOver(null)
   }
 
   const scrollDelta = (s) => (scrollRef?.current ? scrollRef.current.scrollTop - (s.scroll0 || 0) : 0)
@@ -486,54 +496,52 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
     if (s.active && el) {
       const rc = el.getBoundingClientRect()
       let d = 0
-      if (s.y < rc.top + 74) d = -9
-      else if (s.y > rc.bottom - 96) d = 9
-      if (d) { el.scrollTop += d; updateTarget() } // keep the lift + gap synced while auto-scrolling
+      if (s.y < rc.top + 78) d = -10
+      else if (s.y > rc.bottom - 100) d = 10
+      if (d) { el.scrollTop += d; positionDrag() } // keep lift + gap synced while auto-scrolling
     }
     if (s.active) s.raf = requestAnimationFrame(autoscroll)
   }
 
-  // The lifted element follows the finger; siblings translate to open the slot.
-  const applyItemShift = (s) => {
-    const sd = scrollDelta(s)
-    s.el.style.transform = `translateY(${s.y - s.startY + sd}px) scale(1.03)`
-    const others = s.rows.filter((row) => row.id !== s.id)
-    let insertAt = 0
-    for (const row of others) { if (row.center - sd < s.y) insertAt++ }
-    s.newIndex = insertAt
-    for (let j = 0; j < others.length; j++) {
-      const row = others[j]
-      const finalJ = j < insertAt ? j : j + 1     // its slot once the dragged item lands at insertAt
-      const origFull = s.rows.indexOf(row)
-      row.el.style.transition = 'transform 180ms cubic-bezier(0.2,0,0,1)'
-      row.el.style.transform = `translateY(${(finalJ - origFull) * s.rowH}px)`
-    }
-  }
-
-  const updateTarget = () => {
+  // Follow the finger + open the slot (items) or highlight the target (aisles).
+  const positionDrag = () => {
     const s = S.current
+    if (!s.active) return
+    const sd = scrollDelta(s)
     const el = document.elementFromPoint(s.x, s.y) // s.el has pointer-events:none, so this sees beneath it
     if (s.kind === 'item') {
+      s.el.style.transform = `translateY(${s.y - s.startY + sd}px) scale(1.02)`
       const overAisle = el?.closest('[data-aisle]')?.getAttribute('data-aisle')
       if (overAisle && overAisle !== s.aisle) {
-        // over a different aisle -> re-file on drop; settle sibling shifts
         s.targetAisle = overAisle
-        s.el.style.transform = `translateY(${s.y - s.startY + scrollDelta(s)}px) scale(1.03)`
         s.rows.forEach((row) => { if (row.el !== s.el) row.el.style.transform = 'translateY(0px)' })
-        setDragOver({ kind: 'item', aisle: overAisle })
+        setDragOver((d) => (d && d.aisle === overAisle) ? d : { kind: 'item', aisle: overAisle })
       } else {
         s.targetAisle = null
         setDragOver((d) => d ? null : d)
-        applyItemShift(s)
+        const others = s.rows.filter((row) => row.id !== s.id)
+        let insertAt = 0
+        for (const row of others) { if (row.center - sd < s.y) insertAt++ }
+        s.newIndex = insertAt
+        for (let j = 0; j < others.length; j++) {
+          const row = others[j]
+          const finalJ = j < insertAt ? j : j + 1
+          row.el.style.transition = 'transform 180ms cubic-bezier(0.2,0,0,1)'
+          row.el.style.transform = `translateY(${(finalJ - s.rows.indexOf(row)) * s.rowH}px)`
+        }
       }
     } else {
-      s.el.style.transform = `translateY(${s.y - s.startY + scrollDelta(s)}px)`
+      s.el.style.transform = `translateY(${s.y - s.startY + sd}px)`
       const overHeader = el?.closest('[data-aisle-header]')?.getAttribute('data-aisle-header')
-      if (overHeader) { s.targetAisle = overHeader; setDragOver({ kind: 'aisle', aisle: overHeader }) }
+      if (overHeader) { s.targetAisle = overHeader; setDragOver((d) => (d && d.aisle === overHeader) ? d : { kind: 'aisle', aisle: overHeader }) }
     }
   }
 
-  const lift = (s) => {
+  const activate = () => {
+    const s = S.current
+    if (!s.id) return
+    s.active = true
+    try { haptic('medium') } catch {}
     s.scroll0 = scrollRef?.current ? scrollRef.current.scrollTop : 0
     if (s.kind === 'item') {
       const container = s.el.closest('[data-aisle]')
@@ -543,12 +551,24 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
       s.rowH = (s.rows[s.originIndex] && s.rows[s.originIndex].h) || 48
       s.newIndex = s.originIndex
     }
-    const st = s.el.style
-    st.transition = 'transform 120ms ease, box-shadow 120ms ease'
-    st.zIndex = '50'; st.position = 'relative'; st.pointerEvents = 'none'
-    st.boxShadow = '0 10px 26px rgba(0,0,0,0.45)'
-    st.background = c.surface.elevated
-    st.borderRadius = r.md + 'px'
+    s.el.style.pointerEvents = 'none' // imperative (not React-managed) so hit-testing sees beneath
+    s.el.style.transition = 'transform 120ms ease'
+    setLifted({ kind: s.kind, id: s.id }) // React applies the elevated look
+    positionDrag()
+    s.raf = requestAnimationFrame(autoscroll)
+  }
+
+  const onMoveCommon = (x, y, preventDefault) => {
+    const s = S.current
+    if (!s.id) return
+    s.x = x; s.y = y
+    if (!s.active) {
+      if (Math.hypot(x - s.startX, y - s.startY) <= HOLD_TOL) { preventDefault && preventDefault() } // hold: block scroll
+      else cleanup() // moved out -> it's a scroll/swipe; release the gesture
+      return
+    }
+    preventDefault && preventDefault()
+    positionDrag()
   }
 
   const commit = (s) => {
@@ -562,7 +582,6 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
       return
     }
     if (s.targetAisle && s.targetAisle !== s.aisle) { onRecategorize(s.id, s.targetAisle); return }
-    // within-aisle reorder: rebuild the full display order with the item moved to newIndex in its aisle
     const buckets = new Map()
     for (const it of its) { const k = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK; if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(it) }
     const aisleIds = orderRows(buckets.get(s.aisle) || [], av.itemOrder).map((it) => it.id).filter((id) => id !== s.id)
@@ -571,34 +590,33 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
     onReorderItems(flat)
   }
 
+  const begin = (kind, id, aisle, el, x, y, source) => {
+    const s = S.current = { kind, id, aisle, el, startX: x, startY: y, x, y, active: false }
+    s.onEnd = () => {
+      if (s.active) { commit(s); justDragged.current = true; setTimeout(() => { justDragged.current = false }, 350) }
+      cleanup()
+    }
+    if (source === 'touch') {
+      s.onTouchMove = (ev) => { const t = ev.touches[0]; if (t) onMoveCommon(t.clientX, t.clientY, () => { try { ev.preventDefault() } catch {} }) }
+      window.addEventListener('touchmove', s.onTouchMove, { passive: false })
+      window.addEventListener('touchend', s.onEnd)
+      window.addEventListener('touchcancel', s.onEnd)
+    } else {
+      s.onPointerMove = (ev) => onMoveCommon(ev.clientX, ev.clientY, null)
+      window.addEventListener('pointermove', s.onPointerMove)
+      window.addEventListener('pointerup', s.onEnd)
+    }
+    s.timer = setTimeout(activate, HOLD_MS)
+  }
+
+  // The grip handle is inside the row/header; climb to the actual element to lift.
+  const dragEl = (handle, kind) => handle.closest(kind === 'item' ? '[data-item-id]' : '[data-aisle-header]') || handle
   const dragProps = useCallback((kind, id, aisle) => ({
-    onPointerDown: (e) => {
-      if (e.button != null && e.button !== 0) return
-      const el = e.currentTarget
-      const s = S.current = { kind, id, aisle, el, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false }
-      s.onMove = (ev) => {
-        s.x = ev.clientX; s.y = ev.clientY
-        if (!s.active) { if (Math.hypot(ev.clientX - s.startX, ev.clientY - s.startY) > 10) cleanup(); return } // moved first -> scroll/swipe
-        ev.preventDefault()
-        updateTarget()
-      }
-      s.onUp = () => {
-        if (s.active) { commit(s); justDragged.current = true; setTimeout(() => { justDragged.current = false }, 350) }
-        cleanup()
-      }
-      window.addEventListener('pointermove', s.onMove, { passive: false })
-      window.addEventListener('pointerup', s.onUp)
-      window.addEventListener('pointercancel', s.onUp)
-      s.timer = setTimeout(() => {
-        s.active = true
-        try { haptic('medium') } catch {}
-        lift(s)
-        s.raf = requestAnimationFrame(autoscroll)
-      }, HOLD_MS)
-    },
+    onTouchStart: (e) => { const t = e.touches[0]; if (t) begin(kind, id, aisle, dragEl(e.currentTarget, kind), t.clientX, t.clientY, 'touch') },
+    onPointerDown: (e) => { if (e.pointerType === 'touch') return; if (e.button != null && e.button !== 0) return; begin(kind, id, aisle, dragEl(e.currentTarget, kind), e.clientX, e.clientY, 'mouse') },
   }), [])
 
-  return { dragProps, dragOver, didDrag: () => justDragged.current }
+  return { dragProps, dragOver, lifted, didDrag: () => justDragged.current }
 }
 
 // Order the present aisles: any in the device-local `aisleOrder` first (that
@@ -628,7 +646,7 @@ function orderRows (rows, itemOrder) {
 // per-device (see the 2026-07-11 hybrid decision). `dragProps(kind,id,aisle)`
 // wires the long-press handlers from the parent's drag controller.
 const SORTING = '__sorting__'
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, didDrag, sortingActive, aiDone }) {
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone }) {
   const buckets = new Map()
   for (const it of items) {
     let key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
@@ -657,23 +675,29 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
         const isCollapsed = !!collapsed?.has(aisle)
         const open = rows.filter((it) => !it.checked).length
         const aisleTarget = dragOver?.aisle === aisle && dragOver?.kind === 'item'
+        const headerLifted = lifted?.kind === 'aisle' && lifted.id === aisle
         return (
           <div key={aisle} data-aisle={aisle} style={aisleTarget ? { background: 'rgba(127,127,127,0.08)' } : undefined}>
-            <button
-              onClick={() => { if (didDrag?.()) return; onToggle?.(aisle) }}
-              {...(dragProps ? dragProps('aisle', aisle, aisle) : {})}
+            <div
               data-aisle-header={aisle}
-              style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: dragOver?.kind === 'aisle' && dragOver?.aisle === aisle ? c.surface.input : c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px`, cursor: 'pointer', touchAction: 'pan-y' }}
+              style={{ top: 0, width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: dragOver?.kind === 'aisle' && dragOver?.aisle === aisle ? c.surface.input : c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px`, position: headerLifted ? 'relative' : 'sticky', zIndex: headerLifted ? 50 : 1, boxShadow: headerLifted ? '0 10px 26px rgba(0,0,0,0.45)' : 'none' }}
             >
-              <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
-              <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary }}>{aisle}</span>
-              <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px' }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
-            </button>
-            {isCollapsed ? null : rows.map((it) => (
-              <div key={it.id} data-item-id={it.id} data-aisle={aisle} {...(dragProps ? dragProps('item', it.id, aisle) : {})}>
-                {renderRow(it)}
-              </div>
-            ))}
+              <button onClick={() => { if (didDrag?.()) return; onToggle?.(aisle) }} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp.sm, background: 'none', border: 'none', padding: 0, cursor: 'pointer', minWidth: 0 }}>
+                <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{aisle}</span>
+              </button>
+              <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
+              {dragProps ? <span {...dragProps('aisle', aisle, aisle)} onClick={(e) => e.stopPropagation()} aria-label='Reorder aisle' style={{ flexShrink: 0, padding: '4px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex' }}><DotsSixVertical size={18} weight='bold' /></span> : null}
+            </div>
+            {isCollapsed ? null : rows.map((it) => {
+              const itemLifted = lifted?.kind === 'item' && lifted.id === it.id
+              return (
+                <div key={it.id} data-item-id={it.id} data-aisle={aisle}
+                  style={itemLifted ? { position: 'relative', zIndex: 50, background: c.surface.elevated, boxShadow: '0 10px 26px rgba(0,0,0,0.45)', borderRadius: r.md } : undefined}>
+                  {renderRow(it, dragProps ? dragProps('item', it.id, aisle) : undefined)}
+                </div>
+              )
+            })}
           </div>
         )
       })}
@@ -1149,7 +1173,7 @@ export default function App () {
     if (!gid || !openListId) return
     call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle }).then(() => loadItems(gid, openListId)).catch(() => {})
   }, [gid, openListId, loadItems])
-  const { dragProps, dragOver, didDrag } = useAisleDrag({
+  const { dragProps, dragOver, lifted, didDrag } = useAisleDrag({
     items, aisleView, scrollRef: listScrollRef,
     onReorderItems: (order) => patchAisleView({ itemOrder: order }),
     onReorderAisles: (order) => patchAisleView({ aisleOrder: order }),
@@ -1368,14 +1392,14 @@ export default function App () {
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
               : (() => {
-                const renderRow = (it) => (
+                const renderRow = (it, handleProps) => (
                   <SwipeRow key={it.id} onDelete={() => swipeDeleteItem(it)}>
-                    <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} />
+                    <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} dragHandle={handleProps} />
                   </SwipeRow>
                 )
                 return openList?.kind === 'grocery'
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} didDrag={didDrag} sortingActive={aiActive} aiDone={aiDone} />
-                  : items.map(renderRow)
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} sortingActive={aiActive} aiDone={aiDone} />
+                  : items.map((it) => renderRow(it))
               })()}
           </div>
           {pendingUndo ? <UndoToast onUndo={undoDelete} /> : null}
@@ -1851,6 +1875,11 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
           <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
             <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>On-device sorting (AI)</span>
             <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
+            {ai && (ai.state === 'downloading' || ai.state === 'loading') ? (
+              <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
+              </div>
+            ) : null}
             {ai?.state === 'ready' ? <button onClick={removeAi} style={{ alignSelf: 'flex-start', marginTop: 4, background: 'none', border: 'none', padding: 0, color: c.error, fontSize: 12, cursor: 'pointer' }}>Remove model to free space</button> : null}
           </span>
           <Toggle on={!!ai?.consent} onChange={toggleAi} />
