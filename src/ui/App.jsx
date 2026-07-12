@@ -167,7 +167,7 @@ function BottomSheet ({ open, onClose, title, children }) {
   }, [open])
   if (!render) return null
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, background: shown ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0)', transition: 'background 280ms ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 100, background: shown ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0)', transition: 'background 280ms ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 600, background: c.surface.card, borderRadius: `${r.sheet}px ${r.sheet}px 0 0`, maxHeight: '85dvh', overflowY: 'auto', transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', padding: `${sp.sm}px ${sp.lg}px calc(var(--pear-safe-bottom) + ${sp.xl}px)` }}>
         <div style={{ width: 36, height: 4, borderRadius: 2, background: c.text.muted, margin: '6px auto 14px' }} />
         {title ? <h2 style={{ textAlign: 'center', fontSize: 17, fontWeight: 400, margin: `0 0 ${sp.base}px`, color: c.text.primary }}>{title}</h2> : null}
@@ -242,15 +242,32 @@ function AssigneePickerSheet ({ open, onClose, members, selfPubkey, current, onP
 // aisle, so an item can be filed into one that has no items yet - which drag
 // cannot reach, since an empty aisle renders no drop target. Writes via the same
 // synced ai:setCategory path as the drag.
-function AislePickerSheet ({ open, onClose, current, onPick }) {
+function AislePickerSheet ({ open, onClose, current, onPick, custom = [] }) {
+  const [newName, setNewName] = useState('')
+  useEffect(() => { if (open) setNewName('') }, [open])
+  const clean = aisles.sanitizeCustomAisle(newName)
+  const add = () => { if (clean) { onPick(clean); onClose() } }
+  const rowStyle = { display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }
+  // Built-ins + the user's custom aisles, sorted alphabetically for quick
+  // scanning (case-insensitive), with the 'Other' catch-all pinned last. (The
+  // grouped list keeps canonical shelf order; this is just the picker.)
+  const extra = custom.filter((a) => !aisles.AISLES.includes(a))
+  const options = [...aisles.AISLES.filter((a) => a !== aisles.FALLBACK), ...extra]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .concat(aisles.FALLBACK)
   return (
     <BottomSheet open={open} onClose={onClose} title='Choose aisle'>
-      {aisles.AISLES.map((a) => (
-        <button key={a} onClick={() => { onPick(a); onClose() }} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>
+      {options.map((a) => (
+        <button key={a} onClick={() => { onPick(a); onClose() }} style={rowStyle}>
           <span style={{ flex: 1, textAlign: 'left' }}>{a}</span>
           {current === a ? <Check size={18} color={c.primary} weight='bold' /> : null}
         </button>
       ))}
+      <div style={{ display: 'flex', gap: sp.sm, borderTop: `1px solid ${c.divider}`, paddingTop: sp.md, marginTop: sp.xs }}>
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }} placeholder='New aisle' maxLength={24} autoCapitalize='words'
+          style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontFamily: FONT, outline: 'none' }} />
+        <button onClick={add} disabled={!clean} style={{ padding: '0 16px', borderRadius: r.md, border: 'none', background: clean ? c.primary : c.surface.input, color: clean ? c.text.onPrimary : c.text.muted, cursor: clean ? 'pointer' : 'default', fontSize: 14, fontWeight: 500 }}>Add</button>
+      </div>
     </BottomSheet>
   )
 }
@@ -280,7 +297,7 @@ function FullScreen ({ open, title, onBack, children }) {
   }, [open])
   if (!render) return null
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 40, background: c.surface.base, transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: c.surface.base, transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', display: 'flex', flexDirection: 'column' }}>
       <header style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `calc(var(--pear-safe-top) + ${sp.md}px) ${sp.base}px ${sp.md}px`, borderBottom: `1px solid ${c.border}` }}>
         <button onClick={onBack} aria-label='Back' style={{ width: 36, height: 36, background: 'none', border: 'none', color: c.text.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CaretLeft size={24} weight='regular' /></button>
         <h1 style={{ flex: 1, textAlign: 'center', fontSize: 20, fontWeight: 400, margin: 0, color: c.text.primary }}>{title}</h1>
@@ -348,7 +365,7 @@ function ScannerView ({ open, onClose, onDecode }) {
   }, [open])
   if (!open) return null
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: '#000' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 120, background: '#000' }}>
       <video ref={videoRef} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
         <div style={{ width: 240, height: 240, border: `3px solid ${c.primary}`, borderRadius: r.lg }} />
@@ -365,7 +382,7 @@ function ScannerView ({ open, onClose, onDecode }) {
 function DonationReminderModal ({ open, onDonate, onDismiss }) {
   if (!open) return null
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 110, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
       <div style={{ background: c.surface.card, borderRadius: r.xl, padding: sp.xl, maxWidth: 360, width: '100%', textAlign: 'center' }}>
         <div style={{ fontSize: 40 }}>⚡</div>
         <h2 style={{ fontSize: 20, fontWeight: 400, margin: `${sp.sm}px 0`, color: c.text.primary }}>Enjoying PearList?</h2>
@@ -429,7 +446,7 @@ function SwipeRow ({ children, onDelete, disabled }) {
 // Transient "Item deleted · Undo" toast, above the composer.
 function UndoToast ({ onUndo }) {
   return (
-    <div style={{ position: 'fixed', left: '50%', bottom: 'calc(var(--pear-safe-bottom) + 84px)', transform: 'translateX(-50%)', zIndex: 80, maxWidth: 560, width: 'calc(100% - 24px)', background: c.surface.elevated, color: c.text.primary, padding: '10px 8px 10px 16px', borderRadius: r.lg, fontSize: 14, display: 'flex', alignItems: 'center', gap: sp.sm, boxShadow: '0 6px 20px rgba(0,0,0,0.45)', border: `1px solid ${c.border}` }}>
+    <div style={{ position: 'fixed', left: '50%', bottom: 'calc(var(--pear-safe-bottom) + 84px)', transform: 'translateX(-50%)', zIndex: 130, maxWidth: 560, width: 'calc(100% - 24px)', background: c.surface.elevated, color: c.text.primary, padding: '10px 8px 10px 16px', borderRadius: r.lg, fontSize: 14, display: 'flex', alignItems: 'center', gap: sp.sm, boxShadow: '0 6px 20px rgba(0,0,0,0.45)', border: `1px solid ${c.border}` }}>
       <span style={{ flex: 1 }}>Item deleted</span>
       <button onClick={onUndo} style={{ background: 'none', border: 'none', color: c.primary, fontSize: 14, fontWeight: 500, cursor: 'pointer', padding: '4px 14px' }}>Undo</button>
     </div>
@@ -468,6 +485,13 @@ function ItemRow ({ item, members, onToggle, onOpen, dragHandle }) {
 const aisleViewKey = (listId) => `pearlist:aisleview:${listId}`
 function loadAisleView (listId) { try { return JSON.parse(localStorage.getItem(aisleViewKey(listId)) || '{}') || {} } catch { return {} } }
 function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(listId), ...patch }; localStorage.setItem(aisleViewKey(listId), JSON.stringify(v)); return v } catch { return patch } }
+
+// User-made aisle names remembered per space (device-local), so a custom aisle
+// stays offered in the picker even after its last item leaves it (an empty aisle
+// renders nothing). Purely a convenience list; the aisle itself lives on items.
+const customAislesKey = (spaceId) => `pearlist:customaisles:${spaceId}`
+function loadCustomAisles (spaceId) { try { return spaceId ? (JSON.parse(localStorage.getItem(customAislesKey(spaceId)) || '[]') || []) : [] } catch { return [] } }
+function rememberCustomAisle (spaceId, name) { try { if (!spaceId || !name) return; const cur = loadCustomAisles(spaceId); if (!cur.includes(name)) localStorage.setItem(customAislesKey(spaceId), JSON.stringify([...cur, name].slice(-50))) } catch {} }
 
 // Long-press drag controller for the grouped grocery view. Coexists with the
 // row swipe-to-delete: a horizontal move before the hold-timer cancels the drag
@@ -616,7 +640,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
   const commit = (s) => {
     const { items: its, aisleView: av, onReorderItems, onReorderAisles, onRecategorize } = data.current
     if (s.kind === 'aisle') {
-      const present = [...new Set(its.map((it) => aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK))]
+      const present = [...new Set(its.map((it) => aisles.bucketOf(it.category)))]
       const ord = orderAisles(present, av.aisleOrder).filter((a) => a !== s.id)
       const at = s.targetAisle && s.targetAisle !== s.id ? ord.indexOf(s.targetAisle) : ord.length
       ord.splice(at < 0 ? ord.length : at, 0, s.id)
@@ -625,7 +649,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
     }
     if (s.targetAisle && s.targetAisle !== s.aisle) { onRecategorize(s.id, s.targetAisle); return }
     const buckets = new Map()
-    for (const it of its) { const k = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK; if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(it) }
+    for (const it of its) { const k = aisles.bucketOf(it.category); if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(it) }
     const aisleIds = orderRows(buckets.get(s.aisle) || [], av.itemOrder).map((it) => it.id).filter((id) => id !== s.id)
     aisleIds.splice(Math.max(0, Math.min(s.newIndex ?? aisleIds.length, aisleIds.length)), 0, s.id)
     const flat = orderAisles([...buckets.keys()], av.aisleOrder).flatMap((a) => a === s.aisle ? aisleIds : orderRows(buckets.get(a), av.itemOrder).map((it) => it.id))
@@ -662,12 +686,16 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
 }
 
 // Order the present aisles: any in the device-local `aisleOrder` first (that
-// sequence), then the rest in canonical AISLES order.
+// sequence), then the remaining built-ins in canonical AISLES order, then custom
+// (user-made) aisles alphabetically, and 'Other' always last.
 function orderAisles (present, aisleOrder) {
   const set = new Set(present)
   const first = (aisleOrder || []).filter((a) => set.has(a))
-  const rest = aisles.AISLES.filter((a) => set.has(a) && !first.includes(a))
-  return [...first, ...rest]
+  const used = new Set(first)
+  const builtin = aisles.AISLES.filter((a) => a !== aisles.FALLBACK && set.has(a) && !used.has(a))
+  const custom = present.filter((a) => !aisles.AISLES.includes(a) && !used.has(a)).sort()
+  const other = (set.has(aisles.FALLBACK) && !used.has(aisles.FALLBACK)) ? [aisles.FALLBACK] : []
+  return [...first, ...builtin, ...custom, ...other]
 }
 // Order items within an aisle: those in `itemOrder` first (that sequence), then
 // the rest by createdAt (stable original order).
@@ -691,7 +719,7 @@ const SORTING = '__sorting__'
 function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone }) {
   const buckets = new Map()
   for (const it of items) {
-    let key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
+    let key = aisles.bucketOf(it.category)
     // A yet-to-be-classified 'Other' item shows under a transient "Sorting…"
     // group (with a spinner) instead of flashing in Other and then jumping. A
     // user-pinned item (catBy) is a deliberate choice, never "sorting".
@@ -876,7 +904,7 @@ function GuidedTour ({ open, onDone }) {
   const step = steps[i]
   const last = i === steps.length - 1
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 65, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 105, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
       <div style={{ background: c.surface.card, borderRadius: r.xl, padding: sp.xl, maxWidth: 360, width: '100%', textAlign: 'center' }}>
         <div style={{ fontSize: 40 }}>{step.emoji}</div>
         <h2 style={{ fontSize: 20, fontWeight: 400, margin: `${sp.sm}px 0`, color: c.text.primary }}>{step.title}</h2>
@@ -1406,7 +1434,7 @@ export default function App () {
   }
 
   return (
-    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', maxWidth: 600, margin: '0 auto' }}>
+    <div style={{ height: '100dvh', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 600, margin: '0 auto' }}>
       {banner ? <Banner text={banner} onClose={() => setBanner(null)} /> : null}
       {openListId === null ? (
         // ===== Lists overview: all lists in the space + persistent add-list bar =====
@@ -1417,7 +1445,7 @@ export default function App () {
             right={<IconButton label='Invite' onClick={() => setSheet('invite')}><ShareIcon /></IconButton>}
           />
           <MembersBar members={members} onOpen={() => setSheet('members')} />
-          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
               : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
@@ -1428,10 +1456,13 @@ export default function App () {
         // ===== List detail: the items of the open list + add-item bar =====
         <>
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
-          <div ref={listScrollRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
-            {openList?.kind === 'grocery' && !aiPromptDismissed
-              ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onDismiss={() => setAiPromptDismissed(true)} />
-              : null}
+          {/* Outside the scroll area so the consent prompt / download+loading
+              progress stays pinned below the header and is visible no matter how
+              far the list is scrolled (it used to scroll away with the items). */}
+          {openList?.kind === 'grocery' && !aiPromptDismissed
+            ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onDismiss={() => setAiPromptDismissed(true)} />
+            : null}
+          <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
               : (() => {
@@ -1446,7 +1477,11 @@ export default function App () {
               })()}
           </div>
           {pendingUndo ? <UndoToast onUndo={undoDelete} /> : null}
-          <div style={{ position: 'sticky', bottom: 0, background: c.surface.base }}>
+          {/* Stacking scale: section headers 1 < lifted drag rows 50 < composer 60
+              < overlays 100+ (sheets/fullscreen 100, tour 105, modal 110, scanner
+              120, toasts/banners 130). The composer must beat headers + lifted rows
+              but stay under every overlay, so overlays live in the 100+ band. */}
+          <div style={{ position: 'sticky', bottom: 0, zIndex: 60, background: c.surface.base }}>
             {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
           </div>
@@ -1484,7 +1519,8 @@ export default function App () {
       <GuidedTour open={showTour} onDone={dismissTour} />
       <ItemSheet
         open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
-        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); if (patch.category && (patch.category !== sheet.item.category || sheet.item.catBy !== 'user')) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: patch.category, by: 'user' }).catch(() => {}); await loadItems(gid, openListId); setSheet(null) }}
+        customAisles={[...new Set([...items.map((i) => i.category).filter((cat) => cat && !aisles.AISLES.includes(cat)), ...loadCustomAisles(gid)])]}
+        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); if (patch.category && (patch.category !== sheet.item.category || sheet.item.catBy !== 'user')) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: patch.category, by: 'user' }).catch(() => {}); if (patch.category && !aisles.AISLES.includes(patch.category)) rememberCustomAisle(gid, patch.category); await loadItems(gid, openListId); setSheet(null) }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <QtySheet open={!!sheet && sheet.type === 'qty'} onClose={() => setSheet(null)}
@@ -1749,7 +1785,7 @@ function RenameListSheet ({ open, current, onClose, onSave }) {
 // Transient toast (e.g. "Alex joined", "Space deleted"). Tap to dismiss.
 function Banner ({ text, onClose }) {
   return (
-    <div onClick={onClose} style={{ position: 'fixed', top: 'calc(var(--pear-safe-top) + 8px)', left: '50%', transform: 'translateX(-50%)', zIndex: 80, maxWidth: 560, width: 'calc(100% - 24px)', background: c.primary, color: c.text.onPrimary, padding: '10px 16px', borderRadius: r.lg, fontSize: 14, fontWeight: 400, textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)', cursor: 'pointer' }}>{text}</div>
+    <div onClick={onClose} style={{ position: 'fixed', top: 'calc(var(--pear-safe-top) + 8px)', left: '50%', transform: 'translateX(-50%)', zIndex: 130, maxWidth: 560, width: 'calc(100% - 24px)', background: c.primary, color: c.text.onPrimary, padding: '10px 16px', borderRadius: r.lg, fontSize: 14, fontWeight: 400, textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)', cursor: 'pointer' }}>{text}</div>
   )
 }
 
@@ -1908,7 +1944,7 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: `1px solid ${c.divider}` }}>
             <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
               <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>Keep syncing in background</span>
-              <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Stays connected so updates and alerts arrive when the app is closed. Shows a permanent notification.</span>
+              <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Updates arrive while the app is closed. Shows a permanent notification.</span>
             </span>
             <Toggle on={bgSync} onChange={toggleBgSync} />
           </div>
@@ -2133,7 +2169,7 @@ function QtySheet ({ open, onClose, onSave }) {
   )
 }
 
-function ItemSheet ({ open, item, kind, members, selfPubkey, onClose, onSave, onDelete }) {
+function ItemSheet ({ open, item, kind, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
   const [assignee, setAssignee] = useState(null)
@@ -2186,7 +2222,7 @@ function ItemSheet ({ open, item, kind, members, selfPubkey, onClose, onSave, on
         </div>
       </BottomSheet>
       <AssigneePickerSheet open={picking} onClose={() => setPicking(false)} members={members} selfPubkey={selfPubkey} current={assignee} onPick={(pk) => setAssignee(pk)} />
-      <AislePickerSheet open={pickingAisle} onClose={() => setPickingAisle(false)} current={category || aisles.FALLBACK} onPick={(a) => { setCategory(a); setCatTouched(true) }} />
+      <AislePickerSheet open={pickingAisle} onClose={() => setPickingAisle(false)} current={category || aisles.FALLBACK} custom={customAisles} onPick={(a) => { setCategory(a); setCatTouched(true) }} />
     </>
   )
 }

@@ -26,7 +26,8 @@ const MODEL = { name: 'Llama 3.2 1B', sizeMB: 808, asset: LLAMA_3_2_1B_INST_Q4_0
 
 // Kept in sync with src/aisles.js AISLES.
 const AISLES = ['Produce', 'Dairy & Eggs', 'Meat & Seafood', 'Bakery', 'Frozen',
-  'Pantry', 'Snacks', 'Beverages', 'Household', 'Personal Care', 'Other']
+  'Pantry', 'Baking', 'Condiments', 'Snacks', 'Beverages', 'Alcohol', 'Household',
+  'Personal Care', 'Pet', 'Other']
 const AISLE_SCHEMA = {
   type: 'object',
   properties: { aisle: { type: 'string', enum: AISLES } },
@@ -74,19 +75,29 @@ function ensureReady (): Promise<string> {
   if (_modelId) return Promise.resolve(_modelId)
   if (!_readyPromise) {
     _readyPromise = (async () => {
-      _state = 'downloading'; _error = null; _pct = 0; _downloaded = 0; _total = 0; emit()
+      _error = null; _downloaded = 0; _total = 0
+      // If the ~0.8GB is already on disk (READY_KEY persisted from a prior run,
+      // e.g. after an app restart/update that only dropped it from MEMORY), skip
+      // the download banner and go straight to "loading into memory". downloadAsset
+      // is still called - a no-op when present - and only escalates back to the
+      // download UI if a genuine, incomplete download actually happens (file gone).
+      const onDisk = (await AsyncStorage.getItem(READY_KEY)) === '1'
+      _state = onDisk ? 'loading' : 'downloading'; _pct = onDisk ? 100 : 0; emit()
       await downloadAsset({
         assetSrc: MODEL.asset,
         onProgress: (p: any) => {
-          _pct = Math.round(p?.percentage ?? 0)
-          if (typeof p?.downloaded === 'number') _downloaded = p.downloaded
-          if (typeof p?.total === 'number' && p.total > 0) _total = p.total
+          const pct = Math.round(p?.percentage ?? 0)
+          if (pct < 100) {
+            _state = 'downloading'; _pct = pct
+            if (typeof p?.downloaded === 'number') _downloaded = p.downloaded
+            if (typeof p?.total === 'number' && p.total > 0) _total = p.total
+          }
           emit()
         },
       })
       await AsyncStorage.setItem(READY_KEY, '1').catch(() => {})
-      // Distinct 'loading' state: the ~0.8GB is now on disk but loading it into
-      // memory still takes a few seconds, so the UI shows "Loading…" not a stuck 100%.
+      // Distinct 'loading' state: on disk now, but loading it into memory still
+      // takes a few seconds, so the UI shows "Loading…" not a stuck 100%.
       _state = 'loading'; _pct = 100; emit()
       const id = await loadModel({
         modelSrc: MODEL.asset,
@@ -149,6 +160,13 @@ export async function classifyAisleAI (item: string): Promise<string | null> {
         { role: 'user', content: 'Item: "Chobani"' }, { role: 'assistant', content: '{"aisle":"Dairy & Eggs"}' },
         { role: 'user', content: 'Item: "Advil"' }, { role: 'assistant', content: '{"aisle":"Personal Care"}' },
         { role: 'user', content: 'Item: "Eggo waffles"' }, { role: 'assistant', content: '{"aisle":"Frozen"}' },
+        { role: 'user', content: 'Item: "vanilla extract"' }, { role: 'assistant', content: '{"aisle":"Baking"}' },
+        { role: 'user', content: 'Item: "sriracha"' }, { role: 'assistant', content: '{"aisle":"Condiments"}' },
+        { role: 'user', content: 'Item: "Cabernet Sauvignon"' }, { role: 'assistant', content: '{"aisle":"Alcohol"}' },
+        // Pet food is neither for people (Meat/Pantry) nor cleaning - keep cat/dog
+        // food etc. in the Pet aisle so it never lands in a human-food aisle.
+        { role: 'user', content: 'Item: "cat food"' }, { role: 'assistant', content: '{"aisle":"Pet"}' },
+        { role: 'user', content: 'Item: "dog food"' }, { role: 'assistant', content: '{"aisle":"Pet"}' },
         { role: 'user', content: `Item: "${text}"` },
       ],
       stream: false,

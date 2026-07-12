@@ -2,6 +2,32 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-12 - Custom aisles + 3 new built-ins + pin user choices
+Tier: T1 (additive/loosened validation on the existing `category` field + `catBy`
+marker; no new key type, pairing, topic, or encryption change).
+Context: users need to (a) file an item by hand into any aisle - including one with
+no items, which drag can't reach - (b) keep an item where they put it (the AI kept
+re-sorting anything under 'Other', inconsistently), and (c) make their own aisles
+(e.g. "Sushi").
+Choice:
+- `catBy:'user'` marks a hand-chosen aisle (picker or drag); the AI fallback skips
+  catBy:'user' items, so a choice sticks on every peer and an item can rest under
+  'Other' on purpose. AI write path omits `by`, so auto-classify never pins. (PR #53.)
+- Custom aisles are just user-authored `category` strings, NOT a new synced
+  registry. `ai:setCategory` accepts a sanitizeCustomAisle() string only on the
+  user path (by:'user'); the classifier stays locked to the built-in AISLES enum
+  (keyword rules + the QVAC grammar). Grouping treats any non-empty label as its
+  own section (bucketOf); old app versions degrade by showing unknown labels under
+  'Other'. An empty custom aisle disappears (no items = no section); the picker
+  re-offers recently made names from a device-local per-space list.
+- Added built-in aisles Baking, Condiments, Alcohol (aisles.js AISLES + keyword
+  rules + app/qvac.ts enum kept in sync). Moved flour/sugar/bisquick/crisco ->
+  Baking, ketchup/mustard/mayo/heinz/hellmann -> Condiments, beer/wine -> Alcohol.
+Rejected: a synced custom-aisle registry with rename/delete + per-space/per-list
+scope. More surface (new key type, merge rules, T2 proposal) than the need; the
+string-on-item approach already syncs and satisfies "create an aisle". Revisit if
+rename/delete or persistent empty aisles are wanted.
+
 ## 2026-07-11 - Grocery aisle categorization (category field + grouped UI)
 Tier: T1 (additive field + new read-only-ish methods; no pairing/topic/encryption
 change).
