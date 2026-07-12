@@ -11,6 +11,16 @@ const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode } = require('./listWire')
+const { classifyAisle, normalizeAisle } = require('./aisles')
+
+// Offline keyword aisle classifier for the worklet-side ai:categorize methods -
+// the always-available baseline. `classifyItem` is the single seam a smarter
+// classifier can swap into; the RN shell can also compute a category out-of-band
+// and persist it via ai:setCategory below, so both paths write the same signed,
+// synced `category` field.
+async function classifyItem (_ctx, text) {
+  return classifyAisle(text)
+}
 
 // Grace before the owner tears down a just-deleted space, so the `space`
 // tombstone can replicate to connected members first.
@@ -446,6 +456,57 @@ const methods = {
       if (value && !value.deleted) out.push(value)
     }
     return out
+  },
+
+  // --- ai: on-device categorization --------------------------------------
+  // Classify one item into a grocery aisle and write it onto the item row as a
+  // normal signed op, so the category replicates to every peer (only ONE
+  // capable device need run the classifier). `category` is additive: old peers
+  // and non-grocery lists just ignore it. Re-reads before writing so a
+  // concurrent edit is not clobbered.
+  'ai:categorize': async ({ groupId, listId, itemId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, itemKey(listId, itemId))
+    if (!existing || existing.deleted) throw new Error('item not found')
+    const category = normalizeAisle(await classifyItem(ctx, existing.text)) || 'Other'
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, category })
+    return { category }
+  },
+
+  // Persist a category computed elsewhere (the RN shell's QVAC worker) as a
+  // normal signed op, so one capable device's classification syncs to every
+  // peer. The category is validated against the known aisles; an unknown value
+  // is dropped rather than written. Re-reads to avoid clobbering a concurrent edit.
+  'ai:setCategory': async ({ groupId, listId, itemId, category }, ctx) => {
+    const aisle = normalizeAisle(category)
+    if (!aisle) throw new Error('unknown aisle: ' + category)
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, itemKey(listId, itemId))
+    if (!existing || existing.deleted) throw new Error('item not found')
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, category: aisle })
+    return { category: aisle }
+  },
+
+  // Categorize every item in a list that lacks a category (or all of them when
+  // `force`). Returns how many rows were written. This is the call the UI fires
+  // in the background when a grocery list opens; it is a no-op once everything
+  // is categorized, so it is safe to call on every load.
+  'ai:categorizeList': async ({ groupId, listId, force }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    await base.update()
+    const todo = []
+    for await (const { value } of base.view.createReadStream(itemRange(listId))) {
+      if (value && !value.deleted && (force || !value.category)) todo.push(value)
+    }
+    let categorized = 0
+    for (const it of todo) {
+      const category = normalizeAisle(await classifyItem(ctx, it.text)) || 'Other'
+      const cur = await readRow(base, itemKey(listId, it.id)) // re-read: skip if edited/deleted meanwhile
+      if (!cur || cur.deleted) continue
+      await putRow(ctx, groupId, itemKey(listId, it.id), { ...cur, category })
+      categorized++
+    }
+    return { categorized }
   },
 }
 

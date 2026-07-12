@@ -6,8 +6,13 @@
 //   list:{listId}            -> signed { id, name, kind?, assignee?, createdBy,
 //                                        createdAt, updatedAt, pubkey, deleted }
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
-//                                        assignee?, createdBy, createdAt,
-//                                        updatedAt, pubkey, deleted }
+//                                        assignee?, category?, createdBy,
+//                                        createdAt, updatedAt, pubkey, deleted }
+//
+// `category` is an optional grocery-aisle label (see aisles.js) written by the
+// ai:categorize methods. Additive: it rides through applyOps like any other
+// signed field, so old peers accept + ignore it and non-grocery lists never
+// show it. No dedicated merge rule needed.
 //
 // Items are keyed by a content id, NOT by author, so ANY household member can
 // check / edit / delete ANY item (the shared-list UX). See pearlist
