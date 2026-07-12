@@ -443,6 +443,15 @@ function SwipeRow ({ children, onDelete, disabled }) {
   )
 }
 
+// Three quick pulses over a just-added item to pull the eye to where it landed
+// after the list auto-scrolls to it. Overlays the row (pointer-events none) so it
+// reads over the opaque row background. Keyed by the caller so it re-mounts and
+// replays each time a new item is added.
+function ItemFlash ({ on }) {
+  if (!on) return null
+  return <div style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none', borderRadius: r.md, background: 'color-mix(in srgb, var(--color-primary) 32%, transparent)', animation: 'pearlist-flash 1.25s ease-in-out forwards' }} />
+}
+
 // Transient "Item deleted · Undo" toast, above the composer.
 function UndoToast ({ onUndo }) {
   return (
@@ -611,7 +620,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
     s.scroll0 = scrollRef?.current ? scrollRef.current.scrollTop : 0
     if (s.kind === 'item') {
       const container = s.el.closest('[data-aisle]')
-      const els = container ? [...container.querySelectorAll(':scope > [data-item-id]')] : [s.el]
+      const els = container ? [...container.querySelectorAll(':scope [data-item-id]')] : [s.el]
       s.rows = els.map((el) => { const rc = el.getBoundingClientRect(); return { el, id: el.getAttribute('data-item-id'), center: rc.top + rc.height / 2, h: rc.height } })
       s.originIndex = s.rows.findIndex((row) => row.id === s.id)
       s.rowH = (s.rows[s.originIndex] && s.rows[s.originIndex].h) || 48
@@ -715,8 +724,26 @@ function orderRows (rows, itemOrder) {
 // aisle to re-file them there; headers reorder the aisles. All order is
 // per-device (see the 2026-07-11 hybrid decision). `dragProps(kind,id,aisle)`
 // wires the long-press handlers from the parent's drag controller.
+// Smoothly grows/shrinks an aisle's rows on collapse toggle using the
+// grid-template-rows 0fr<->1fr trick (animates auto height with no fixed cap).
+// Overflow is clipped while collapsed or mid-animation, but set back to visible
+// once fully expanded and idle - otherwise it would clip a cross-aisle drag lift
+// (the lifted row translates outside the aisle box). Rows stay mounted while
+// collapsed (just clipped to 0), so drag + the just-added scroll can still find
+// them.
+function CollapsibleRows ({ collapsed, children }) {
+  const [clip, setClip] = useState(collapsed)
+  useEffect(() => { if (collapsed) setClip(true) }, [collapsed]) // clip immediately when collapsing
+  return (
+    <div style={{ display: 'grid', gridTemplateRows: collapsed ? '0fr' : '1fr', transition: 'grid-template-rows 340ms cubic-bezier(0.4,0,0.2,1)' }}
+      onTransitionEnd={(e) => { if (e.propertyName === 'grid-template-rows' && !collapsed) setClip(false) }}>
+      <div style={{ overflow: clip ? 'hidden' : 'visible', minHeight: 0 }}>{children}</div>
+    </div>
+  )
+}
+
 const SORTING = '__sorting__'
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone }) {
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone, flashId }) {
   const buckets = new Map()
   for (const it of items) {
     let key = aisles.bucketOf(it.category)
@@ -739,7 +766,7 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
                 <span style={{ width: 12, height: 12, borderRadius: '50%', border: `2px solid ${c.text.muted}`, borderTopColor: c.primary, display: 'inline-block', animation: 'pearlist-spin 0.7s linear infinite' }} />
                 <span style={{ flex: 1, fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.secondary }}>Sorting…</span>
               </div>
-              {rows.map((it) => <div key={it.id} style={{ opacity: 0.6 }}>{renderRow(it)}</div>)}
+              {rows.map((it) => <div key={it.id} data-item-id={it.id} style={{ position: 'relative', opacity: 0.6 }}>{renderRow(it)}<ItemFlash on={flashId === it.id} /></div>)}
             </div>
           )
         }
@@ -760,15 +787,18 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
               <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
               {dragProps ? <span {...dragProps('aisle', aisle, aisle)} onClick={(e) => e.stopPropagation()} aria-label='Reorder aisle' style={{ flexShrink: 0, padding: '4px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex' }}><DotsSixVertical size={18} weight='bold' /></span> : null}
             </div>
-            {isCollapsed ? null : rows.map((it) => {
-              const itemLifted = lifted?.kind === 'item' && lifted.id === it.id
-              return (
-                <div key={it.id} data-item-id={it.id}
-                  style={itemLifted ? { position: 'relative', zIndex: 50, background: c.surface.elevated, boxShadow: '0 10px 26px rgba(0,0,0,0.45)', borderRadius: r.md, overflow: 'hidden' } : undefined}>
-                  {renderRow(it, dragProps ? dragProps('item', it.id, aisle) : undefined, itemLifted)}
-                </div>
-              )
-            })}
+            <CollapsibleRows collapsed={isCollapsed}>
+              {rows.map((it) => {
+                const itemLifted = lifted?.kind === 'item' && lifted.id === it.id
+                return (
+                  <div key={it.id} data-item-id={it.id}
+                    style={itemLifted ? { position: 'relative', zIndex: 50, background: c.surface.elevated, boxShadow: '0 10px 26px rgba(0,0,0,0.45)', borderRadius: r.md, overflow: 'hidden' } : { position: 'relative' }}>
+                    {renderRow(it, dragProps ? dragProps('item', it.id, aisle) : undefined, itemLifted)}
+                    <ItemFlash on={flashId === it.id} />
+                  </div>
+                )
+              })}
+            </CollapsibleRows>
           </div>
         )
       })}
@@ -1251,6 +1281,38 @@ export default function App () {
     onRecategorize: recategorizeItem,
   })
 
+  // Just-added item: scroll it into view (it can land mid-list under its aisle,
+  // or off-screen on a long list) and briefly flash it. Waits until no sheet is
+  // open (groceries pop a quantity sheet on add) and the row has rendered.
+  const [flashId, setFlashId] = useState(null)
+  useEffect(() => {
+    if (!flashId || sheet) return
+    // If the new item landed in a collapsed aisle, expand it first (so the row is
+    // actually visible), then let the effect re-run to scroll + flash it.
+    const it = items.find((i) => i.id === flashId)
+    if (it && openList?.kind === 'grocery') {
+      const aisle = aisles.bucketOf(it.category)
+      if ((aisleView.collapsed || []).includes(aisle)) {
+        patchAisleView({ collapsed: (aisleView.collapsed || []).filter((a) => a !== aisle) })
+        return
+      }
+    }
+    const el = listScrollRef.current?.querySelector(`[data-item-id="${(window.CSS && CSS.escape) ? CSS.escape(flashId) : flashId}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const t = setTimeout(() => setFlashId(null), 1600)
+    return () => clearTimeout(t)
+  }, [flashId, sheet, items, aisleView.collapsed, openList?.kind, patchAisleView])
+
+  // Collapse/expand every aisle at once (grouped grocery view).
+  const presentAisles = [...new Set(items.map((i) => aisles.bucketOf(i.category)))]
+  const allCollapsed = presentAisles.length > 0 && presentAisles.every((a) => collapsedSet.has(a))
+  const toggleCollapseAll = useCallback(() => {
+    const present = [...new Set(items.map((i) => aisles.bucketOf(i.category)))]
+    const collapsed = present.length > 0 && present.every((a) => (aisleView.collapsed || []).includes(a))
+    patchAisleView({ collapsed: collapsed ? [] : present })
+  }, [items, aisleView.collapsed, patchAisleView])
+
   // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
   // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
   // once the user has opted in and the model is downloaded. Until then the
@@ -1313,11 +1375,14 @@ export default function App () {
   async function addItemText (text) {
     const t = String(text || '').trim(); if (!t || !gid || !openListId) return
     setDraft(''); setSuggestions([])
+    composer.current?.blur?.() // dismiss the keyboard; show the full list
+    // Groceries: choose quantity FIRST, then actually add on confirm/dismiss. The
+    // row is added only after the quantity sheet closes, so it is not inserted
+    // underneath the sheet where the just-added flash would be missed.
+    if (openList?.kind === 'grocery') { setSheet({ type: 'qty', text: t }); return }
     const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t })
     await loadItems(gid, openListId)
-    composer.current?.blur?.() // dismiss the keyboard; show the full list
-    // Groceries: prompt for quantity right after adding (a common grocery need).
-    if (openList?.kind === 'grocery' && itemId) setSheet({ type: 'qty', itemId, text: t })
+    if (itemId) setFlashId(itemId) // scroll to + flash the new row
   }
   const addItem = () => addItemText(draft)
 
@@ -1472,8 +1537,13 @@ export default function App () {
                   </SwipeRow>
                 )
                 return openList?.kind === 'grocery'
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} sortingActive={aiActive} aiDone={aiDone} />
-                  : items.map((it) => renderRow(it))
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} sortingActive={aiActive} aiDone={aiDone} flashId={flashId} />
+                  : items.map((it) => (
+                    <div key={it.id} data-item-id={it.id} style={{ position: 'relative' }}>
+                      {renderRow(it)}
+                      <ItemFlash on={flashId === it.id} />
+                    </div>
+                  ))
               })()}
           </div>
           {pendingUndo ? <UndoToast onUndo={undoDelete} /> : null}
@@ -1495,6 +1565,8 @@ export default function App () {
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} canReset={items.some((i) => i.checked)} onClose={() => setSheet(null)}
+        grouped={openList?.kind === 'grocery' && presentAisles.length > 1} allCollapsed={allCollapsed}
+        onToggleCollapseAll={() => { toggleCollapseAll(); setSheet(null) }}
         onRename={() => setSheet('renameList')}
         onCategory={() => setSheet('category')}
         onNotify={() => setSheet('notifyMode')}
@@ -1523,8 +1595,8 @@ export default function App () {
         onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); if (patch.category && (patch.category !== sheet.item.category || sheet.item.catBy !== 'user')) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: patch.category, by: 'user' }).catch(() => {}); if (patch.category && !aisles.AISLES.includes(patch.category)) rememberCustomAisle(gid, patch.category); await loadItems(gid, openListId); setSheet(null) }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
-      <QtySheet open={!!sheet && sheet.type === 'qty'} onClose={() => setSheet(null)}
-        onSave={async (qty) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.itemId, qty }); await loadItems(gid, openListId); setSheet(null) }}
+      <QtySheet open={!!sheet && sheet.type === 'qty'}
+        onCommit={async (qty) => { const t = sheet?.text; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
       />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
@@ -1702,7 +1774,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 
 // List options (rename / category / notify / assign / delete), opened from the
 // detail header. The completion-notify row shows only on chore lists.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, onClose, onRename, onCategory, onNotify, onAssign, onReset, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped, allCollapsed, onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -1719,6 +1791,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, onClose,
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
+      {grouped ? <Row onClick={onToggleCollapseAll}><span style={{ flex: 1, textAlign: 'left' }}>{allCollapsed ? 'Expand all aisles' : 'Collapse all aisles'}</span></Row> : null}
       {canReset ? <Row onClick={onReset}><span style={{ flex: 1, textAlign: 'left' }}>Uncheck all</span></Row> : null}
       {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row> : null}
     </BottomSheet>
@@ -2153,18 +2226,23 @@ function LightningWalletModal ({ open, detected = false, onClose }) {
 
 // Quick quantity stepper shown right after adding an item to a grocery list.
 // Defaults to 1; dismissing keeps 1 (item:add already stored qty 1), Done saves.
-function QtySheet ({ open, onClose, onSave }) {
+// Grocery quantity step. The item is added only when this closes - via Done OR a
+// backdrop dismiss - both routed through a single guarded commit so the row is
+// never added twice and always lands after the sheet is gone.
+function QtySheet ({ open, onCommit }) {
   const [qty, setQty] = useState(1)
-  useEffect(() => { if (open) setQty(1) }, [open])
+  const committed = useRef(false)
+  useEffect(() => { if (open) { setQty(1); committed.current = false } }, [open])
+  const commit = () => { if (committed.current) return; committed.current = true; onCommit(qty) }
   const stepBtn = { width: 48, height: 48, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }
   return (
-    <BottomSheet open={open} onClose={onClose} title='How many?'>
+    <BottomSheet open={open} onClose={commit} title='How many?'>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.lg, margin: `${sp.sm}px 0 ${sp.lg}px` }}>
         <button onClick={() => setQty((q) => Math.max(1, q - 1))} aria-label='Decrease' style={stepBtn}><Minus size={22} weight='bold' /></button>
         <span style={{ fontFamily: MONO, fontSize: 28, color: c.text.primary, minWidth: 56, textAlign: 'center' }}>{qty}</span>
         <button onClick={() => setQty((q) => q + 1)} aria-label='Increase' style={stepBtn}><Plus size={22} weight='bold' /></button>
       </div>
-      <Button onClick={() => onSave(qty)}>Done</Button>
+      <Button onClick={commit}>Done</Button>
     </BottomSheet>
   )
 }
