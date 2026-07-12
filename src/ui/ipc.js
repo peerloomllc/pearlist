@@ -153,10 +153,10 @@ const mockMethods = {
   'shell:aiConsent': async ({ enabled }) => { mock.ai = { ...mock.ai, consent: !!enabled, state: enabled ? 'ready' : mock.ai.state, pct: enabled ? 100 : mock.ai.pct, downloadedMB: enabled ? mock.ai.totalMB : mock.ai.downloadedMB }; return mock.ai },
   'shell:aiRemoveModel': async () => { mock.ai = { ...mock.ai, state: 'none', pct: 0, downloadedMB: 0 }; return mock.ai },
   'shell:aiCategorize': async () => ({ ok: true, queued: 0 }),
-  'ai:setCategory': async ({ groupId, itemId, category }) => {
+  'ai:setCategory': async ({ groupId, itemId, category, by }) => {
     const it = mockGroup(groupId).items.get(itemId)
-    if (it && aisles.AISLES.includes(category)) it.category = category
-    return { category: it?.category }
+    if (it && aisles.AISLES.includes(category)) { it.category = category; if (by === 'user') it.catBy = 'user' }
+    return { category: it?.category, catBy: it?.catBy }
   },
   'ai:categorizeList': async ({ groupId, listId, force }) => {
     let categorized = 0

@@ -6,13 +6,16 @@
 //   list:{listId}            -> signed { id, name, kind?, assignee?, createdBy,
 //                                        createdAt, updatedAt, pubkey, deleted }
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
-//                                        assignee?, category?, createdBy,
+//                                        assignee?, category?, catBy?, createdBy,
 //                                        createdAt, updatedAt, pubkey, deleted }
 //
 // `category` is an optional grocery-aisle label (see aisles.js) written by the
 // ai:categorize methods. Additive: it rides through applyOps like any other
 // signed field, so old peers accept + ignore it and non-grocery lists never
-// show it. No dedicated merge rule needed.
+// show it. No dedicated merge rule needed. `catBy` ('user' when set) marks a
+// category the user chose by hand (drag or the item-detail aisle picker); the AI
+// fallback skips catBy:'user' items, so a manual choice - including resting an
+// item under 'Other' on purpose - is never re-sorted. Also additive.
 //
 // Items are keyed by a content id, NOT by author, so ANY household member can
 // check / edit / delete ANY item (the shared-list UX). See pearlist

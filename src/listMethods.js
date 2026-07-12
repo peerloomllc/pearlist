@@ -477,14 +477,20 @@ const methods = {
   // normal signed op, so one capable device's classification syncs to every
   // peer. The category is validated against the known aisles; an unknown value
   // is dropped rather than written. Re-reads to avoid clobbering a concurrent edit.
-  'ai:setCategory': async ({ groupId, listId, itemId, category }, ctx) => {
+  'ai:setCategory': async ({ groupId, listId, itemId, category, by }, ctx) => {
     const aisle = normalizeAisle(category)
     if (!aisle) throw new Error('unknown aisle: ' + category)
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))
     if (!existing || existing.deleted) throw new Error('item not found')
-    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, category: aisle })
-    return { category: aisle }
+    // A user-chosen aisle (drag or the item-detail picker) is pinned via catBy so
+    // the AI fallback never re-sorts it - notably so an item can rest under 'Other'
+    // on purpose. The AI path omits `by`, leaving any existing pin (and its value)
+    // untouched. catBy is additive + synced, so the pin holds across every peer.
+    const next = { ...existing, category: aisle }
+    if (by === 'user') next.catBy = 'user'
+    await putRow(ctx, groupId, itemKey(listId, itemId), next)
+    return { category: aisle, catBy: next.catBy }
   },
 
   // Categorize every item in a list that lacks a category (or all of them when
