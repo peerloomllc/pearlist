@@ -468,8 +468,13 @@ const HOLD_TOL = 10 // px of finger movement allowed during the hold; within thi
 function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderAisles, onRecategorize }) {
   const [dragOver, setDragOver] = useState(null) // { kind, aisle } - cross-aisle / header target highlight
   const [lifted, setLifted] = useState(null)     // { kind, id } - the elevated element (React renders the lift)
-  const data = useRef({ items, aisleView })
-  data.current = { items, aisleView }
+  // dragProps is useCallback([]) (stable handlers), which freezes begin/commit -
+  // and the callbacks they close over - at first-render values (when no list was
+  // open: gid=false, openListId=null). Keep the live items/view AND callbacks in
+  // this per-render ref so the frozen commit always calls the CURRENT handlers.
+  // Without this, cross-aisle recategorize silently no-ops (stale gid/openListId).
+  const data = useRef({})
+  data.current = { items, aisleView, onReorderItems, onReorderAisles, onRecategorize }
   const S = useRef({})
   const justDragged = useRef(false)
 
@@ -494,6 +499,22 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
 
   const scrollDelta = (s) => (scrollRef?.current ? scrollRef.current.scrollTop - (s.scroll0 || 0) : 0)
 
+  // Which aisle section is under a viewport y? Uses each [data-aisle] container's
+  // LAYOUT rect rather than elementFromPoint. Reorder shifts sibling rows with
+  // transforms (visual only, they don't reflow the container), and elementFromPoint
+  // hit-tests those shifted rows - so near an aisle boundary it can report the
+  // wrong section and flip-flop the target frame to frame. Layout rects don't move
+  // under child transforms, so the boundary is stable. Header-height rect covers a
+  // collapsed aisle too, so an item can be re-filed into one.
+  const aisleAtPoint = (y) => {
+    const root = scrollRef?.current || document
+    for (const node of root.querySelectorAll('[data-aisle]')) {
+      const rc = node.getBoundingClientRect()
+      if (y >= rc.top && y <= rc.bottom) return node.getAttribute('data-aisle')
+    }
+    return null
+  }
+
   const autoscroll = () => {
     const s = S.current
     const el = scrollRef?.current
@@ -515,7 +536,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
     const el = document.elementFromPoint(s.x, s.y) // s.el has pointer-events:none, so this sees beneath it
     if (s.kind === 'item') {
       s.el.style.transform = `translateY(${s.y - s.startY + sd}px) scale(1.02)`
-      const overAisle = el?.closest('[data-aisle]')?.getAttribute('data-aisle')
+      const overAisle = aisleAtPoint(s.y)
       if (overAisle && overAisle !== s.aisle) {
         s.targetAisle = overAisle
         s.rows.forEach((row) => { if (row.el !== s.el) row.el.style.transform = 'translateY(0px)' })
@@ -576,7 +597,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
   }
 
   const commit = (s) => {
-    const { items: its, aisleView: av } = data.current
+    const { items: its, aisleView: av, onReorderItems, onReorderAisles, onRecategorize } = data.current
     if (s.kind === 'aisle') {
       const present = [...new Set(its.map((it) => aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK))]
       const ord = orderAisles(present, av.aisleOrder).filter((a) => a !== s.id)
