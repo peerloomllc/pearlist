@@ -48,17 +48,21 @@ function normalizeAisle (x) {
 // "ice cream" -> Frozen beats "cream" -> Dairy, regardless of rule order; ties
 // on length fall to the earlier rule. Intentionally modest: this is a fallback,
 // not the star of the show.
+// Each aisle lists generic words + common brand names (so popular brands hit
+// this fast, accurate path instead of the slower/less-reliable LLM). Brands are
+// chosen to be distinctive tokens - ambiguous everyday words (always, gain,
+// life, secret, ...) are deliberately omitted to avoid false matches.
 const RULES = [
-  ['Frozen', ['frozen', 'ice cream', 'popsicle', 'pizza', 'fries', 'nuggets']],
+  ['Frozen', ['frozen', 'ice cream', 'popsicle', 'pizza', 'fries', 'nuggets', 'digiorno', 'totinos', "totino's", 'hot pocket', 'hot pockets', 'eggo', 'ben & jerry', "ben & jerry's", 'haagen-dazs', 'haagen dazs', 'talenti', 'klondike', 'tater tots', 'bagel bites', 'popsicles']],
   ['Produce', ['apple', 'apples', 'banana', 'bananas', 'lettuce', 'spinach', 'kale', 'tomato', 'tomatoes', 'onion', 'onions', 'garlic', 'potato', 'potatoes', 'carrot', 'carrots', 'lemon', 'lemons', 'lime', 'limes', 'avocado', 'avocados', 'berries', 'strawberries', 'blueberries', 'grapes', 'cucumber', 'pepper', 'peppers', 'broccoli', 'celery', 'cilantro', 'parsley', 'mushroom', 'mushrooms', 'orange', 'oranges', 'salad']],
-  ['Dairy & Eggs', ['milk', 'egg', 'eggs', 'butter', 'cheese', 'yogurt', 'yoghurt', 'cream', 'sour cream', 'cottage']],
-  ['Meat & Seafood', ['chicken', 'beef', 'pork', 'bacon', 'sausage', 'turkey', 'ham', 'steak', 'fish', 'salmon', 'tuna', 'shrimp', 'ground']],
+  ['Dairy & Eggs', ['milk', 'egg', 'eggs', 'butter', 'cheese', 'yogurt', 'yoghurt', 'cream', 'sour cream', 'cottage', 'chobani', 'yoplait', 'oikos', 'philadelphia', 'babybel', 'string cheese', 'half and half', 'creamer', 'kraft singles']],
+  ['Meat & Seafood', ['chicken', 'beef', 'pork', 'bacon', 'sausage', 'turkey', 'ham', 'steak', 'fish', 'salmon', 'tuna', 'shrimp', 'ground', 'tyson', 'perdue', 'oscar mayer', 'hillshire', 'ball park', 'johnsonville', 'jimmy dean', 'hot dog', 'hot dogs']],
   ['Bakery', ['bread', 'bagel', 'bagels', 'bun', 'buns', 'roll', 'rolls', 'tortilla', 'tortillas', 'muffin', 'muffins', 'croissant', 'sourdough', 'baguette', 'cake', 'donut', 'donuts']],
-  ['Beverages', ['water', 'juice', 'soda', 'coffee', 'tea', 'beer', 'wine', 'cola', 'seltzer', 'lemonade', 'kombucha']],
-  ['Snacks', ['chips', 'crackers', 'cookies', 'candy', 'chocolate', 'popcorn', 'pretzels', 'nuts', 'granola', 'bar', 'bars', 'snack', 'snacks']],
-  ['Pantry', ['rice', 'pasta', 'flour', 'sugar', 'salt', 'oil', 'olive oil', 'vinegar', 'beans', 'lentils', 'cereal', 'oats', 'oatmeal', 'sauce', 'ketchup', 'mustard', 'mayo', 'mayonnaise', 'honey', 'peanut butter', 'jam', 'jelly', 'soup', 'broth', 'stock', 'spice', 'spices', 'coffee beans', 'can', 'canned']],
-  ['Household', ['paper towel', 'paper towels', 'toilet paper', 'napkins', 'trash bags', 'detergent', 'soap', 'dish soap', 'sponge', 'sponges', 'bleach', 'cleaner', 'foil', 'wrap', 'ziploc', 'batteries', 'light bulb', 'bulbs']],
-  ['Personal Care', ['shampoo', 'conditioner', 'toothpaste', 'toothbrush', 'deodorant', 'razor', 'razors', 'lotion', 'sunscreen', 'floss', 'tampons', 'pads', 'diapers', 'wipes', 'vitamins', 'ibuprofen', 'tylenol', 'bandaid', 'bandages']],
+  ['Beverages', ['water', 'juice', 'soda', 'coffee', 'tea', 'beer', 'wine', 'cola', 'seltzer', 'lemonade', 'kombucha', 'coke', 'coca-cola', 'coca cola', 'sprite', 'pepsi', 'dr pepper', 'mountain dew', 'mtn dew', 'gatorade', 'powerade', 'red bull', 'la croix', 'lacroix', 'snapple', 'capri sun', 'minute maid', 'tropicana', 'pellegrino', 'perrier', 'fanta', '7up', 'ginger ale', 'sunny d']],
+  ['Snacks', ['chips', 'crackers', 'cookies', 'candy', 'chocolate', 'popcorn', 'pretzels', 'nuts', 'granola', 'bar', 'bars', 'snack', 'snacks', 'doritos', 'sunchips', 'sun chips', 'lays', "lay's", 'pringles', 'cheetos', 'ruffles', 'tostitos', 'fritos', 'oreo', 'oreos', 'chips ahoy', 'goldfish', 'ritz', 'cheez-it', 'cheez-its', 'cheezit', 'triscuit', 'wheat thins', 'skittles', 'snickers', 'kit kat', 'twix', "reese's", 'reeses', 'hershey', 'trail mix', 'pop tarts', 'pop-tarts', 'jerky', 'slim jim', 'clif bar', 'kind bar']],
+  ['Pantry', ['rice', 'pasta', 'flour', 'sugar', 'salt', 'oil', 'olive oil', 'vinegar', 'beans', 'lentils', 'cereal', 'oats', 'oatmeal', 'sauce', 'ketchup', 'mustard', 'mayo', 'mayonnaise', 'honey', 'peanut butter', 'jam', 'jelly', 'soup', 'broth', 'stock', 'spice', 'spices', 'coffee beans', 'can', 'canned', 'cheerios', 'corn flakes', 'cornflakes', 'frosted flakes', 'froot loops', 'lucky charms', 'raisin bran', 'rice krispies', 'quaker', "campbell's", 'campbells', 'chef boyardee', 'prego', 'ragu', 'heinz', "hellmann's", 'hellmanns', 'nutella', 'ramen', 'maruchan', 'spam', 'velveeta', 'bisquick', 'crisco']],
+  ['Household', ['paper towel', 'paper towels', 'toilet paper', 'napkins', 'trash bags', 'detergent', 'soap', 'dish soap', 'sponge', 'sponges', 'bleach', 'cleaner', 'foil', 'wrap', 'ziploc', 'batteries', 'light bulb', 'bulbs', 'tide', 'clorox', 'lysol', 'bounty', 'charmin', 'cottonelle', 'febreze', 'windex', 'dawn', 'cascade', 'glad', 'hefty', 'swiffer', 'mr clean', 'pledge', 'brawny', 'angel soft', 'palmolive', 'comet', 'ajax']],
+  ['Personal Care', ['shampoo', 'conditioner', 'toothpaste', 'toothbrush', 'deodorant', 'razor', 'razors', 'lotion', 'sunscreen', 'floss', 'tampons', 'pads', 'diapers', 'wipes', 'vitamins', 'ibuprofen', 'tylenol', 'bandaid', 'bandages', 'colgate', 'crest', 'sensodyne', 'listerine', 'olay', 'cetaphil', 'cerave', 'gillette', 'oral-b', 'oral b', 'tampax', 'kotex', 'huggies', 'pampers', 'luvs', 'band-aid', 'neosporin', 'advil', 'motrin', 'aleve', 'pepto', 'tums', 'centrum', 'dayquil', 'nyquil', 'purell', 'aveeno', 'chapstick', 'q-tips', 'qtips']],
 ]
 
 // Pre-split each rule's phrases into word arrays once, so classify is a cheap

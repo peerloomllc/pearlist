@@ -453,15 +453,19 @@ function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(list
 // within their aisle or drop into another aisle to re-file (recategorize);
 // headers reorder aisles. All device-local. Returns handlers + live drag state +
 // a floating ghost to render. Pointer events (works in the WebView on touch).
-const HOLD_MS = 320
+const HOLD_MS = 300
 function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderAisles, onRecategorize }) {
-  const [dragOver, setDragOver] = useState(null) // { kind, dragId, aisle, beforeId }
-  const [ghost, setGhost] = useState(null)       // { x, y, label, kind }
+  const [dragOver, setDragOver] = useState(null) // { kind, aisle } - cross-aisle / header target highlight
   const data = useRef({ items, aisleView })
   data.current = { items, aisleView }
   const S = useRef({})
   const justDragged = useRef(false) // swallow the click a header emits after a drag
 
+  const clearStyles = () => {
+    const s = S.current
+    if (s.el) { const st = s.el.style; st.transition = ''; st.transform = ''; st.zIndex = ''; st.position = ''; st.boxShadow = ''; st.background = ''; st.borderRadius = ''; st.pointerEvents = '' }
+    ;(s.rows || []).forEach((row) => { if (row.el !== s.el) { row.el.style.transition = ''; row.el.style.transform = '' } })
+  }
   const cleanup = () => {
     const s = S.current
     window.removeEventListener('pointermove', s.onMove)
@@ -469,52 +473,113 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
     window.removeEventListener('pointercancel', s.onUp)
     if (s.timer) clearTimeout(s.timer)
     if (s.raf) cancelAnimationFrame(s.raf)
+    clearStyles()
     S.current = {}
-    setDragOver(null); setGhost(null)
+    setDragOver(null)
   }
+
+  const scrollDelta = (s) => (scrollRef?.current ? scrollRef.current.scrollTop - (s.scroll0 || 0) : 0)
 
   const autoscroll = () => {
     const s = S.current
     const el = scrollRef?.current
     if (s.active && el) {
-      const r = el.getBoundingClientRect()
-      if (s.y < r.top + 70) el.scrollTop -= 8
-      else if (s.y > r.bottom - 90) el.scrollTop += 8
+      const rc = el.getBoundingClientRect()
+      let d = 0
+      if (s.y < rc.top + 74) d = -9
+      else if (s.y > rc.bottom - 96) d = 9
+      if (d) { el.scrollTop += d; updateTarget() } // keep the lift + gap synced while auto-scrolling
     }
     if (s.active) s.raf = requestAnimationFrame(autoscroll)
   }
 
+  // The lifted element follows the finger; siblings translate to open the slot.
+  const applyItemShift = (s) => {
+    const sd = scrollDelta(s)
+    s.el.style.transform = `translateY(${s.y - s.startY + sd}px) scale(1.03)`
+    const others = s.rows.filter((row) => row.id !== s.id)
+    let insertAt = 0
+    for (const row of others) { if (row.center - sd < s.y) insertAt++ }
+    s.newIndex = insertAt
+    for (let j = 0; j < others.length; j++) {
+      const row = others[j]
+      const finalJ = j < insertAt ? j : j + 1     // its slot once the dragged item lands at insertAt
+      const origFull = s.rows.indexOf(row)
+      row.el.style.transition = 'transform 180ms cubic-bezier(0.2,0,0,1)'
+      row.el.style.transform = `translateY(${(finalJ - origFull) * s.rowH}px)`
+    }
+  }
+
   const updateTarget = () => {
     const s = S.current
-    const el = document.elementFromPoint(s.x, s.y)
-    if (!el) return
+    const el = document.elementFromPoint(s.x, s.y) // s.el has pointer-events:none, so this sees beneath it
     if (s.kind === 'item') {
-      const overItem = el.closest('[data-item-id]')
-      const container = el.closest('[data-aisle]')
-      const aisle = container?.getAttribute('data-aisle') || s.aisle
-      const beforeId = overItem && overItem.getAttribute('data-item-id') !== s.id ? overItem.getAttribute('data-item-id') : null
-      setDragOver({ kind: 'item', dragId: s.id, aisle, beforeId })
-      s.targetAisle = aisle; s.beforeId = beforeId
+      const overAisle = el?.closest('[data-aisle]')?.getAttribute('data-aisle')
+      if (overAisle && overAisle !== s.aisle) {
+        // over a different aisle -> re-file on drop; settle sibling shifts
+        s.targetAisle = overAisle
+        s.el.style.transform = `translateY(${s.y - s.startY + scrollDelta(s)}px) scale(1.03)`
+        s.rows.forEach((row) => { if (row.el !== s.el) row.el.style.transform = 'translateY(0px)' })
+        setDragOver({ kind: 'item', aisle: overAisle })
+      } else {
+        s.targetAisle = null
+        setDragOver((d) => d ? null : d)
+        applyItemShift(s)
+      }
     } else {
-      const overHeader = el.closest('[data-aisle-header]')
-      const aisle = overHeader?.getAttribute('data-aisle-header')
-      if (aisle) { setDragOver({ kind: 'aisle', aisle }); s.targetAisle = aisle }
+      s.el.style.transform = `translateY(${s.y - s.startY + scrollDelta(s)}px)`
+      const overHeader = el?.closest('[data-aisle-header]')?.getAttribute('data-aisle-header')
+      if (overHeader) { s.targetAisle = overHeader; setDragOver({ kind: 'aisle', aisle: overHeader }) }
     }
+  }
+
+  const lift = (s) => {
+    s.scroll0 = scrollRef?.current ? scrollRef.current.scrollTop : 0
+    if (s.kind === 'item') {
+      const container = s.el.closest('[data-aisle]')
+      const els = container ? [...container.querySelectorAll(':scope > [data-item-id]')] : [s.el]
+      s.rows = els.map((el) => { const rc = el.getBoundingClientRect(); return { el, id: el.getAttribute('data-item-id'), center: rc.top + rc.height / 2, h: rc.height } })
+      s.originIndex = s.rows.findIndex((row) => row.id === s.id)
+      s.rowH = (s.rows[s.originIndex] && s.rows[s.originIndex].h) || 48
+      s.newIndex = s.originIndex
+    }
+    const st = s.el.style
+    st.transition = 'transform 120ms ease, box-shadow 120ms ease'
+    st.zIndex = '50'; st.position = 'relative'; st.pointerEvents = 'none'
+    st.boxShadow = '0 10px 26px rgba(0,0,0,0.45)'
+    st.background = c.surface.elevated
+    st.borderRadius = r.md + 'px'
+  }
+
+  const commit = (s) => {
+    const { items: its, aisleView: av } = data.current
+    if (s.kind === 'aisle') {
+      const present = [...new Set(its.map((it) => aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK))]
+      const ord = orderAisles(present, av.aisleOrder).filter((a) => a !== s.id)
+      const at = s.targetAisle && s.targetAisle !== s.id ? ord.indexOf(s.targetAisle) : ord.length
+      ord.splice(at < 0 ? ord.length : at, 0, s.id)
+      onReorderAisles(ord)
+      return
+    }
+    if (s.targetAisle && s.targetAisle !== s.aisle) { onRecategorize(s.id, s.targetAisle); return }
+    // within-aisle reorder: rebuild the full display order with the item moved to newIndex in its aisle
+    const buckets = new Map()
+    for (const it of its) { const k = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK; if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(it) }
+    const aisleIds = orderRows(buckets.get(s.aisle) || [], av.itemOrder).map((it) => it.id).filter((id) => id !== s.id)
+    aisleIds.splice(Math.max(0, Math.min(s.newIndex ?? aisleIds.length, aisleIds.length)), 0, s.id)
+    const flat = orderAisles([...buckets.keys()], av.aisleOrder).flatMap((a) => a === s.aisle ? aisleIds : orderRows(buckets.get(a), av.itemOrder).map((it) => it.id))
+    onReorderItems(flat)
   }
 
   const dragProps = useCallback((kind, id, aisle) => ({
     onPointerDown: (e) => {
       if (e.button != null && e.button !== 0) return
-      const s = S.current = { kind, id, aisle, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false }
-      const label = kind === 'aisle' ? aisle : (data.current.items.find((it) => it.id === id)?.text || '')
+      const el = e.currentTarget
+      const s = S.current = { kind, id, aisle, el, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false }
       s.onMove = (ev) => {
         s.x = ev.clientX; s.y = ev.clientY
-        if (!s.active) {
-          if (Math.hypot(ev.clientX - s.startX, ev.clientY - s.startY) > 10) cleanup() // moved first -> scroll/swipe
-          return
-        }
+        if (!s.active) { if (Math.hypot(ev.clientX - s.startX, ev.clientY - s.startY) > 10) cleanup(); return } // moved first -> scroll/swipe
         ev.preventDefault()
-        setGhost((g) => g ? { ...g, x: s.x, y: s.y } : g)
         updateTarget()
       }
       s.onUp = () => {
@@ -527,46 +592,13 @@ function useAisleDrag ({ items, aisleView, scrollRef, onReorderItems, onReorderA
       s.timer = setTimeout(() => {
         s.active = true
         try { haptic('medium') } catch {}
-        setGhost({ x: s.x, y: s.y, label, kind })
-        setDragOver({ kind, dragId: id, aisle, beforeId: null })
+        lift(s)
         s.raf = requestAnimationFrame(autoscroll)
       }, HOLD_MS)
     },
   }), [])
 
-  const commit = (s) => {
-    const { items: its, aisleView: av } = data.current
-    if (s.kind === 'aisle') {
-      const present = [...new Set(its.map((it) => aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK))]
-      const ordered = orderAisles(present, av.aisleOrder).filter((a) => a !== s.id)
-      const at = s.targetAisle && s.targetAisle !== s.id ? ordered.indexOf(s.targetAisle) : ordered.length
-      ordered.splice(at < 0 ? ordered.length : at, 0, s.id)
-      onReorderAisles(ordered)
-      return
-    }
-    // item drag
-    if (s.targetAisle && s.targetAisle !== s.aisle) { onRecategorize(s.id, s.targetAisle); return }
-    // same-aisle reorder: pin the full current display order with the item moved
-    const buckets = new Map()
-    for (const it of its) { const k = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK; (buckets.get(k) || buckets.set(k, []).get(k)).push(it) }
-    const flat = orderAisles([...buckets.keys()], av.aisleOrder).flatMap((a) => orderRows(buckets.get(a), av.itemOrder).map((it) => it.id))
-    const without = flat.filter((id) => id !== s.id)
-    const at = s.beforeId ? without.indexOf(s.beforeId) : -1
-    without.splice(at < 0 ? without.length : at, 0, s.id)
-    onReorderItems(without)
-  }
-
-  return { dragProps, dragOver, ghost, didDrag: () => justDragged.current }
-}
-
-// The floating element that follows the finger during a drag.
-function DragGhost ({ ghost }) {
-  if (!ghost) return null
-  return (
-    <div style={{ position: 'fixed', left: 0, top: 0, transform: `translate(${ghost.x + 12}px, ${ghost.y - 18}px)`, zIndex: 100, pointerEvents: 'none', maxWidth: '70%', padding: `${sp.sm}px ${sp.base}px`, background: c.surface.elevated, border: `1px solid ${c.primary}`, borderRadius: r.md, boxShadow: '0 8px 24px rgba(0,0,0,0.4)', color: c.text.primary, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textTransform: ghost.kind === 'aisle' ? 'uppercase' : 'none' }}>
-      {ghost.label}
-    </div>
-  )
+  return { dragProps, dragOver, didDrag: () => justDragged.current }
 }
 
 // Order the present aisles: any in the device-local `aisleOrder` first (that
@@ -595,17 +627,33 @@ function orderRows (rows, itemOrder) {
 // aisle to re-file them there; headers reorder the aisles. All order is
 // per-device (see the 2026-07-11 hybrid decision). `dragProps(kind,id,aisle)`
 // wires the long-press handlers from the parent's drag controller.
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, didDrag }) {
+const SORTING = '__sorting__'
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, didDrag, sortingActive, aiDone }) {
   const buckets = new Map()
   for (const it of items) {
-    const key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
+    let key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
+    // A yet-to-be-classified 'Other' item shows under a transient "Sorting…"
+    // group (with a spinner) instead of flashing in Other and then jumping.
+    if (key === aisles.FALLBACK && sortingActive && aiDone && !aiDone.has(it.id)) key = SORTING
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(it)
   }
-  const sections = orderAisles([...buckets.keys()], aisleOrder).map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
+  const ordered = orderAisles([...buckets.keys()].filter((k) => k !== SORTING), aisleOrder)
+  const sections = [...(buckets.has(SORTING) ? [SORTING] : []), ...ordered].map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
   return (
     <>
       {sections.map(({ aisle, items: rows }) => {
+        if (aisle === SORTING) {
+          return (
+            <div key={SORTING}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, background: c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px` }}>
+                <span style={{ width: 12, height: 12, borderRadius: '50%', border: `2px solid ${c.text.muted}`, borderTopColor: c.primary, display: 'inline-block', animation: 'pearlist-spin 0.7s linear infinite' }} />
+                <span style={{ flex: 1, fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.secondary }}>Sorting…</span>
+              </div>
+              {rows.map((it) => <div key={it.id} style={{ opacity: 0.6 }}>{renderRow(it)}</div>)}
+            </div>
+          )
+        }
         const isCollapsed = !!collapsed?.has(aisle)
         const open = rows.filter((it) => !it.checked).length
         const aisleTarget = dragOver?.aisle === aisle && dragOver?.kind === 'item'
@@ -622,8 +670,7 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
               <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px' }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
             </button>
             {isCollapsed ? null : rows.map((it) => (
-              <div key={it.id} data-item-id={it.id} data-aisle={aisle} {...(dragProps ? dragProps('item', it.id, aisle) : {})}
-                style={{ borderTop: dragOver?.kind === 'item' && dragOver?.beforeId === it.id ? `2px solid ${c.primary}` : undefined, opacity: dragOver?.dragId === it.id ? 0.4 : 1 }}>
+              <div key={it.id} data-item-id={it.id} data-aisle={aisle} {...(dragProps ? dragProps('item', it.id, aisle) : {})}>
                 {renderRow(it)}
               </div>
             ))}
@@ -643,12 +690,16 @@ function AiConsentBanner ({ status, otherCount, onEnable, onDismiss }) {
   const gb = (status.model.sizeMB / 1024).toFixed(1)
   const wrap = { margin: `${sp.md}px ${sp.base}px`, padding: sp.base, background: c.surface.elevated, border: `1px solid ${c.border}`, borderRadius: r.lg }
   if (status.consent) {
-    if (status.state === 'downloading') {
+    if (status.state === 'downloading' || status.state === 'loading') {
+      const loading = status.state === 'loading'
+      // Bar from MB (smooth) rather than the coarse percentage; full + pulsing
+      // while the model loads into memory.
+      const frac = loading ? 1 : (status.totalMB ? Math.min(1, (status.downloadedMB || 0) / status.totalMB) : (status.pct || 0) / 100)
       return (
         <div style={wrap}>
-          <span style={{ color: c.text.primary, fontSize: 14, fontWeight: 400 }}>Downloading AI sorter… {status.pct}%</span>
+          <span style={{ color: c.text.primary, fontSize: 14, fontWeight: 400 }}>{loading ? 'Loading AI model into memory…' : `Downloading AI sorter… ${status.downloadedMB || 0} / ${status.totalMB || Math.round(status.model.sizeMB)} MB`}</span>
           <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: sp.sm, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${status.pct}%`, background: c.primary, transition: 'width 400ms ease' }} />
+            <div style={{ height: '100%', width: `${Math.round(frac * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: loading ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
           </div>
         </div>
       )
@@ -1098,7 +1149,7 @@ export default function App () {
     if (!gid || !openListId) return
     call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle }).then(() => loadItems(gid, openListId)).catch(() => {})
   }, [gid, openListId, loadItems])
-  const { dragProps, dragOver, ghost, didDrag } = useAisleDrag({
+  const { dragProps, dragOver, didDrag } = useAisleDrag({
     items, aisleView, scrollRef: listScrollRef,
     onReorderItems: (order) => patchAisleView({ itemOrder: order }),
     onReorderAisles: (order) => patchAisleView({ aisleOrder: order }),
@@ -1109,18 +1160,26 @@ export default function App () {
   // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
   // once the user has opted in and the model is downloaded. Until then the
   // consent prompt (below) handles it. Re-runs when the model becomes ready.
+  const aiActive = !!(aiStatus?.consent && aiStatus?.state === 'ready')
   const aiSentRef = useRef(new Set())
-  useEffect(() => { aiSentRef.current = new Set() }, [openListId])
+  // Items the AI has finished with (found an aisle or not). An 'Other' item that
+  // is NOT yet done shows as "Sorting…" while the model is active, so it never
+  // visibly sits in "Other" and then jumps.
+  const [aiDone, setAiDone] = useState(new Set())
+  useEffect(() => { aiSentRef.current = new Set(); setAiDone(new Set()) }, [openListId])
   useEffect(() => {
-    if (openList?.kind !== 'grocery' || !gid || !openListId) return
-    if (!(aiStatus?.consent && aiStatus?.state === 'ready')) return
+    if (openList?.kind !== 'grocery' || !gid || !openListId || !aiActive) return
     const others = items.filter((i) => i.category === 'Other' && !aiSentRef.current.has(i.id))
     if (!others.length) return
     others.forEach((i) => aiSentRef.current.add(i.id))
     call('shell:aiCategorize', { groupId: gid, listId: openListId, items: others.map((i) => ({ itemId: i.id, text: i.text })) }).catch(() => {})
-  }, [openList?.kind, gid, openListId, items, aiStatus?.consent, aiStatus?.state])
+  }, [openList?.kind, gid, openListId, items, aiActive])
   useEffect(() => {
-    return on('ai:recategorized', (d) => { if (d?.listId === openListId && gid) loadItems(gid, openListId) })
+    return on('ai:recategorized', (d) => {
+      if (d?.listId !== openListId) return
+      if (d?.done?.length) setAiDone((prev) => { const n = new Set(prev); d.done.forEach((x) => n.add(x)); return n })
+      if (gid) loadItems(gid, openListId)
+    })
   }, [openListId, gid, loadItems])
 
   async function createSpace (name) {
@@ -1315,7 +1374,7 @@ export default function App () {
                   </SwipeRow>
                 )
                 return openList?.kind === 'grocery'
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} didDrag={didDrag} />
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} didDrag={didDrag} sortingActive={aiActive} aiDone={aiDone} />
                   : items.map(renderRow)
               })()}
           </div>
@@ -1345,7 +1404,6 @@ export default function App () {
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
-      <DragGhost ghost={ghost} />
       <MenuSheet open={sheet === 'menu'} onClose={() => setSheet(null)} profile={profile}
         onProfile={() => { setSheet(null); setView('profile') }}
         onAbout={() => { setSheet(null); setView('about') }} />
@@ -1688,7 +1746,8 @@ function MenuSheet ({ open, onClose, profile, onProfile, onAbout }) {
 function aiSubtitle (ai) {
   if (!ai) return 'Sorts unusual grocery items into aisles, on your device.'
   const gb = (ai.model.sizeMB / 1024).toFixed(1)
-  if (ai.state === 'downloading') return `Downloading model… ${ai.pct}%`
+  if (ai.state === 'downloading') return `Downloading model… ${ai.downloadedMB || 0} / ${ai.totalMB || Math.round(ai.model.sizeMB)} MB`
+  if (ai.state === 'loading') return 'Loading model into memory…'
   if (ai.state === 'ready') return `Ready · ${ai.model.name} (~${gb} GB stored on device)`
   if (ai.state === 'error') return 'Download failed - toggle off then on to retry.'
   return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`

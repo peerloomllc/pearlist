@@ -423,15 +423,16 @@ export default function Shell () {
           const { groupId, listId, items: batch } = args || {}
           reply(id, { ok: true, queued: Array.isArray(batch) ? batch.length : 0 })
           ;(async () => {
-            let changed = 0
             for (const it of (Array.isArray(batch) ? batch : [])) {
               const aisle = await classifyAisleAI(String(it?.text || ''))
               if (aisle && aisle !== 'Other') {
                 await callRaw('ai:setCategory', { groupId, listId, itemId: it.itemId, category: aisle }).catch(() => {})
-                changed++
               }
+              // Report each item as it finishes (found an aisle or not) so the UI
+              // clears its "Sorting…" state and the item settles into place one at
+              // a time, instead of flashing in "Other" then jumping.
+              emitEvent('ai:recategorized', { listId, done: [it.itemId] })
             }
-            if (changed) emitEvent('ai:recategorized', { listId })
           })().catch(() => {})
           return
         }
