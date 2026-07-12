@@ -11,7 +11,7 @@ const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode } = require('./listWire')
-const { classifyAisle, normalizeAisle } = require('./aisles')
+const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods -
 // the always-available baseline. `classifyItem` is the single seam a smarter
@@ -478,7 +478,9 @@ const methods = {
   // peer. The category is validated against the known aisles; an unknown value
   // is dropped rather than written. Re-reads to avoid clobbering a concurrent edit.
   'ai:setCategory': async ({ groupId, listId, itemId, category, by }, ctx) => {
-    const aisle = normalizeAisle(category)
+    // A built-in aisle, or - only when the user chose it by hand - a sanitized
+    // custom aisle name. The classifier (by omitted) stays locked to built-ins.
+    const aisle = normalizeAisle(category) || (by === 'user' ? sanitizeCustomAisle(category) : null)
     if (!aisle) throw new Error('unknown aisle: ' + category)
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))

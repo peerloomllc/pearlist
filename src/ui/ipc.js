@@ -155,7 +155,8 @@ const mockMethods = {
   'shell:aiCategorize': async () => ({ ok: true, queued: 0 }),
   'ai:setCategory': async ({ groupId, itemId, category, by }) => {
     const it = mockGroup(groupId).items.get(itemId)
-    if (it && aisles.AISLES.includes(category)) { it.category = category; if (by === 'user') it.catBy = 'user' }
+    const aisle = aisles.normalizeAisle(category) || (by === 'user' ? aisles.sanitizeCustomAisle(category) : null)
+    if (it && aisle) { it.category = aisle; if (by === 'user') it.catBy = 'user' }
     return { category: it?.category, catBy: it?.catBy }
   },
   'ai:categorizeList': async ({ groupId, listId, force }) => {
