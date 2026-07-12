@@ -102,29 +102,26 @@ function ensureReady (): Promise<string> {
 
 export async function getAiStatus (): Promise<AiStatus> { await init(); return status() }
 
-// Opt in / out. Turning on kicks off the download in the BACKGROUND (progress
-// via the sink) and returns immediately - never blocks the caller on ~0.8GB.
+// Opt in / out. Turning ON kicks off the download in the BACKGROUND (progress via
+// the sink) and returns immediately. Turning OFF fully removes the model + frees
+// the ~0.8GB (re-enabling re-downloads) - "off" means gone, not just disabled.
 export async function setAiConsent (enabled: boolean): Promise<AiStatus> {
   await init()
   _consent = enabled
   await AsyncStorage.setItem(CONSENT_KEY, enabled ? '1' : '0').catch(() => {})
-  if (enabled && _state !== 'ready') { ensureReady().catch(() => {}) }
+  if (enabled) { if (_state !== 'ready') ensureReady().catch(() => {}) }
+  else { await removeAiModel() }
   return status()
 }
 
-// Free the ~0.8GB: unload + clear the model's on-disk storage.
+// Unload + delete the on-disk model to reclaim space.
 export async function removeAiModel (): Promise<AiStatus> {
   await init()
-  try {
-    // unloadModel needs a loaded id to clear its storage; load it (from disk,
-    // fast) if it was downloaded-but-not-loaded this session, then unload+clear.
-    const id = _modelId || (_state === 'ready' ? await ensureReady().catch(() => null) : null)
-    if (id) await unloadModel({ modelId: id, clearStorage: true })
-  } catch {}
+  try { if (_modelId) await unloadModel({ modelId: _modelId, clearStorage: true }) } catch {}
   try { await (deleteCache as any)({ all: true }) } catch {}
   // The real ~0.8GB lives in the SDK's model store at <documentDirectory>.qvac/models
-  // (HOME_DIR = document dir). unloadModel/deleteCache don't remove it, so delete it
-  // directly - this is what actually reclaims the space.
+  // (HOME_DIR = the app document dir). unloadModel/deleteCache do NOT remove it, so
+  // delete it directly - this is what actually reclaims the space.
   try { await FileSystem.deleteAsync(FileSystem.documentDirectory + '.qvac/models', { idempotent: true }) } catch {}
   _modelId = null; _readyPromise = null; _state = 'none'; _pct = 0; _downloaded = 0; _total = 0; _error = null
   await AsyncStorage.setItem(READY_KEY, '0').catch(() => {})

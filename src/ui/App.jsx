@@ -370,7 +370,7 @@ function DonationReminderModal ({ open, onDonate, onDismiss }) {
 // keep vertical scrolling while we own the horizontal drag, so no preventDefault
 // (and no passive-listener fight) is needed. Past the threshold it slides out
 // and calls onDelete; short drags snap back.
-function SwipeRow ({ children, onDelete }) {
+function SwipeRow ({ children, onDelete, disabled }) {
   const start = useRef(null)
   const axis = useRef(null)
   const dxRef = useRef(0)
@@ -380,7 +380,7 @@ function SwipeRow ({ children, onDelete }) {
   const THRESHOLD = 88
   const setDx = (v) => { dxRef.current = v; setDxState(v) }
   const reset = () => { start.current = null; axis.current = null; setDragging(false); setDx(0) }
-  const onStart = (e) => { const t = e.touches[0]; start.current = { x: t.clientX, y: t.clientY }; axis.current = null; setDragging(true) }
+  const onStart = (e) => { if (disabled) return; const t = e.touches[0]; start.current = { x: t.clientX, y: t.clientY }; axis.current = null; setDragging(true) }
   const onMove = (e) => {
     if (!start.current) return
     const t = e.touches[0]
@@ -400,7 +400,7 @@ function SwipeRow ({ children, onDelete }) {
   }
   return (
     <div ref={wrap} style={{ position: 'relative', overflow: 'hidden' }}>
-      <div aria-hidden='true' style={{ position: 'absolute', inset: 0, background: c.error, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 22, color: '#fff' }}><TrashIcon /></div>
+      <div aria-hidden='true' style={{ position: 'absolute', inset: 0, background: c.error, display: disabled ? 'none' : 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 22, color: '#fff' }}><TrashIcon /></div>
       <div onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onTouchCancel={reset}
         style={{ transform: `translateX(${dx}px)`, transition: dragging ? 'none' : 'transform 200ms cubic-bezier(0.32,0.72,0,1)', background: c.surface.base, touchAction: 'pan-y', position: 'relative', willChange: 'transform' }}>
         {children}
@@ -697,8 +697,8 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
               const itemLifted = lifted?.kind === 'item' && lifted.id === it.id
               return (
                 <div key={it.id} data-item-id={it.id}
-                  style={itemLifted ? { position: 'relative', zIndex: 50, background: c.surface.elevated, boxShadow: '0 10px 26px rgba(0,0,0,0.45)', borderRadius: r.md } : undefined}>
-                  {renderRow(it, dragProps ? dragProps('item', it.id, aisle) : undefined)}
+                  style={itemLifted ? { position: 'relative', zIndex: 50, background: c.surface.elevated, boxShadow: '0 10px 26px rgba(0,0,0,0.45)', borderRadius: r.md, overflow: 'hidden' } : undefined}>
+                  {renderRow(it, dragProps ? dragProps('item', it.id, aisle) : undefined, itemLifted)}
                 </div>
               )
             })}
@@ -1396,8 +1396,8 @@ export default function App () {
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
               : (() => {
-                const renderRow = (it, handleProps) => (
-                  <SwipeRow key={it.id} onDelete={() => swipeDeleteItem(it)}>
+                const renderRow = (it, handleProps, dragging) => (
+                  <SwipeRow key={it.id} onDelete={() => swipeDeleteItem(it)} disabled={dragging}>
                     <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} dragHandle={handleProps} />
                   </SwipeRow>
                 )
@@ -1805,7 +1805,6 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
   useEffect(() => { if (open) call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [open])
   useEffect(() => on('ai:status', setAi), [])
   async function toggleAi (v) { try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
-  async function removeAi () { try { setAi(await call('shell:aiRemoveModel', {})) } catch {} }
 
   async function commitAvatar (value) {
     setBusy(true)
@@ -1884,7 +1883,6 @@ function ProfileView ({ open, onBack, profile, theme, onTheme, onSaved }) {
                 <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
               </div>
             ) : null}
-            {ai?.state === 'ready' ? <button onClick={removeAi} style={{ alignSelf: 'flex-start', marginTop: 4, background: 'none', border: 'none', padding: 0, color: c.error, fontSize: 12, cursor: 'pointer' }}>Remove model to free space</button> : null}
           </span>
           <Toggle on={!!ai?.consent} onChange={toggleAi} />
         </div>
