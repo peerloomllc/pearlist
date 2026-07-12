@@ -35,7 +35,11 @@ const AISLE_SCHEMA = {
   additionalProperties: false,
 }
 
-type State = 'none' | 'downloading' | 'loading' | 'ready' | 'error'
+// 'idle' = downloaded to disk but NOT loaded into memory (the resting state after
+// an app restart). Loading it into RAM is deferred until the user asks (a prompt
+// for the passive sorter, or tapping recipe Generate), so we never silently eat
+// memory on launch. 'ready' = loaded in memory this session.
+type State = 'none' | 'downloading' | 'loading' | 'ready' | 'idle' | 'error'
 
 let _consent = false
 let _state: State = 'none'
@@ -66,7 +70,8 @@ async function init () {
   _inited = true
   try {
     _consent = (await AsyncStorage.getItem(CONSENT_KEY)) === '1'
-    if ((await AsyncStorage.getItem(READY_KEY)) === '1') _state = 'ready'
+    // Downloaded, but a fresh process hasn't loaded it into memory yet -> idle.
+    if ((await AsyncStorage.getItem(READY_KEY)) === '1') _state = 'idle'
   } catch {}
 }
 
@@ -112,6 +117,15 @@ function ensureReady (): Promise<string> {
 }
 
 export async function getAiStatus (): Promise<AiStatus> { await init(); return status() }
+
+// Explicitly load the model into memory on demand (idle -> loading -> ready).
+// Progress streams via the sink; returns the final status.
+export async function loadModelNow (): Promise<AiStatus> {
+  await init()
+  if (!_consent) return status()
+  try { await ensureReady() } catch {}
+  return status()
+}
 
 // Opt in / out. Turning ON kicks off the download in the BACKGROUND (progress via
 // the sink) and returns immediately. Turning OFF fully removes the model + frees
@@ -179,5 +193,44 @@ export async function classifyAisleAI (item: string): Promise<string | null> {
     return AISLES.includes(aisle) ? aisle : null
   } catch {
     return null
+  }
+}
+
+const RECIPE_SCHEMA = {
+  type: 'object',
+  properties: { items: { type: 'array', items: { type: 'string' }, maxItems: 20 } },
+  required: ['items'],
+  additionalProperties: false,
+}
+
+// Expand a meal / recipe description into a grocery shopping list: short item
+// names to buy, no quantities or steps. On-device generation; [] if not consented
+// or on any failure. The UI shows the result for review before anything is added.
+export async function expandToItems (description: string): Promise<string[]> {
+  await init()
+  if (!_consent) return []
+  const text = String(description || '').trim()
+  if (!text) return []
+  try {
+    const modelId = await ensureReady()
+    const run = completion({
+      modelId,
+      history: [
+        { role: 'system', content: 'You turn a meal or recipe into a grocery shopping list: the ingredients someone buys, as short item names. No quantities, no cooking steps, no duplicates. Reply with JSON only.' },
+        { role: 'user', content: 'Make: "tacos"' }, { role: 'assistant', content: '{"items":["Ground beef","Taco shells","Shredded cheese","Lettuce","Tomatoes","Salsa","Sour cream","Taco seasoning"]}' },
+        { role: 'user', content: 'Make: "spaghetti dinner"' }, { role: 'assistant', content: '{"items":["Spaghetti","Marinara sauce","Ground beef","Parmesan","Garlic","Onion","Garlic bread"]}' },
+        { role: 'user', content: `Make: "${text}"` },
+      ],
+      stream: false,
+      responseFormat: { type: 'json_schema', json_schema: { name: 'groceries', schema: RECIPE_SCHEMA, strict: true } },
+    })
+    const final = await run.final
+    const raw = (final.contentText || '').trim()
+    let items: any
+    try { items = JSON.parse(raw).items } catch { return [] }
+    if (!Array.isArray(items)) return []
+    return [...new Set(items.map((s: any) => String(s || '').trim()).filter(Boolean))].slice(0, 20)
+  } catch {
+    return []
   }
 }

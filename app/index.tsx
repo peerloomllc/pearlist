@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
-import { classifyAisleAI, getAiStatus, setAiConsent, removeAiModel, setProgressSink } from './qvac'
+import { classifyAisleAI, expandToItems, getAiStatus, loadModelNow, setAiConsent, removeAiModel, setProgressSink } from './qvac'
 
 // --- local notifications (assignment + join + completion; ON by default) ----
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
@@ -435,6 +435,19 @@ export default function Shell () {
             }
           })().catch(() => {})
           return
+        }
+        case 'shell:aiExpand': {
+          // Recipe/meal -> grocery items. Blocking (the UI shows a spinner and a
+          // review list); returns [] if not consented or generation fails. Loads
+          // the model into memory first if idle.
+          const items = await expandToItems(String(args?.description || ''))
+          return reply(id, { ok: true, items })
+        }
+        case 'shell:aiLoad': {
+          // Explicit "load into memory" (from the sorter prompt). Progress streams
+          // via ai:status; reply with the final status.
+          const s = await loadModelNow()
+          return reply(id, { ok: true, status: s })
         }
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')

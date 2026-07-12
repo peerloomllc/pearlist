@@ -6,7 +6,7 @@ import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -864,11 +864,27 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
 // under "Other" and the user has not yet opted into the on-device AI. Explains
 // the one-time download + on-device privacy before anything is fetched. Once
 // enabled, it shows download progress instead.
-function AiConsentBanner ({ status, otherCount, onEnable, onDismiss }) {
+function AiConsentBanner ({ status, otherCount, onEnable, onLoad, onDismiss }) {
   if (!status) return null
   const gb = (status.model.sizeMB / 1024).toFixed(1)
   const wrap = { margin: `${sp.md}px ${sp.base}px`, padding: sp.base, background: c.surface.elevated, border: `1px solid ${c.border}`, borderRadius: r.lg }
   if (status.consent) {
+    // Downloaded but not loaded this session: ask before spending memory/seconds
+    // to load it (never silently). Only when there is something to sort.
+    if (status.state === 'idle' && otherCount) {
+      return (
+        <div style={wrap}>
+          <div style={{ color: c.text.primary, fontSize: 15, fontWeight: 400, marginBottom: 4 }}>Sort {otherCount} item{otherCount > 1 ? 's' : ''} by aisle?</div>
+          <p style={{ color: c.text.secondary, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: `0 0 ${sp.md}px` }}>
+            The on-device AI is downloaded but not loaded. Loading it into memory takes a few seconds and uses some RAM.
+          </p>
+          <div style={{ display: 'flex', gap: sp.sm }}>
+            <button onClick={onLoad} style={{ flex: 1, padding: '10px 14px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Load AI</button>
+            <button onClick={onDismiss} style={{ padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Not now</button>
+          </div>
+        </div>
+      )
+    }
     if (status.state === 'downloading' || status.state === 'loading') {
       const loading = status.state === 'loading'
       // Bar from MB (smooth) rather than the coarse percentage; full + pulsing
@@ -1381,7 +1397,8 @@ export default function App () {
   // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
   // once the user has opted in and the model is downloaded. Until then the
   // consent prompt (below) handles it. Re-runs when the model becomes ready.
-  const aiActive = !!(aiStatus?.consent && aiStatus?.state === 'ready')
+  const aiActive = !!(aiStatus?.consent && aiStatus?.state === 'ready') // loaded in memory (sorter runs)
+  const aiAvailable = !!(aiStatus?.consent && ['idle', 'loading', 'ready'].includes(aiStatus?.state)) // downloaded (usable; loads on demand)
   const aiSentRef = useRef(new Set())
   // Items the AI has finished with (found an aisle or not). An 'Other' item that
   // is NOT yet done shows as "Sorting…" while the model is active, so it never
@@ -1576,7 +1593,7 @@ export default function App () {
               progress stays pinned below the header and is visible no matter how
               far the list is scrolled (it used to scroll away with the items). */}
           {openList?.kind === 'grocery' && !aiPromptDismissed
-            ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onDismiss={() => setAiPromptDismissed(true)} />
+            ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onLoad={() => call('shell:aiLoad', {}).then(setAiStatus).catch(() => {})} onDismiss={() => setAiPromptDismissed(true)} />
             : null}
           <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {items.length === 0
@@ -1603,6 +1620,9 @@ export default function App () {
               120, toasts/banners 130). The composer must beat headers + lifted rows
               but stay under every overlay, so overlays live in the 100+ band. */}
           <div style={{ position: 'sticky', bottom: 0, zIndex: 60, background: c.surface.base }}>
+            {isGroceryList && aiAvailable ? (
+              <button onClick={() => setSheet('recipe')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, width: '100%', padding: `${sp.sm}px 0`, background: 'none', border: 'none', color: c.accent, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}><Sparkle size={16} weight='fill' />Add from a recipe<Sparkle size={16} weight='fill' /></button>
+            ) : null}
             {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
           </div>
@@ -1674,6 +1694,9 @@ export default function App () {
       <QtySheet open={!!sheet && sheet.type === 'qty'}
         onCommit={async (qty) => { const t = sheet?.text; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); const ov = overrideFor(t); if (itemId && ov) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: ov, by: 'user' }).catch(() => {}); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
       />
+      <RecipeSheet open={sheet === 'recipe'} onClose={() => setSheet(null)}
+        onGenerate={(description) => call('shell:aiExpand', { description }).then((r) => r?.items || []).catch(() => [])}
+        onAdd={async (picks) => { for (const t of picks) await call('item:add', { groupId: gid, listId: openListId, text: t }).catch(() => {}); await loadItems(gid, openListId); setSheet(null) }} />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
     </div>
@@ -1984,6 +2007,7 @@ function aiSubtitle (ai) {
   if (ai.state === 'downloading') return `Downloading model… ${ai.downloadedMB || 0} / ${ai.totalMB || Math.round(ai.model.sizeMB)} MB`
   if (ai.state === 'loading') return 'Loading model into memory…'
   if (ai.state === 'ready') return `Ready · ${ai.model.name} (~${gb} GB stored on device)`
+  if (ai.state === 'idle') return `On · loads into memory when first used this session (~${gb} GB on device)`
   if (ai.state === 'error') return 'Download failed - toggle off then on to retry.'
   return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`
 }
@@ -2327,6 +2351,62 @@ function QtySheet ({ open, onCommit }) {
         <button onClick={() => setQty((q) => q + 1)} aria-label='Increase' style={stepBtn}><Plus size={22} weight='bold' /></button>
       </div>
       <Button onClick={commit}>Done</Button>
+    </BottomSheet>
+  )
+}
+
+// Recipe/meal -> grocery items (on-device AI). Type what you're making, generate
+// a suggested list, then review (deselect/keep) before adding. onGenerate calls
+// the shell's QVAC expansion; onAdd bulk-adds the picked items to the list.
+function RecipeSheet ({ open, onClose, onGenerate, onAdd }) {
+  const [desc, setDesc] = useState('')
+  const [items, setItems] = useState(null) // null = not generated yet
+  const [picked, setPicked] = useState(new Set())
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { if (open) { setDesc(''); setItems(null); setPicked(new Set()); setBusy(false) } }, [open])
+  const generate = async () => {
+    const d = desc.trim(); if (!d || busy) return
+    setBusy(true); setItems(null)
+    const got = await onGenerate(d)
+    setItems(got); setPicked(new Set(got)); setBusy(false)
+  }
+  const toggle = (it) => setPicked((p) => { const n = new Set(p); n.has(it) ? n.delete(it) : n.add(it); return n })
+  const add = async () => {
+    const picks = items.filter((it) => picked.has(it)); if (!picks.length || busy) return
+    setBusy(true); await onAdd(picks)
+  }
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Add from a recipe'>
+      <div style={{ display: 'flex', gap: sp.sm, marginBottom: sp.md }}>
+        <input value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') generate() }} placeholder="What are you making? (e.g. tacos)" autoFocus maxLength={80}
+          style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, fontFamily: FONT, outline: 'none' }} />
+        <button onClick={generate} disabled={busy || !desc.trim()} style={{ padding: '0 16px', borderRadius: r.md, border: 'none', background: (busy || !desc.trim()) ? c.surface.input : c.primary, color: (busy || !desc.trim()) ? c.text.muted : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: (busy || !desc.trim()) ? 'default' : 'pointer', flexShrink: 0 }}>{busy && items === null ? '…' : 'Generate'}</button>
+      </div>
+      {busy && items === null ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, color: c.text.muted, fontSize: 13, margin: `${sp.lg}px 0` }}>
+          <Sparkle size={16} weight='fill' color={c.accent} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite' }} />
+          <span>Thinking up ingredients</span>
+          <Sparkle size={16} weight='fill' color={c.accent} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite 0.6s' }} />
+        </div>
+      ) : null}
+      {items && items.length === 0 ? <p style={{ color: c.text.muted, fontSize: 14, textAlign: 'center', margin: `${sp.base}px 0` }}>Couldn't come up with a list. Try rephrasing (e.g. "chicken tacos").</p> : null}
+      {items && items.length > 0 ? (
+        <>
+          <p style={{ color: c.text.muted, fontSize: 12, margin: `0 0 ${sp.sm}px` }}>Tap to keep or drop, then add.</p>
+          <div style={{ maxHeight: '42dvh', overflowY: 'auto', marginBottom: sp.md }}>
+            {items.map((it) => {
+              const on = picked.has(it)
+              return (
+                <button key={it} onClick={() => toggle(it)} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.sm}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', textAlign: 'left' }}>
+                  <span style={{ width: 22, height: 22, flexShrink: 0, borderRadius: r.sm, border: `2px solid ${on ? c.primary : c.text.muted}`, background: on ? c.primary : 'transparent', color: c.text.onPrimary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{on ? <Check size={14} weight='bold' /> : null}</span>
+                  <span style={{ flex: 1, color: on ? c.text.primary : c.text.muted, fontSize: 16, fontWeight: 300, textDecoration: on ? 'none' : 'line-through' }}>{it}</span>
+                </button>
+              )
+            })}
+          </div>
+          <Button onClick={add} disabled={busy || !picked.size}>{busy ? 'Adding…' : `Add ${picked.size} item${picked.size === 1 ? '' : 's'}`}</Button>
+        </>
+      ) : null}
     </BottomSheet>
   )
 }
