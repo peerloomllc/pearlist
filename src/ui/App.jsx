@@ -238,6 +238,23 @@ function AssigneePickerSheet ({ open, onClose, members, selfPubkey, current, onP
   )
 }
 
+// Pick a grocery aisle for an item (item detail -> Aisle row). Lists every known
+// aisle, so an item can be filed into one that has no items yet - which drag
+// cannot reach, since an empty aisle renders no drop target. Writes via the same
+// synced ai:setCategory path as the drag.
+function AislePickerSheet ({ open, onClose, current, onPick }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Choose aisle'>
+      {aisles.AISLES.map((a) => (
+        <button key={a} onClick={() => { onPick(a); onClose() }} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>
+          <span style={{ flex: 1, textAlign: 'left' }}>{a}</span>
+          {current === a ? <Check size={18} color={c.primary} weight='bold' /> : null}
+        </button>
+      ))}
+    </BottomSheet>
+  )
+}
+
 // Accordion card matching the suite (rotating chevron, max-height body).
 function Collapsible ({ title, open, onToggle, children }) {
   return (
@@ -676,8 +693,9 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
   for (const it of items) {
     let key = aisles.AISLES.includes(it.category) ? it.category : aisles.FALLBACK
     // A yet-to-be-classified 'Other' item shows under a transient "Sorting…"
-    // group (with a spinner) instead of flashing in Other and then jumping.
-    if (key === aisles.FALLBACK && sortingActive && aiDone && !aiDone.has(it.id)) key = SORTING
+    // group (with a spinner) instead of flashing in Other and then jumping. A
+    // user-pinned item (catBy) is a deliberate choice, never "sorting".
+    if (key === aisles.FALLBACK && sortingActive && aiDone && !aiDone.has(it.id) && it.catBy !== 'user') key = SORTING
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(it)
   }
@@ -1196,7 +1214,7 @@ export default function App () {
   const listScrollRef = useRef(null)
   const recategorizeItem = useCallback((itemId, aisle) => {
     if (!gid || !openListId) return
-    call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle }).then(() => loadItems(gid, openListId)).catch(() => {})
+    call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle, by: 'user' }).then(() => loadItems(gid, openListId)).catch(() => {})
   }, [gid, openListId, loadItems])
   const { dragProps, dragOver, lifted, didDrag } = useAisleDrag({
     items, aisleView, scrollRef: listScrollRef,
@@ -1218,7 +1236,7 @@ export default function App () {
   useEffect(() => { aiSentRef.current = new Set(); setAiDone(new Set()) }, [openListId])
   useEffect(() => {
     if (openList?.kind !== 'grocery' || !gid || !openListId || !aiActive) return
-    const others = items.filter((i) => i.category === 'Other' && !aiSentRef.current.has(i.id))
+    const others = items.filter((i) => i.category === 'Other' && i.catBy !== 'user' && !aiSentRef.current.has(i.id))
     if (!others.length) return
     others.forEach((i) => aiSentRef.current.add(i.id))
     call('shell:aiCategorize', { groupId: gid, listId: openListId, items: others.map((i) => ({ itemId: i.id, text: i.text })) }).catch(() => {})
@@ -1465,8 +1483,8 @@ export default function App () {
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); setView('about') }} />
       <GuidedTour open={showTour} onDone={dismissTour} />
       <ItemSheet
-        open={!!sheet && sheet.type === 'item'} item={sheet?.item} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
-        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); await loadItems(gid, openListId); setSheet(null) }}
+        open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
+        onSave={async (patch) => { await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url }); await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee }); if (patch.category && (patch.category !== sheet.item.category || sheet.item.catBy !== 'user')) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: patch.category, by: 'user' }).catch(() => {}); await loadItems(gid, openListId); setSheet(null) }}
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <QtySheet open={!!sheet && sheet.type === 'qty'} onClose={() => setSheet(null)}
@@ -2115,15 +2133,19 @@ function QtySheet ({ open, onClose, onSave }) {
   )
 }
 
-function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete }) {
+function ItemSheet ({ open, item, kind, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
   const [assignee, setAssignee] = useState(null)
   const [note, setNote] = useState('')
   const [url, setUrl] = useState('')
+  const [category, setCategory] = useState(null)
+  const [catTouched, setCatTouched] = useState(false)
   const [picking, setPicking] = useState(false)
-  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setPicking(false) } }, [open, item])
+  const [pickingAisle, setPickingAisle] = useState(false)
+  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false) } }, [open, item])
   if (!item) return null
+  const isGrocery = kind === 'grocery'
   return (
     <>
       <BottomSheet open={open} onClose={onClose} title='Edit item'>
@@ -2143,6 +2165,15 @@ function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete
               <CaretRight size={16} color={c.text.muted} weight='regular' />
             </span>
           </button>
+          {isGrocery ? (
+            <button onClick={() => setPickingAisle(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, padding: '12px 14px', background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, cursor: 'pointer' }}>
+              <span style={{ color: c.text.secondary, fontSize: 14 }}>Aisle</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, color: c.text.primary, fontSize: 15 }}>
+                {category || aisles.FALLBACK}
+                <CaretRight size={16} color={c.text.muted} weight='regular' />
+              </span>
+            </button>
+          ) : null}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder='Notes (optional)' rows={2} maxLength={2000}
             style={{ width: '100%', padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none', resize: 'vertical', minHeight: 44 }} />
           <div style={{ display: 'flex', gap: sp.sm }}>
@@ -2150,11 +2181,12 @@ function ItemSheet ({ open, item, members, selfPubkey, onClose, onSave, onDelete
               style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
             {url.trim() ? <button onClick={() => openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim())} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
           </div>
-          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim() })}>Save</Button>
+          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category: (isGrocery && catTouched) ? category : undefined })}>Save</Button>
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>
       <AssigneePickerSheet open={picking} onClose={() => setPicking(false)} members={members} selfPubkey={selfPubkey} current={assignee} onPick={(pk) => setAssignee(pk)} />
+      <AislePickerSheet open={pickingAisle} onClose={() => setPickingAisle(false)} current={category || aisles.FALLBACK} onPick={(a) => { setCategory(a); setCatTouched(true) }} />
     </>
   )
 }
