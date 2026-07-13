@@ -6,6 +6,7 @@
 
 const { createGroupEngine } = require('@peerloom/core/engine')
 const { applyListOp } = require('./listWire')
+const { authorizeRevoke, admitWriter } = require('./revocation')
 const listMethods = require('./listMethods')
 
 // Pairing/writer-admission trace (diagnostic, 2026-07-01). The core emits marks
@@ -36,6 +37,12 @@ const engine = createGroupEngine({
   applyOps: applyListOp,
   methods: listMethods,
   mark,
+  // Writer revocation (proposals/2026-07-13-writer-revocation.md). Both are inert
+  // until a space's owner ARMS it (space.revokeV1); without authorizeRevoke the
+  // engine ignores revokeWriter ops entirely, so an un-armed space behaves exactly
+  // as it does today.
+  authorizeRevoke,
+  admitWriter,
   // Storage retention (roadmap #4 P2): auto-prune old already-applied blocks
   // across all mounted spaces every 30 min, keeping a generous recent buffer so
   // small spaces are untouched and only long-churned ones shrink.

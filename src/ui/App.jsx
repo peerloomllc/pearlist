@@ -582,9 +582,12 @@ function ConfirmHost () {
   return (
     <BottomSheet open={!!state} onClose={() => done(false)} title={state?.title}>
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.base}px` }}>{state?.message}</p>
+      {/* Equal-width buttons: the confirm and Cancel carry the same weight, so one
+          does not read as the obvious choice by size alone. Applies to every
+          askConfirm (Remove, Stronger removal, Leave, Clear learned aisles...). */}
       <div style={{ display: 'flex', gap: sp.sm }}>
         <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
-        <button onClick={() => done(false)} style={{ padding: '0 18px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+        <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
       </div>
     </BottomSheet>
   )
@@ -1131,6 +1134,7 @@ export default function App () {
   const [lnDetected, setLnDetected] = useState(false) // does the device have a Lightning wallet (drives the donation sheet)
   const [members, setMembers] = useState([])
   const [removedMembers, setRemovedMembers] = useState([]) // evicted; the owner can add them back
+  const [revoke, setRevoke] = useState(null)               // hard-revocation status for the active space
   const [selfPubkey, setSelfPubkey] = useState(null)
   const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
   const [navRequest, setNavRequest] = useState(null) // { groupId, listId } from a notification tap
@@ -1176,6 +1180,7 @@ export default function App () {
     const rm = await call('member:getRemoved', { groupId }).catch(() => [])
     setMembers(ms)
     setRemovedMembers(rm)
+    call('space:revocationStatus', { groupId }).then(setRevoke).catch(() => setRevoke(null))
     // Re-publish our roster row until it lands... but NOT if we were removed. An
     // evicted member is filtered out of `ms` forever, so without this guard the
     // "I'm missing, republish" retry would fire on every refresh tick and append a
@@ -1543,9 +1548,34 @@ export default function App () {
       danger: true,
     })
     if (!ok) return
-    try { await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not remove: ' + e.message); return }
+    let res
+    try { res = await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not remove: ' + e.message); return }
     await loadMembers(gid, selfPubkey)
-    setBanner(`${name} removed.`)
+    // Be honest when we could only HIDE them. Cutting a device off needs its writer
+    // binding, which only exists if it has been online since Stronger removal was
+    // turned on. Without it the removal is hide-only, and saying otherwise would be
+    // a lie about a security property.
+    if (revoke?.armed && res && res.revoked === false) {
+      setBanner(`${name} removed from the list, but their device could not be cut off (it has not been online since Stronger removal was turned on).`)
+    } else {
+      setBanner(`${name} removed.`)
+    }
+  }
+  // Turn on hard revocation for this space. ONE WAY, and the copy says so: it
+  // changes how every peer applies writer ops, and a peer that has not updated would
+  // silently fork the space, which is why it stays off until everyone has.
+  // It stops a removed device WRITING. It cannot stop it READING - no design can
+  // (it keeps the space's key), so the copy must not imply otherwise.
+  async function armRevocation () {
+    const ok = await askConfirm({
+      title: 'Stronger removal?',
+      message: 'Removed devices will also lose the ability to CHANGE anything in this space, not just disappear from the member list. They can still see what they already have: turning this on cannot take that away. This cannot be undone, and every member has to have updated first.',
+      confirmLabel: 'Turn on',
+    })
+    if (!ok) return
+    try { await call('space:armRevocation', { groupId: gid }) } catch (e) { alert(e.message); return }
+    await loadMembers(gid, selfPubkey)
+    setBanner('Stronger removal is on.')
   }
   async function restoreMember (m) {
     try { await call('member:restore', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not add back: ' + e.message); return }
@@ -1798,7 +1828,7 @@ export default function App () {
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
-      <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner} onRemove={removeMember} removed={removedMembers} onRestore={restoreMember} />
+      <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner} onRemove={removeMember} removed={removedMembers} onRestore={restoreMember} revoke={revoke} onArm={armRevocation} />
       <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => { setSheet(null); setDeleteTarget(null) }} spaceName={deleteTarget?.name} onConfirm={() => deleteSpace(deleteTarget?.groupId)} />
       <LightningWalletModal open={sheet === 'wallet'} detected={lnDetected} onClose={() => setSheet(null)} />
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); goTab('about') }} />
@@ -2102,7 +2132,7 @@ function Banner ({ text, onClose }) {
 // the roster forever with no way out. Removal hides them and is reversible with
 // a fresh invite; it does not revoke a device that still holds the space, which
 // is why the copy says "remove", never "block".
-function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner, onRemove, removed = [], onRestore }) {
+function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner, onRemove, removed = [], onRestore, revoke, onArm }) {
   return (
     <BottomSheet open={open} onClose={onClose} title={`In ${spaceName || 'this space'}`}>
       {members.length === 0
@@ -2134,6 +2164,21 @@ function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner,
             </div>
           ))}
         </>
+      ) : null}
+
+      {/* Stronger removal (hard writer revocation), owner only. Off until EVERY member
+          has updated: a peer that does not understand it would keep accepting a removed
+          device's changes and silently drift out of sync with everyone else. */}
+      {isOwner && revoke && !revoke.armed ? (
+        <div style={{ marginTop: sp.lg, paddingTop: sp.base, borderTop: `1px solid ${c.divider}` }}>
+          <div style={{ color: c.text.primary, fontSize: 15, marginBottom: 4 }}>Stronger removal</div>
+          <p style={{ color: c.text.muted, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: `0 0 ${sp.base}px` }}>
+            {revoke.canArm
+              ? 'Removed devices also lose the ability to change anything here, not just disappear from the list. They can still see what they already have.'
+              : `Everyone has to update first (${revoke.ready} of ${revoke.total} done${revoke.waitingOn?.length ? `, waiting on ${revoke.waitingOn.join(', ')}` : ''}).`}
+          </p>
+          <Button variant='secondary' disabled={!revoke.canArm} style={{ opacity: revoke.canArm ? 1 : 0.5 }} onClick={onArm}>Turn on</Button>
+        </div>
       ) : null}
     </BottomSheet>
   )

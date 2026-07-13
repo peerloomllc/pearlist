@@ -272,3 +272,64 @@ test('a member may retire their OWN row with `left` (owner-scoped rule allows it
   // ...but still cannot write anyone else's row, so nobody can force you out.
   assert.equal(rowApplyDecision(memberKey(OTHERPUB), mine, null), 'reject')
 })
+
+// --- writer revocation (proposals/2026-07-13-writer-revocation.md) -----------
+// The binding that revocation depends on must come from the block's AUTHORING
+// writer core (node.from.key), never from anything the row claims - otherwise a
+// member could name a VICTIM's writer key and have the owner revoke the victim.
+
+const { writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke } = require('../src/listWire')
+
+const WKEY_A = 'aa'.repeat(32)
+const WKEY_VICTIM = 'bb'.repeat(32)
+const fakeNode = (writerHex) => ({ from: { key: Buffer.from(writerHex, 'hex') } })
+
+test('writerKeyOf reads the AUTHORING core, not the row', () => {
+  assert.equal(writerKeyOf(fakeNode(WKEY_A)), WKEY_A)
+  assert.equal(writerKeyOf({}), null)
+  assert.equal(writerKeyOf(null), null)
+})
+
+test('apply records the writer binding ONLY once the space is armed', async () => {
+  const armedSpace = signValue({ pubkey: PUB, owner: PUB, name: 'H', updatedAt: 1000, revokeV1: true }, KP.secretKey)
+  const coldSpace = signValue({ pubkey: PUB, owner: PUB, name: 'H', updatedAt: 1000 }, KP.secretKey)
+  const row = signValue({ pubkey: PUB, updatedAt: 2000, displayName: 'Me', caps: [REVOKE_CAP] }, KP.secretKey)
+
+  // Not armed -> the row is stored verbatim (byte-identical to what old peers store,
+  // which is what keeps an un-armed space fork-free).
+  const cold = mockView({ space: coldSpace })
+  await apply({ type: 'put', key: memberKey(PUB), value: row }, { view: cold, ctx: { node: fakeNode(WKEY_A) } })
+  assert.equal((await cold.get(memberKey(PUB))).value._w, undefined, 'dormant until armed')
+
+  // Armed -> the binding is recorded from the authoring core.
+  const hot = mockView({ space: armedSpace })
+  await apply({ type: 'put', key: memberKey(PUB), value: row }, { view: hot, ctx: { node: fakeNode(WKEY_A) } })
+  assert.equal((await hot.get(memberKey(PUB))).value._w, WKEY_A, 'binding taken from node.from.key')
+})
+
+test('a member CANNOT redirect revocation by lying about its writer key', async () => {
+  const armedSpace = signValue({ pubkey: PUB, owner: PUB, name: 'H', updatedAt: 1000, revokeV1: true }, KP.secretKey)
+  // OTHER signs their own row but CLAIMS the victim's writer core key.
+  const liar = signValue({ pubkey: OTHERPUB, updatedAt: 2000, displayName: 'Liar', _w: WKEY_VICTIM }, OTHER.secretKey)
+  const view = mockView({ space: armedSpace })
+  // ...but the block was actually appended by the liar's OWN core.
+  await apply({ type: 'put', key: memberKey(OTHERPUB), value: liar }, { view, ctx: { node: fakeNode(WKEY_A) } })
+  const stored = (await view.get(memberKey(OTHERPUB))).value
+  assert.equal(stored._w, WKEY_A, 'the claimed key is OVERWRITTEN by the authoring core')
+  assert.notEqual(stored._w, WKEY_VICTIM, 'the victim is NOT the revocation target')
+})
+
+test('capability gate: every member must advertise, except the eviction target', () => {
+  const withCap = (pub) => ({ pubkey: pub, caps: [REVOKE_CAP] })
+  const noCap = (pub) => ({ pubkey: pub })
+  assert.equal(hasCap(withCap(PUB), REVOKE_CAP), true)
+  assert.equal(hasCap(noCap(PUB), REVOKE_CAP), false)
+
+  assert.equal(allMembersSupportRevoke([withCap(PUB), withCap(OTHERPUB)]), true, 'all updated -> can arm')
+  assert.equal(allMembersSupportRevoke([withCap(PUB), noCap(OTHERPUB)]), false, 'one straggler -> must NOT arm')
+  // The stale device we are evicting will NEVER advertise support - if it counted,
+  // the gate would never open and the whole feature would be useless.
+  assert.equal(allMembersSupportRevoke([withCap(PUB), noCap(OTHERPUB)], [OTHERPUB]), true,
+    'the eviction target is excluded from the gate')
+  assert.equal(allMembersSupportRevoke([]), false, 'no members -> nothing to arm')
+})
