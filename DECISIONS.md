@@ -2,6 +2,42 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-13 - Member removal rides existing rows, NOT a new namespace
+Tier: T2 (additive fields on two existing rows; no new key type, no pairing or
+crypto change). Proposal: 2026-07-13-space-member-eviction (APPROVED).
+Context: there was no way to remove a member. A wiped or replaced device sat in
+the roster forever (MembersBar, member count, assignee picker) with no exit, and
+`member:{pubkey}` rows are owner-scoped so only that device could ever retract
+its own row - precisely the device we no longer have.
+Choice: the owner evicts by adding the pubkey to an `evicted` map on the EXISTING
+`space` singleton, which is already owner-gated in applyListOp (only the
+established owner's signed update is accepted), so eviction needed no new trust
+gate. A member leaves by setting `left: true` on their OWN roster row, which the
+owner-scoped rule already permits. member:getAll filters `evicted`, `left` and
+(latent bug, fixed) `deleted`, so every membership surface is fixed at once.
+Alternatives:
+- A new `evict:{pubkey}` NAMESPACE (the obvious design, REJECTED). applyListOp
+  drops keys outside NAMESPACES, so an old peer would skip the op while a new peer
+  put()s it. The two then compute different Hyperbee views from the same op log,
+  and Autobase indexers SIGN the view: that is a fork, not a cosmetic difference.
+  It was survivable when `member:` itself landed as a new namespace (2026-06-30,
+  pre-v1.0.0, no old peers). It is not survivable now that v1.0.0 is in three
+  stores. Additive FIELDS on existing rows are stored verbatim by view.put, so old
+  peers store byte-identical values and merely fail to interpret them (they keep
+  showing the member; cosmetic, no divergence).
+- A member-row TOMBSTONE (REJECTED): rowApplyDecision enforces no-resurrection, so
+  it would strand a re-invited member as permanently unrosterable. Both flags are
+  revocable for exactly this reason, which is what makes member:restore possible.
+Consequences: removal HIDES, it does not revoke. An evicted device stays an
+admitted Autobase writer and can still read the space it already has, so the UI
+says "remove", never "block". Real revocation (base.removeWriter, which exists in
+Autobase 7.28.1) is consensus state and forks old peers, so it needs a capability
+gate and is a separate T3. Restore MUST be reachable from the UI (a "Removed"
+section, owner only): an evicted pubkey stays evicted even if that device rejoins
+with a fresh invite, since only the owner can clear it. A stale OWNER is still a
+dead end (open question: owner hand-off). Suite-wide gap; promote to
+@peerloom/core if the shape holds.
+
 ## 2026-07-12 - Manual user-defined sections for non-grocery lists
 Tier: T1 (reuses the existing `category` field + loosened validation; no new key
 type, pairing, or encryption change).

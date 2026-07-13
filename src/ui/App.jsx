@@ -6,7 +6,7 @@ import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -1130,6 +1130,7 @@ export default function App () {
   const [donateReminder, setDonateReminder] = useState(false)
   const [lnDetected, setLnDetected] = useState(false) // does the device have a Lightning wallet (drives the donation sheet)
   const [members, setMembers] = useState([])
+  const [removedMembers, setRemovedMembers] = useState([]) // evicted; the owner can add them back
   const [selfPubkey, setSelfPubkey] = useState(null)
   const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
   const [navRequest, setNavRequest] = useState(null) // { groupId, listId } from a notification tap
@@ -1172,8 +1173,16 @@ export default function App () {
   // writable member and not yet listed (so peers can resolve our assignee pubkey).
   const loadMembers = useCallback(async (groupId, self) => {
     const ms = await call('member:getAll', { groupId }).catch(() => [])
+    const rm = await call('member:getRemoved', { groupId }).catch(() => [])
     setMembers(ms)
-    if (self && !ms.some((m) => m.pubkey === self)) call('member:publish', { groupId }).catch(() => {})
+    setRemovedMembers(rm)
+    // Re-publish our roster row until it lands... but NOT if we were removed. An
+    // evicted member is filtered out of `ms` forever, so without this guard the
+    // "I'm missing, republish" retry would fire on every refresh tick and append a
+    // member row each time, growing the log without bound (and never reappearing,
+    // since only the owner can clear an eviction).
+    const evictedSelf = !!self && rm.some((m) => m.pubkey === self)
+    if (self && !evictedSelf && !ms.some((m) => m.pubkey === self)) call('member:publish', { groupId }).catch(() => {})
     // "Someone joined" banner: fire only for a member that appears after we have
     // already seen this space's roster once (skips the initial load and self).
     const prev = prevMembersRef.current[groupId]
@@ -1520,6 +1529,46 @@ export default function App () {
     if (sp.length === 0) setPhase('onboarding')
     setBanner('Space deleted.')
   }
+  // Owner-only: drop a member from the space (the stale-device case). Reversible
+  // with a fresh invite, so the confirm says so. It does NOT revoke a device that
+  // still holds the space, and the copy is careful not to imply otherwise.
+  async function removeMember (m) {
+    const name = m.displayName || 'this member'
+    const ok = await askConfirm({
+      title: `Remove ${name}?`,
+      // Honest: re-inviting them is NOT enough on its own, because only the owner
+      // can clear an eviction. "Add back" on this screen is the way back.
+      message: `${name} stops showing as a member of this space. Anything they added stays, and you can add them back from this screen.`,
+      confirmLabel: 'Remove',
+      danger: true,
+    })
+    if (!ok) return
+    try { await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not remove: ' + e.message); return }
+    await loadMembers(gid, selfPubkey)
+    setBanner(`${name} removed.`)
+  }
+  async function restoreMember (m) {
+    try { await call('member:restore', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not add back: ' + e.message); return }
+    await loadMembers(gid, selfPubkey)
+    setBanner(`${m.displayName || 'Member'} added back.`)
+  }
+  // Anyone can leave a space they are in (the owner deletes it instead). Retires
+  // our own roster row, then forgets the space locally.
+  async function leaveSpace (space) {
+    const ok = await askConfirm({
+      title: `Leave ${space?.name || 'this space'}?`,
+      message: 'You stop showing as a member and this space is removed from this device. Its lists stay for everyone else. You can rejoin with a new invite.',
+      confirmLabel: 'Leave',
+      danger: true,
+    })
+    if (!ok) return
+    setSheet(null)
+    try { await call('space:leave', { groupId: space.groupId }) } catch (e) { alert('Could not leave: ' + e.message); return }
+    const sp = await loadSpaces()
+    if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
+    if (sp.length === 0) setPhase('onboarding')
+    setBanner('You left the space.')
+  }
   async function assignList (listId, assignee) {
     await call('list:assign', { groupId: gid, listId, assignee })
     await loadLists(gid)
@@ -1732,7 +1781,7 @@ export default function App () {
       <InviteSheet open={sheet === 'invite'} onClose={() => setSheet(null)} inviteKey={activeSpace?.inviteKey} spaceName={activeSpace?.name} />
       <SpaceSwitcherSheet open={sheet === 'spaces'} onClose={() => setSheet(null)} spaces={spaces} activeId={activeSpaceId}
         onPick={switchSpace} onCreate={() => setSheet('start')} onJoin={() => setSheet('join')}
-        onDelete={(s) => { setDeleteTarget(s); setSheet('deleteSpace') }} />
+        onDelete={(s) => { setDeleteTarget(s); setSheet('deleteSpace') }} onLeave={leaveSpace} />
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} canReset={items.some((i) => i.checked)} onClose={() => setSheet(null)}
@@ -1749,7 +1798,7 @@ export default function App () {
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
-      <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} />
+      <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner} onRemove={removeMember} removed={removedMembers} onRestore={restoreMember} />
       <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => { setSheet(null); setDeleteTarget(null) }} spaceName={deleteTarget?.name} onConfirm={() => deleteSpace(deleteTarget?.groupId)} />
       <LightningWalletModal open={sheet === 'wallet'} detected={lnDetected} onClose={() => setSheet(null)} />
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); goTab('about') }} />
@@ -1801,7 +1850,10 @@ function StartSheet ({ open, onClose, onCreate }) {
 }
 
 // Switch between spaces (each a separate private group), or make/join another.
-function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate, onJoin, onDelete }) {
+// Owner gets Delete (tears the space down for everyone); everyone else gets
+// Leave (retires their roster row + forgets it here). Same slot, since they are
+// the two ways out and exactly one applies to you.
+function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate, onJoin, onDelete, onLeave }) {
   return (
     <BottomSheet open={open} onClose={onClose} title='Spaces'>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: sp.base }}>
@@ -1815,7 +1867,9 @@ function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate
               </button>
               {s.owner ? (
                 <button onClick={() => onDelete(s)} aria-label={`Delete ${s.name}`} style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><TrashIcon size={17} /></button>
-              ) : null}
+              ) : (
+                <button onClick={() => onLeave(s)} aria-label={`Leave ${s.name}`} style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><SignOut size={17} weight='regular' /></button>
+              )}
             </div>
           )
         })}
@@ -2043,17 +2097,44 @@ function Banner ({ text, onClose }) {
 }
 
 // Who's in the space.
-function MembersSheet ({ open, onClose, members, selfPubkey, spaceName }) {
+// The space's roster. The OWNER (and only the owner) can remove a member here:
+// the stale-device case, where a wiped or replaced phone would otherwise sit in
+// the roster forever with no way out. Removal hides them and is reversible with
+// a fresh invite; it does not revoke a device that still holds the space, which
+// is why the copy says "remove", never "block".
+function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner, onRemove, removed = [], onRestore }) {
   return (
     <BottomSheet open={open} onClose={onClose} title={`In ${spaceName || 'this space'}`}>
       {members.length === 0
         ? <p style={{ color: c.text.muted, fontSize: 14, textAlign: 'center', padding: `${sp.base}px 0` }}>Just you so far.</p>
-        : members.map((m) => (
-            <div key={m.pubkey} style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.xs}px`, borderTop: `1px solid ${c.divider}` }}>
+        : members.map((m) => {
+            const isSelf = m.pubkey === selfPubkey
+            return (
+              <div key={m.pubkey} style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.xs}px`, borderTop: `1px solid ${c.divider}` }}>
+                <Avatar name={m.displayName} avatar={m.avatar} size={40} />
+                <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.displayName || 'Member'}{isSelf ? ' (You)' : ''}</span>
+                {isOwner && !isSelf ? (
+                  <button onClick={() => onRemove(m)} aria-label={`Remove ${m.displayName || 'member'}`} style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}><UserMinus size={20} weight='regular' /></button>
+                ) : null}
+              </div>
+            )
+          })}
+
+      {/* Removed members, owner only. Restore MUST live here: an evicted pubkey stays
+          evicted even if that device rejoins with a fresh invite (only the owner can
+          write the `space` row), so without this the removal is one-way in practice. */}
+      {isOwner && removed.length ? (
+        <>
+          <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `${sp.lg}px ${sp.xs}px ${sp.xs}px` }}>Removed</div>
+          {removed.map((m) => (
+            <div key={m.pubkey} style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.xs}px`, borderTop: `1px solid ${c.divider}`, opacity: 0.65 }}>
               <Avatar name={m.displayName} avatar={m.avatar} size={40} />
-              <span style={{ color: c.text.primary, fontSize: 16 }}>{m.displayName || 'Member'}{m.pubkey === selfPubkey ? ' (You)' : ''}</span>
+              <span style={{ flex: 1, minWidth: 0, color: c.text.secondary, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.displayName || 'Member'}</span>
+              <button onClick={() => onRestore(m)} style={{ flexShrink: 0, padding: '8px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Add back</button>
             </div>
           ))}
+        </>
+      ) : null}
     </BottomSheet>
   )
 }

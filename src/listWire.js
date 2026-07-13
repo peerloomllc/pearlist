@@ -21,6 +21,22 @@
 // check / edit / delete ANY item (the shared-list UX). See pearlist
 // DECISIONS.md 2026-06-30. `pubkey` records the LAST editor and the signature
 // proves it; concurrent edits resolve last-writer-wins.
+//
+// MEMBERSHIP REMOVAL (proposals/2026-07-13-space-member-eviction.md). Two additive
+// fields, deliberately NOT a new namespace: applyListOp drops keys outside
+// NAMESPACES, so a new key would make an old peer skip the op while a new peer
+// put()s it - divergent views, and Autobase indexers sign the view, so a released
+// space would fork. Both rows below are stored verbatim by view.put and neither
+// apply branch strips unknown fields, so old peers store byte-identical values
+// and merely do not INTERPRET them (they keep showing the member; cosmetic).
+//   space.evicted?: { [pubkey]: { at } }  - owner evicts. Rides the `space` row,
+//     which is ALREADY owner-gated in applyListOp, so this needs no new trust gate.
+//   member:{pubkey}.left?: true           - member leaves. Rides their own roster
+//     row, which the owner-scoped rule already lets only them write.
+// Both are REVOCABLE flags, never tombstones: `deleted` hits the no-resurrection
+// rule below, which would make a re-invited member permanently unrosterable.
+// Hiding is not revoking: an evicted device stays an admitted Autobase writer and
+// can still read the space. Real writer removal is a separate T3.
 
 const { verifyValue } = require('@peerloom/core/records')
 
@@ -184,4 +200,21 @@ async function maybeNotify (ctx, key, value, existing) {
   }
 }
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode }
+// Roster visibility. Pure, so the filter is unit-testable without an Autobase:
+// takes a member row and the `space` meta and says whether it belongs in the
+// roster. Every membership surface (MembersBar, the member count, the assignee
+// picker) reads member:getAll, so filtering here fixes all of them at once.
+//   evicted - the owner listed this pubkey in space.evicted
+//   left    - the member retired their own row
+//   deleted - a tombstoned row (member:getAll never filtered these; latent bug)
+function isEvicted (spaceMeta, pubkey) {
+  const ev = spaceMeta && spaceMeta.evicted
+  return !!(ev && typeof ev === 'object' && ev[pubkey])
+}
+function isMemberVisible (row, spaceMeta) {
+  if (!row || typeof row.pubkey !== 'string') return false
+  if (row.deleted === true || row.left === true) return false
+  return !isEvicted(spaceMeta, row.pubkey)
+}
+
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible }
