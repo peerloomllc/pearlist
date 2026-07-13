@@ -17,6 +17,9 @@
         "NSBonjourServices": [
           "_hyperswarm._udp",
           "_pearlistlan._tcp"
+        ],
+        "LSApplicationQueriesSchemes": [
+          "lightning"
         ]
       }
     },
