@@ -1660,7 +1660,9 @@ export default function App () {
               but stay under every overlay, so overlays live in the 100+ band. */}
           <div style={{ position: 'sticky', bottom: 0, zIndex: 60, background: c.surface.base }}>
             {isGroceryList && aiAvailable ? (
-              <button onClick={() => setSheet('recipe')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, width: '100%', padding: `${sp.sm}px 0`, background: 'none', border: 'none', color: c.accent, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}><Sparkle size={16} weight='fill' />Add from a recipe<Sparkle size={16} weight='fill' /></button>
+              // Sparkles lit (accent) when the model is loaded in memory, dim when
+              // idle (downloaded, not loaded yet) - a subtle "is it loaded?" cue.
+              <button onClick={() => setSheet('recipe')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, width: '100%', padding: `${sp.sm}px 0`, background: 'none', border: 'none', color: aiActive ? c.accent : c.text.muted, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}><Sparkle size={16} weight='fill' />Add from a recipe<Sparkle size={16} weight='fill' /></button>
             ) : null}
             {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
@@ -2076,6 +2078,8 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
   useEffect(() => { call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [])
   useEffect(() => on('ai:status', setAi), [])
   async function toggleAi (v) { if (v && !(await aiEnableConfirmed())) return; try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
+  const loadAi = () => call('shell:aiLoad', {}).then((r) => { if (r?.status) setAi(r.status) }).catch(() => {})
+  const unloadAi = () => call('shell:aiUnload', {}).then((r) => { if (r?.status) setAi(r.status) }).catch(() => {})
   const [learned, setLearned] = useState(0)
   useEffect(() => { setLearned(overrideCount()) }, [])
   async function clearLearned () {
@@ -2160,16 +2164,24 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
         {bgSyncSupported ? <Setting title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
         <Setting title='Local AI Sorting' about={ABOUT['Local AI Sorting']} aboutLink={{ label: 'QVAC documentation', url: 'https://docs.qvac.tether.io/' }}
           control={<Toggle on={!!ai?.consent} onChange={toggleAi} />}
-          extra={ai && (ai.state === 'downloading' || ai.state === 'loading' || ai.state === 'error') ? (
-            <>
-              <span style={{ color: ai.state === 'error' ? c.error : c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
-              {(ai.state === 'downloading' || ai.state === 'loading') ? (
+          extra={!ai || !ai.consent ? null
+            : (ai.state === 'downloading' || ai.state === 'loading') ? (
+              <>
+                <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
                 <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
                 </div>
-              ) : null}
-            </>
-          ) : null} />
+              </>
+            ) : ai.state === 'error' ? (
+              <span style={{ color: c.error, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
+            ) : (ai.state === 'idle' || ai.state === 'ready') ? (
+              // Memory-residency status + a control to load / free RAM without deleting the model.
+              <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, marginTop: 2 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: ai.state === 'ready' ? c.primary : c.text.muted }} />
+                <span style={{ flex: 1, fontSize: 12, color: c.text.muted }}>{ai.state === 'ready' ? 'Loaded in memory' : 'Not loaded (loads on use)'}</span>
+                <button onClick={ai.state === 'ready' ? unloadAi : loadAi} style={{ background: 'none', border: 'none', padding: 0, color: c.accent, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}>{ai.state === 'ready' ? 'Unload' : 'Load'}</button>
+              </div>
+            ) : null} />
         <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />

@@ -127,6 +127,18 @@ export async function loadModelNow (): Promise<AiStatus> {
   return status()
 }
 
+// Drop the model from MEMORY but keep it on disk (idle). Frees RAM now; a later
+// load re-reads from disk, no re-download. Distinct from removeAiModel (which
+// deletes the ~0.8GB). No-op if not loaded.
+export async function unloadFromMemory (): Promise<AiStatus> {
+  await init()
+  try { if (_modelId) await unloadModel({ modelId: _modelId, clearStorage: false }) } catch {}
+  _modelId = null; _readyPromise = null
+  if (_consent && _state === 'ready') _state = 'idle'
+  emit()
+  return status()
+}
+
 // Opt in / out. Turning ON kicks off the download in the BACKGROUND (progress via
 // the sink) and returns immediately. Turning OFF fully removes the model + frees
 // the ~0.8GB (re-enabling re-downloads) - "off" means gone, not just disabled.
