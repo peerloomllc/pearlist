@@ -36,7 +36,7 @@ const openUrl = (url) => { try { call('shell:openUrl', { url }) } catch {} }
 // drives its icon, color, and the Lists-page section it groups under. Array
 // order is the section display order; the generic 'list' is the default + last.
 const CATEGORIES = [
-  { key: 'grocery', label: 'Groceries', section: 'Groceries', Icon: ShoppingCart, color: c.success },
+  { key: 'grocery', label: 'Shopping', section: 'Shopping', Icon: ShoppingCart, color: c.success },
   { key: 'chore', label: 'Chores', section: 'Chores', Icon: Broom, color: c.warn },
   { key: 'todo', label: 'To-dos', section: 'To-dos', Icon: ListChecks, color: c.accent },
   { key: 'list', label: 'List', section: 'Lists', Icon: ListBullets, color: c.text.muted },
@@ -1025,7 +1025,7 @@ function NameSetup ({ profile, onDone }) {
 
 // A brief once-only tour shown the first time the user reaches the home screen.
 const TOUR_STEPS = [
-  { emoji: '📝', title: 'Lists live in a space', body: "Everything here is shared with the people in this space. Add lists like Groceries or Chores with the field at the bottom." },
+  { emoji: '📝', title: 'Lists live in a space', body: "Everything here is shared with the people in this space. Add lists like Shopping or Chores with the field at the bottom." },
   { emoji: '✅', title: 'Tap a list to fill it', body: 'Open a list to add items, check them off, set quantities, and assign an item to someone.' },
   { emoji: '👋', title: 'Invite your people', body: 'Tap the share icon to invite others. Everyone syncs peer-to-peer - no account, no server.' },
 ]
@@ -1843,7 +1843,7 @@ function ListRow ({ list, members, onOpen }) {
   )
 }
 
-// The Lists overview, grouped into category sections (Groceries, Chores, ...)
+// The Lists overview, grouped into category sections (Shopping, Chores, ...)
 // in CATEGORIES order. Section headers only show once more than one category is
 // in use, so a space that never categorizes still reads as one flat list.
 function GroupedLists ({ lists, members, onOpen }) {
@@ -1890,7 +1890,7 @@ function SuggestionBar ({ items, onPick }) {
 // add-item (list detail) bars.
 function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef }) {
   return (
-    <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base, borderTop: `1px solid ${c.border}` }}>
+    <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base }}>
       <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onSubmit() }} placeholder={placeholder} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
       <button onClick={onSubmit} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={22} weight='bold' /></button>
     </div>
@@ -2172,7 +2172,7 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
           ) : null} />
         <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
-          control={<button onClick={clearLearned} disabled={!learned} style={{ padding: '8px 14px', borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: learned ? c.error : c.text.muted, fontSize: 14, cursor: learned ? 'pointer' : 'default', flexShrink: 0, opacity: learned ? 1 : 0.6 }}>Clear</button>} />
+          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
       </div>
       <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
