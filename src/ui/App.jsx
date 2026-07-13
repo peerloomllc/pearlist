@@ -6,7 +6,7 @@ import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -1023,35 +1023,60 @@ function NameSetup ({ profile, onDone }) {
   )
 }
 
-// A brief once-only tour shown the first time the user reaches the home screen.
+// A brief once-only tour. On a first run it comes BEFORE the space exists (it is
+// what explains what a space even is), so its last step is the create/join
+// hand-off; onCreate/onJoin are passed only on that path. Returning users (a
+// TOUR_KEY bump) and Settings → Replay get the same steps minus that hand-off,
+// since they already have a space.
+// Bump TOUR_KEY when the steps change materially so returning users see the new
+// ones.
+const TOUR_KEY = 'pearlist:tourSeen:v2'
 const TOUR_STEPS = [
-  { emoji: '📝', title: 'Lists live in a space', body: "Everything here is shared with the people in this space. Add lists like Shopping or Chores with the field at the bottom." },
-  { emoji: '✅', title: 'Tap a list to fill it', body: 'Open a list to add items, check them off, set quantities, and assign an item to someone.' },
-  { emoji: '👋', title: 'Invite your people', body: 'Tap the share icon to invite others. Everyone syncs peer-to-peer - no account, no server.' },
+  { Icon: ListBullets, title: 'Lists live in a space', body: 'A space is a private place shared with your household. Every list in it, from Shopping to Chores to To-do, is shared with the people you invite.' },
+  { Icon: CheckCircle, title: 'Tap a list to fill it', body: 'Open a list to add items, check them off, set quantities and assign an item to someone. Add a new list with the field at the bottom.' },
+  { Icon: ShoppingCart, title: 'Shopping sorts itself', body: 'Items on a Shopping list land in supermarket aisles on their own. Drag one onto another aisle to re-file it and PearList remembers. Other lists can have sections you name yourself.' },
+  { Icon: Sparkle, title: 'Optional on-device AI', body: 'Turn on Local AI in Settings to sort the trickier items and to turn a meal or a recipe into a shopping list. It runs entirely on your phone, so nothing about your lists ever leaves the device.' },
+  { Icon: BellRinging, title: 'Know when things get done', body: 'PearList alerts you when someone assigns you an item, joins your space or checks items off a list you created. Every list has its own alert setting in its options menu.' },
+  { Icon: ShareNetwork, title: 'Invite your people', body: 'Tap the share icon to invite others. Everyone syncs peer-to-peer, with no account and no server.' },
 ]
-function GuidedTour ({ open, onDone }) {
+function GuidedTour ({ open, onDone, onCreate, onJoin }) {
   const [i, setI] = useState(0)
+  useEffect(() => { if (open) setI(0) }, [open])
   if (!open) return null
-  // Final slide sets background-sync expectations, tailored to the platform:
-  // iOS pauses background apps (so an all-iPhone space only syncs when open),
-  // while Android can keep syncing in the background.
+  // Background-sync expectations, tailored to the platform: iOS pauses background
+  // apps (so an all-iPhone space only syncs when open), while Android can keep
+  // syncing in the background.
   const isIOS = typeof window !== 'undefined' && window.__pearPlatform === 'ios'
   const bgStep = isIOS
-    ? { emoji: '📱', title: 'A note for iPhone', body: "iOS pauses apps in the background, so on iPhone PearList syncs and sends alerts mainly while it's open. If everyone in a space is on iPhone, updates only sync when someone has PearList open. Keep an Android device in the space for always-on background sync." }
-    : { emoji: '📶', title: 'Syncing in the background', body: "On Android, PearList can keep syncing even when it's closed (Settings → Keep syncing in background), so updates arrive right away - and it keeps iPhone members in your space synced too." }
-  const steps = [...TOUR_STEPS, bgStep]
+    ? { Icon: DeviceMobile, title: 'A note for iPhone', body: "iOS pauses apps in the background, so on iPhone PearList syncs and sends alerts mainly while it's open. If everyone in a space is on iPhone, updates only sync when someone has PearList open. Keep an Android device in the space for always-on background sync." }
+    : { Icon: ArrowsClockwise, title: 'Syncing in the background', body: "On Android, PearList can keep syncing even when it's closed (Settings → Background Sync), so updates arrive right away, and it keeps iPhone members in your space synced too." }
+  // First run only: the tour ends by handing off to create/join, so the space is
+  // made with the tour's context behind it rather than before any of it.
+  const handoff = onCreate && onJoin
+  const spaceStep = { Icon: UsersThree, title: 'Create or join a space', body: 'Start a space for your household, or join one with an invite someone sent you. You can be in more than one, so a family space and a roommate space can live side by side.' }
+  const steps = [...TOUR_STEPS, bgStep, ...(handoff ? [spaceStep] : [])]
   const step = steps[i]
   const last = i === steps.length - 1
+  const onSpaceStep = handoff && last
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 105, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
       <div style={{ background: c.surface.card, borderRadius: r.xl, padding: sp.xl, maxWidth: 360, width: '100%', textAlign: 'center' }}>
-        <div style={{ fontSize: 40 }}>{step.emoji}</div>
-        <h2 style={{ fontSize: 20, fontWeight: 400, margin: `${sp.sm}px 0`, color: c.text.primary }}>{step.title}</h2>
-        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.lg}px`, minHeight: 63 }}>{step.body}</p>
+        <div style={{ width: 64, height: 64, margin: '0 auto', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: c.surface.elevated, color: c.primary }}>
+          <step.Icon size={30} weight='regular' />
+        </div>
+        <h2 style={{ fontSize: 20, fontWeight: 400, margin: `${sp.base}px 0 ${sp.sm}px`, color: c.text.primary }}>{step.title}</h2>
+        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.lg}px`, minHeight: 105 }}>{step.body}</p>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginBottom: sp.base }}>
           {steps.map((_, k) => <span key={k} style={{ width: 7, height: 7, borderRadius: '50%', background: k === i ? c.primary : c.border }} />)}
         </div>
-        <Button onClick={() => last ? onDone() : setI(i + 1)}>{last ? 'Get started' : 'Next'}</Button>
+        {onSpaceStep ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
+            <Button variant='primary' onClick={onCreate}>Create a space</Button>
+            <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
+          </div>
+        ) : (
+          <Button onClick={() => last ? onDone() : setI(i + 1)}>{last ? 'Get started' : 'Next'}</Button>
+        )}
         {!last ? <button onClick={onDone} style={{ marginTop: sp.sm, background: 'none', border: 'none', color: c.text.muted, fontSize: 14, cursor: 'pointer' }}>Skip</button> : null}
       </div>
     </div>
@@ -1242,12 +1267,19 @@ export default function App () {
       : `"${d?.item || 'an item'}" was completed in "${d?.listName || 'a list'}"`
   )), [])
 
-  // Show the brief guided tour once, the first time the user reaches home.
+  // Show the brief guided tour once. On a first run that is during onboarding,
+  // once the name is set and before a space exists (the tour explains what a
+  // space is, then hands off to create/join). Existing installs have no
+  // onboarding phase left, so they pick it up on their next visit to home, which
+  // is what a TOUR_KEY bump relies on.
   useEffect(() => {
-    if (phase !== 'home') return
-    try { if (!localStorage.getItem('pearlist:tourSeen')) setShowTour(true) } catch {}
-  }, [phase])
-  function dismissTour () { try { localStorage.setItem('pearlist:tourSeen', '1') } catch {}; setShowTour(false) }
+    if (phase !== 'home' && !(phase === 'onboarding' && profile?.displayName)) return
+    try { if (!localStorage.getItem(TOUR_KEY)) setShowTour(true) } catch {}
+  }, [phase, profile?.displayName])
+  function dismissTour () { try { localStorage.setItem(TOUR_KEY, '1') } catch {}; setShowTour(false) }
+  // Replay from Settings: back to Lists so the tour lands over the screen it
+  // describes, not over the Settings panel.
+  function replayTour () { setOpenListId(null); setView(null); setShowTour(true) }
 
   // Notification tap -> open the related space (and list, if any). Requested by
   // the shell (notify:open); applied once we are home and that space has loaded
@@ -1612,9 +1644,16 @@ export default function App () {
     if (!profile?.displayName) {
       return <NameSetup profile={profile} onDone={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
     }
+    // The tour runs over this screen and ends on its create/join step, so those
+    // buttons close the tour (it has been seen) and open the same sheets the
+    // screen behind it would. Backing out of a sheet lands on that screen, which
+    // offers the same two choices, so there is no dead end.
     return (
       <>
         <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} />
+        <GuidedTour open={showTour} onDone={dismissTour}
+          onCreate={() => { dismissTour(); setSheet('start') }}
+          onJoin={() => { dismissTour(); setSheet('join') }} />
         <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
         <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       </>
@@ -1669,7 +1708,7 @@ export default function App () {
           </div>
         </>
       ) : view === 'profile' ? (
-        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2054,7 +2093,7 @@ function aiSubtitle (ai) {
   return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`
 }
 
-function ProfileView ({ profile, theme, onTheme, onSaved }) {
+function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2098,6 +2137,7 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
     'Local AI': "Powers the on-device AI features: sorting grocery items into aisles, and turning a meal or recipe into a shopping list (\"Add from a recipe\"). A fast built-in name matcher still places common items instantly; the AI handles the rest and runs entirely on your phone - nothing about your lists ever leaves the device. One-time ~0.8 GB download; turn it off to delete the model and reclaim the space (the name matcher keeps working). Powered by QVAC, Tether's local AI SDK.",
     'Loaded in memory': "Keeping the model in memory lets it sort and generate instantly, but uses some RAM. Turn this off to free the memory now - the model stays downloaded and reloads (a few seconds) the next time AI is used. It also loads on its own the first time you use AI each session.",
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
+    'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
   }
   const Setting = ({ title, about, aboutLink, control, extra, first }) => (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
@@ -2190,6 +2230,10 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
         <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
+      </Group>
+      <Group title='Help'>
+        <Setting first title='Replay the tour' about={ABOUT['Replay the tour']}
+          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
       </Group>
       <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
