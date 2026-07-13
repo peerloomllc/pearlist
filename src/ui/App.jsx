@@ -582,9 +582,12 @@ function ConfirmHost () {
   return (
     <BottomSheet open={!!state} onClose={() => done(false)} title={state?.title}>
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.base}px` }}>{state?.message}</p>
+      {/* Equal-width buttons: the confirm and Cancel carry the same weight, so one
+          does not read as the obvious choice by size alone. Applies to every
+          askConfirm (Remove, Stronger removal, Leave, Clear learned aisles...). */}
       <div style={{ display: 'flex', gap: sp.sm }}>
         <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
-        <button onClick={() => done(false)} style={{ padding: '0 18px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+        <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
       </div>
     </BottomSheet>
   )
