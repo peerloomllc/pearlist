@@ -1662,7 +1662,7 @@ export default function App () {
             {isGroceryList && aiAvailable ? (
               // Sparkles lit (accent) when the model is loaded in memory, dim when
               // idle (downloaded, not loaded yet) - a subtle "is it loaded?" cue.
-              <button onClick={() => setSheet('recipe')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, width: '100%', padding: `${sp.sm}px 0`, background: 'none', border: 'none', color: aiActive ? c.accent : c.text.muted, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}><Sparkle size={16} weight='fill' />Add from a recipe<Sparkle size={16} weight='fill' /></button>
+              <button onClick={() => setSheet('recipe')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, width: '100%', padding: `${sp.sm}px 0`, background: 'none', border: 'none', color: aiActive ? c.primary : c.text.muted, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}><Sparkle size={16} weight='fill' />Add from a recipe<Sparkle size={16} weight='fill' /></button>
             ) : null}
             {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
@@ -2195,7 +2195,7 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
         {info?.link ? (
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: sp.base }}>
-            <button onClick={() => openUrl(info.link.url)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.accent, fontSize: 14, fontWeight: 400 }}>
+            <button onClick={() => openUrl(info.link.url)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.primary, fontSize: 14, fontWeight: 400 }}>
               {info.link.label}<ArrowSquareOut size={16} weight='regular' />
             </button>
           </div>
@@ -2442,9 +2442,9 @@ function RecipeSheet ({ open, onClose, onGenerate, onAdd }) {
       </div>
       {busy && items === null ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, color: c.text.muted, fontSize: 13, margin: `${sp.lg}px 0` }}>
-          <Sparkle size={16} weight='fill' color={c.accent} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite' }} />
+          <Sparkle size={16} weight='fill' color={c.primary} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite' }} />
           <span>Thinking up ingredients</span>
-          <Sparkle size={16} weight='fill' color={c.accent} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite 0.6s' }} />
+          <Sparkle size={16} weight='fill' color={c.primary} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite 0.6s' }} />
         </div>
       ) : null}
       {items && items.length === 0 ? <p style={{ color: c.text.muted, fontSize: 14, textAlign: 'center', margin: `${sp.base}px 0` }}>Couldn't come up with a list. Try rephrasing (e.g. "chicken tacos").</p> : null}
