@@ -1545,9 +1545,18 @@ export default function App () {
       danger: true,
     })
     if (!ok) return
-    try { await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not remove: ' + e.message); return }
+    let res
+    try { res = await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not remove: ' + e.message); return }
     await loadMembers(gid, selfPubkey)
-    setBanner(`${name} removed.`)
+    // Be honest when we could only HIDE them. Cutting a device off needs its writer
+    // binding, which only exists if it has been online since Stronger removal was
+    // turned on. Without it the removal is hide-only, and saying otherwise would be
+    // a lie about a security property.
+    if (revoke?.armed && res && res.revoked === false) {
+      setBanner(`${name} removed from the list, but their device could not be cut off (it has not been online since Stronger removal was turned on).`)
+    } else {
+      setBanner(`${name} removed.`)
+    }
   }
   // Turn on hard revocation for this space. ONE WAY, and the copy says so: it
   // changes how every peer applies writer ops, and a peer that has not updated would

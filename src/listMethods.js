@@ -403,6 +403,14 @@ const methods = {
 
   // Can this space be armed yet, and if not, who is holding it up? Drives the UI so
   // the owner sees "3 of 4 members have updated" rather than a bare error.
+  //
+  // ALSO SELF-HEALS THE WRITER BINDING. apply only stamps `_w` (the authoring writer
+  // core) onto a member row while the space is ARMED, so every row written BEFORE
+  // arming has no binding - and a removal then silently degrades to hide-only, with
+  // nothing to revoke. (Found exactly that way on-device: armed a space whose member
+  // had joined earlier, removed them, and their writes still landed.) So once armed,
+  // each device re-publishes its OWN row until it carries a binding. Same shape as
+  // the existing "republish until it lands" retry in the UI.
   'space:revocationStatus': async ({ groupId }, ctx) => {
     const base = viewFor(ctx, groupId)
     const meta = await readRow(base, 'space')
@@ -411,13 +419,24 @@ const methods = {
     const evicted = Object.keys(meta?.evicted || {})
     const active = rows.filter((r) => r.pubkey && !evicted.includes(r.pubkey) && r.deleted !== true && r.left !== true)
     const missing = active.filter((r) => !(Array.isArray(r.caps) && r.caps.includes(REVOKE_CAP)))
+    const armed = meta?.revokeV1 === true
+
+    const me = pubkeyHex(ctx)
+    const mine = rows.find((r) => r.pubkey === me)
+    const bound = !!(mine && typeof mine._w === 'string')
+    if (armed && mine && !bound) publishMember(ctx, groupId).catch(() => {})
+
     return {
-      armed: meta?.revokeV1 === true,
-      isOwner: meta?.owner === pubkeyHex(ctx),
+      armed,
+      isOwner: meta?.owner === me,
       canArm: allMembersSupportRevoke(rows, evicted),
       total: active.length,
       ready: active.length - missing.length,
       waitingOn: missing.map((r) => r.displayName || 'Member'),
+      // Who can actually be hard-revoked yet. A member that has not been online since
+      // arming has no binding, so removing them only HIDES them - the UI should not
+      // promise more than that.
+      unbound: active.filter((r) => typeof r._w !== 'string').map((r) => r.displayName || 'Member'),
     }
   },
 
