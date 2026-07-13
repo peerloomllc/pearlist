@@ -104,6 +104,36 @@ function rowApplyDecision (key, incoming, existing) {
   return 'accept'
 }
 
+// The Autobase writer core that actually appended this block, hex. Autobase hands
+// apply `node.from` = the authoring writer's core (lib/apply-state.js). Unforgeable:
+// nobody can append to another writer's core. This is the ONLY trustworthy source
+// for the identity -> writer-core mapping that revocation needs.
+function writerKeyOf (node) {
+  try {
+    const k = node && node.from && node.from.key
+    if (!k) return null
+    return typeof k === 'string' ? k : Buffer.from(k).toString('hex')
+  } catch { return null }
+}
+
+// Is every member advertising revocation support? The capability gate. Revoking a
+// writer is CONSENSUS state: a peer that does not understand the op keeps the
+// revoked writer in its set, keeps accepting its blocks, and SILENTLY FORKS - see
+// peerloom-core test/writer-revocation.test.js ("an old-code BYSTANDER silently
+// forks the space"). Nothing throws, so nothing catches it for us.
+//
+// `except` is the eviction target: the device we are removing is precisely the one
+// that will never advertise support (it is dead or on an old build), so requiring
+// IT to advertise would mean the gate never opens and the feature is useless.
+const REVOKE_CAP = 'revoke1'
+function hasCap (row, cap) { return !!(row && Array.isArray(row.caps) && row.caps.includes(cap)) }
+function allMembersSupportRevoke (memberRows, except = []) {
+  const skip = new Set(except)
+  const rows = memberRows.filter((r) => r && r.pubkey && !skip.has(r.pubkey) && r.deleted !== true && r.left !== true)
+  if (!rows.length) return false
+  return rows.every((r) => hasCap(r, REVOKE_CAP))
+}
+
 // engine applyOps: one op at a time, in linearized order. A delete is a put of
 // a { deleted: true } tombstone (kept in the view so no-resurrection holds), so
 // only 'put' ops exist.
@@ -136,7 +166,28 @@ async function applyListOp (op, ctx) {
   if (!inNamespace(op.key)) return
   const existing = (await view.get(op.key))?.value
   if (rowApplyDecision(op.key, op.value, existing) === 'accept') {
-    await view.put(op.key, op.value)
+    let value = op.value
+    // WRITER BINDING (gated by space.revokeV1; see proposals/2026-07-13-writer-
+    // revocation.md). Revoking a writer needs its Autobase WRITER CORE key, but the
+    // roster is keyed by IDENTITY pubkey and nothing maps between them.
+    //
+    // The mapping must NOT be self-declared: a member could then claim a victim's
+    // writer key and have the owner's revocation remove the VICTIM instead. The only
+    // unforgeable source is which core actually appended this block - you cannot
+    // append to someone else's writer core - so we take it from node.from.key and
+    // ignore anything the row claims.
+    //
+    // Recording it CHANGES THE VIEW, so it is fork-inducing and stays dormant until
+    // the owner arms revokeV1 (which they may only do once every member advertises
+    // support). Re-derived on every write, so it survives a republish.
+    if (op.key.startsWith('member:')) {
+      const meta = (await view.get('space'))?.value
+      if (meta && meta.revokeV1 === true) {
+        const w = writerKeyOf(ctx.node)
+        if (w) value = { ...op.value, _w: w }
+      }
+    }
+    await view.put(op.key, value)
     try { await maybeNotify(ctx, op.key, op.value, existing) } catch {}
   }
 }
@@ -217,4 +268,4 @@ function isMemberVisible (row, spaceMeta) {
   return !isEvicted(spaceMeta, row.pubkey)
 }
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible }
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke }

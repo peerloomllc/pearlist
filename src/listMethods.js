@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods -
@@ -119,7 +119,12 @@ async function recordRecent (ctx, text) {
 // it can write to, so peers can resolve assignee pubkeys to a name + avatar.
 async function publishMember (ctx, onlyGroupId) {
   const prof = (await ctx.localDb.get('profile'))?.value
-  const value = { displayName: prof?.displayName || 'Member' }
+  // `caps` advertises what this build understands. It is the capability gate for
+  // writer revocation: the owner may only ARM revocation once every other member
+  // advertises REVOKE_CAP, because a peer that does not understand a revokeWriter op
+  // keeps accepting the revoked writer's blocks and SILENTLY forks the space.
+  // Additive field -> old peers store it verbatim and ignore it. No fork.
+  const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP] }
   if (prof?.avatarBlob) { value.avatarBlob = prof.avatarBlob; value.avatarHash = prof.avatarHash; value.avatarType = prof.avatarType || 'image/png' }
   else if (prof?.avatar) value.avatar = prof.avatar // legacy inline (pre-blob profiles)
   const key = memberKey(pubkeyHex(ctx))
@@ -161,7 +166,58 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
   if (evicted) next[pubkey] = { at: Date.now() }
   else delete next[pubkey]
   await putRow(ctx, groupId, 'space', { ...meta, evicted: next })
-  return { ok: true, evicted }
+
+  // HARD REVOCATION (proposals/2026-07-13-writer-revocation.md). Hiding a member
+  // does not stop their device WRITING. If the space is armed, also revoke their
+  // Autobase writer core, so an evicted device can no longer write at all.
+  //
+  // The writer key comes from `_w`, which apply derived from the block's AUTHORING
+  // core (listWire.writerKeyOf) - never from anything the member declared, or a
+  // member could name a victim's writer key and have us revoke the VICTIM.
+  //
+  // Best-effort: no `_w` (member never wrote a row while armed) = nothing to revoke,
+  // and they stay hidden-only. Restoring a member does NOT re-add their writer; they
+  // rejoin via a fresh invite, which admits them again.
+  let revoked = false
+  if (evicted && meta.revokeV1 === true) {
+    const row = await readRow(base, memberKey(pubkey))
+    const writerKey = row && typeof row._w === 'string' ? row._w : null
+    if (writerKey) {
+      await ctx.append(groupId, signValue({
+        type: 'revokeWriter', pubkey: writerKey, by: pubkeyHex(ctx), groupId,
+      }, ctx.identity.secretKey))
+      revoked = true
+    }
+  }
+  return { ok: true, evicted, revoked }
+}
+
+// Arm hard revocation for a space. Owner only, and ONE WAY - it changes how every
+// peer applies writer ops, so there is no un-arming without re-forking.
+//
+// The gate: every member EXCEPT any already-evicted one must advertise REVOKE_CAP.
+// A peer that does not understand a revokeWriter op keeps accepting a revoked
+// writer's blocks and SILENTLY forks the space (peerloom-core
+// test/writer-revocation.test.js). The already-evicted are excluded on purpose: the
+// stale device we want gone is exactly the one that will never advertise support, so
+// requiring it would mean the gate never opens.
+async function armRevocation (ctx, groupId) {
+  const base = viewFor(ctx, groupId)
+  const meta = await readRow(base, 'space')
+  if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can arm revocation')
+  if (meta.revokeV1 === true) return { ok: true, armed: true, already: true }
+  const rows = []
+  for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) rows.push(value)
+  const evicted = Object.keys(meta.evicted || {})
+  if (!allMembersSupportRevoke(rows, evicted)) {
+    const missing = rows
+      .filter((r) => r.pubkey && !evicted.includes(r.pubkey) && r.deleted !== true && r.left !== true)
+      .filter((r) => !(Array.isArray(r.caps) && r.caps.includes(REVOKE_CAP)))
+      .map((r) => r.displayName || 'Member')
+    throw new Error('every member must update first. Still on an old version: ' + (missing.join(', ') || 'unknown'))
+  }
+  await putRow(ctx, groupId, 'space', { ...meta, revokeV1: true })
+  return { ok: true, armed: true }
 }
 
 function viewFor (ctx, groupId) {
@@ -340,6 +396,30 @@ const methods = {
   // T3 (proposals/2026-07-13-space-member-eviction.md, open question 2).
   'member:remove': async ({ groupId, pubkey }, ctx) => setEvicted(ctx, groupId, pubkey, true),
   'member:restore': async ({ groupId, pubkey }, ctx) => setEvicted(ctx, groupId, pubkey, false),
+
+  // Arm hard revocation (owner only, one way). Until this is called, removal only
+  // HIDES a member; after it, removal also cuts the device off from writing.
+  'space:armRevocation': async ({ groupId }, ctx) => armRevocation(ctx, groupId),
+
+  // Can this space be armed yet, and if not, who is holding it up? Drives the UI so
+  // the owner sees "3 of 4 members have updated" rather than a bare error.
+  'space:revocationStatus': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const meta = await readRow(base, 'space')
+    const rows = []
+    for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) rows.push(value)
+    const evicted = Object.keys(meta?.evicted || {})
+    const active = rows.filter((r) => r.pubkey && !evicted.includes(r.pubkey) && r.deleted !== true && r.left !== true)
+    const missing = active.filter((r) => !(Array.isArray(r.caps) && r.caps.includes(REVOKE_CAP)))
+    return {
+      armed: meta?.revokeV1 === true,
+      isOwner: meta?.owner === pubkeyHex(ctx),
+      canArm: allMembersSupportRevoke(rows, evicted),
+      total: active.length,
+      ready: active.length - missing.length,
+      waitingOn: missing.map((r) => r.displayName || 'Member'),
+    }
+  },
 
   // The removed members, so the owner can put one back. Restore has to be reachable
   // from the UI: an evicted pubkey stays evicted even if that device re-joins with a
