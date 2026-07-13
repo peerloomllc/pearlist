@@ -1013,7 +1013,7 @@ function NameSetup ({ profile, onDone }) {
         <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, borderRadius: '50%' }}>
           <Avatar name={name} avatar={avatar} size={96} />
         </button>
-        <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', color: c.accent, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add a photo (optional)'}</button>
+        <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', color: c.primary, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add a photo (optional)'}</button>
         <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
       </div>
       <input value={name} maxLength={64} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') cont() }} placeholder='Your name'
