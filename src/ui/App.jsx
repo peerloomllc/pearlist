@@ -2438,7 +2438,7 @@ function RecipeSheet ({ open, onClose, onGenerate, onAdd }) {
       <div style={{ display: 'flex', gap: sp.sm, marginBottom: sp.md }}>
         <input value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') generate() }} placeholder="What are you making? (e.g. tacos)" autoFocus maxLength={80}
           style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, fontFamily: FONT, outline: 'none' }} />
-        <button onClick={generate} disabled={busy || !desc.trim()} style={{ padding: '0 16px', borderRadius: r.md, border: 'none', background: (busy || !desc.trim()) ? c.surface.input : c.primary, color: (busy || !desc.trim()) ? c.text.muted : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: (busy || !desc.trim()) ? 'default' : 'pointer', flexShrink: 0 }}>{busy && items === null ? '…' : 'Generate'}</button>
+        <button onClick={generate} disabled={busy || !desc.trim()} style={{ padding: '0 16px', borderRadius: r.md, border: 'none', background: (busy || !desc.trim()) ? c.surface.input : c.primary, color: (busy || !desc.trim()) ? c.text.muted : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: (busy || !desc.trim()) ? 'default' : 'pointer', flexShrink: 0 }}>{busy && items === null ? 'Generating' : 'Generate'}</button>
       </div>
       {busy && items === null ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, color: c.text.muted, fontSize: 13, margin: `${sp.lg}px 0` }}>
