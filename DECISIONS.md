@@ -2,6 +2,41 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-13 - Writer revocation: gated, one-way, and it stops WRITES only
+Tier: T3 (Autobase writer membership is consensus state). Proposal:
+2026-07-13-writer-revocation (APPROVED). Phase 2 of the eviction work.
+Context: PR #68 HIDES an evicted member. Their device stays an admitted writer and
+can still change the space.
+Choice: an owner-signed `revokeWriter` op -> base.removeWriter, behind a capability
+gate. Three parts, all forced by measurement, not taste:
+- SCOPE: it stops WRITES, never READS. Core has no peer blocklist (swarm connection
+  -> store.replicate unconditionally), so an evicted device keeps the topic + key and
+  replicates forever. Cutting off reads means re-keying = a NEW space, which already
+  works (everyone leaves, one recreates). The UI says "stronger removal", never
+  "block".
+- THE GATE IS MANDATORY, not an optimisation. A spike (now peerloom-core
+  test/writer-revocation.test.js) showed an old-code BYSTANDER that ignores a revoke
+  op keeps accepting the revoked writer's blocks and SILENTLY forks the space -
+  nothing throws. So revocation stays dormant until the owner ARMS it (space.revokeV1),
+  which they may only do once every member EXCEPT the target advertises `caps`. The
+  target is excluded on purpose: the stale device we want gone is exactly the one that
+  will never advertise, so requiring it would mean the gate never opens.
+- THE BINDING MUST COME FROM node.from.key. removeWriter needs the Autobase WRITER
+  CORE key; the roster is keyed by IDENTITY pubkey; nothing maps between them. A
+  self-declared mapping lets a member claim a VICTIM's writer key and have the owner
+  revoke the victim. The only unforgeable source is which core actually appended the
+  block. Recording it changes the view, so it is gated too.
+Alternatives: block reads (IMPOSSIBLE without re-keying, see scope); admit writers as
+indexers (kept for existing spaces; once armed, new writers are admitted as
+NON-indexers so revocation never touches the indexer set - liveness checked: with the
+owner offline members still collaborate, and the signed frontier stalls the same as
+today).
+Consequences: ONE WAY (no un-arming). A device that has NOT been online since arming
+has no binding and can only be HIDDEN, never cut off - so arm EARLY; the UI says so
+rather than pretending. Suite-wide: the engine hooks (authorizeRevoke, admitWriter)
+live in @peerloom/core and default to today's behaviour, so PearCal/PearGuard are
+unchanged until they opt in.
+
 ## 2026-07-13 - Member removal rides existing rows, NOT a new namespace
 Tier: T2 (additive fields on two existing rows; no new key type, no pairing or
 crypto change). Proposal: 2026-07-13-space-member-eviction (APPROVED).
