@@ -200,3 +200,75 @@ test('no notify:completed when I complete an item myself', async () => {
   const events = await apply({ type: 'put', key: itemKey('L7', 'I'), value: mine }, { initial })
   assert.ok(!events.some(([e]) => e === 'notify:completed'))
 })
+
+// --- membership removal (proposals/2026-07-13-space-member-eviction.md) -------
+// Owner evicts via space.evicted; a member leaves via `left` on their own row.
+// The security property lives in the EXISTING `space` apply rule (owner-only
+// updates), so a forged eviction from a non-owner must be dropped in apply on
+// every peer, not merely refused by the IPC method.
+
+const { isMemberVisible, memberKey } = require('../src/listWire')
+
+function memberRow (pub, kp, extra = {}) {
+  return signValue({ pubkey: pub, updatedAt: 1000, displayName: 'Someone', ...extra }, kp.secretKey)
+}
+// A stored `space` row owned by PUB.
+function spaceRow (extra = {}, kp = KP, pub = PUB, at = 1000) {
+  return signValue({ pubkey: pub, owner: PUB, name: 'Home', createdAt: 1, updatedAt: at, ...extra }, kp.secretKey)
+}
+
+test('roster hides evicted, left and tombstoned members', () => {
+  const meta = { owner: PUB, evicted: { [OTHERPUB]: { at: 5 } } }
+  assert.equal(isMemberVisible(memberRow(PUB, KP), meta), true)
+  assert.equal(isMemberVisible(memberRow(OTHERPUB, OTHER), meta), false, 'evicted by the owner')
+  assert.equal(isMemberVisible(memberRow(PUB, KP, { left: true }), meta), false, 'left the space')
+  assert.equal(isMemberVisible(memberRow(PUB, KP, { deleted: true }), meta), false, 'tombstoned')
+  assert.equal(isMemberVisible(memberRow(PUB, KP), null), true, 'no space meta yet')
+})
+
+test('eviction is revocable, so a re-invited member comes back', () => {
+  const evicted = { owner: PUB, evicted: { [OTHERPUB]: { at: 5 } } }
+  assert.equal(isMemberVisible(memberRow(OTHERPUB, OTHER), evicted), false)
+  // member:restore deletes the key rather than tombstoning it. A tombstone would
+  // trip the no-resurrection rule and strand them forever.
+  const restored = { owner: PUB, evicted: {} }
+  assert.equal(isMemberVisible(memberRow(OTHERPUB, OTHER), restored), true)
+})
+
+test('apply: the owner may evict a member', async () => {
+  const view = mockView({ space: spaceRow() })
+  const update = spaceRow({ evicted: { [OTHERPUB]: { at: 9 } } }, KP, PUB, 2000)
+  await apply({ type: 'put', key: 'space', value: update }, { view })
+  const stored = (await view.get('space')).value
+  assert.deepEqual(stored.evicted, { [OTHERPUB]: { at: 9 } })
+})
+
+test('apply: a NON-owner cannot evict anyone (forged eviction is dropped)', async () => {
+  const view = mockView({ space: spaceRow() })
+  // OTHER is a member (a writer!) but not the owner: they sign a space update
+  // that evicts the owner. Every peer must drop it identically.
+  const forged = signValue({ pubkey: OTHERPUB, owner: PUB, name: 'Home', createdAt: 1, updatedAt: 3000, evicted: { [PUB]: { at: 9 } } }, OTHER.secretKey)
+  await apply({ type: 'put', key: 'space', value: forged }, { view })
+  const stored = (await view.get('space')).value
+  assert.equal(stored.evicted, undefined, 'forged eviction must not apply')
+  assert.equal(isMemberVisible(memberRow(PUB, KP), stored), true, 'owner still in the roster')
+})
+
+test('apply: the space row is stored verbatim, so old peers do not diverge', async () => {
+  // The compat argument for the whole feature: `evicted` is an additive field on
+  // an existing row, and apply put()s the value as-is. An old peer (which does
+  // not know the field) therefore stores byte-identical bytes and merely fails to
+  // INTERPRET it. A new NAMESPACE would instead be dropped by old peers, giving a
+  // divergent view - and Autobase indexers sign the view.
+  const view = mockView({ space: spaceRow() })
+  const update = spaceRow({ evicted: { [OTHERPUB]: { at: 9 } }, someFutureField: 42 }, KP, PUB, 2000)
+  await apply({ type: 'put', key: 'space', value: update }, { view })
+  assert.deepEqual((await view.get('space')).value, update, 'stored verbatim, unknown fields intact')
+})
+
+test('a member may retire their OWN row with `left` (owner-scoped rule allows it)', () => {
+  const mine = memberRow(PUB, KP, { left: true })
+  assert.equal(rowApplyDecision(memberKey(PUB), mine, null), 'accept')
+  // ...but still cannot write anyone else's row, so nobody can force you out.
+  assert.equal(rowApplyDecision(memberKey(OTHERPUB), mine, null), 'reject')
+})

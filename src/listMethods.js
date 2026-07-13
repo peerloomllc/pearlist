@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods -
@@ -141,6 +141,27 @@ function signRow (ctx, value) {
 
 async function putRow (ctx, groupId, key, value) {
   await ctx.append(groupId, { type: 'put', key, value: signRow(ctx, value) })
+}
+
+// Owner-only edit of the `space` row's `evicted` map (read-modify-write, so it
+// preserves owner/name/createdAt). Refuses to evict the owner: that would hide
+// the one account that can un-hide anyone, and it is not how an owner exits (they
+// delete the space, or - later - hand ownership off).
+//
+// Two owner devices evicting concurrently both RMW this row and resolve LWW, so
+// one eviction can be lost. Rare (a single owner), and re-doing it just works.
+const HEX_64 = /^[0-9a-f]{64}$/i
+async function setEvicted (ctx, groupId, pubkey, evicted) {
+  if (typeof pubkey !== 'string' || !HEX_64.test(pubkey)) throw new Error('invalid pubkey')
+  const base = viewFor(ctx, groupId)
+  const meta = await readRow(base, 'space')
+  if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can remove a member')
+  if (pubkey === meta.owner) throw new Error('the owner cannot be removed')
+  const next = { ...(meta.evicted || {}) }
+  if (evicted) next[pubkey] = { at: Date.now() }
+  else delete next[pubkey]
+  await putRow(ctx, groupId, 'space', { ...meta, evicted: next })
+  return { ok: true, evicted }
 }
 
 function viewFor (ctx, groupId) {
@@ -293,14 +314,65 @@ const methods = {
   // retries until it lands). Returns whether the base was writable.
   'member:publish': async ({ groupId }, ctx) => ({ published: await publishMember(ctx, groupId) }),
 
+  // The roster, minus anyone the owner evicted (space.evicted), anyone who left
+  // (row.left) and any tombstoned row. See listWire.isMemberVisible.
   'member:getAll': async ({ groupId }, ctx) => {
     const base = viewFor(ctx, groupId)
-    await base.update()
+    const meta = await readRow(base, 'space')
     const out = []
     for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
-      if (value && value.pubkey) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: resolveAvatarCached(ctx, value) })
+      if (isMemberVisible(value, meta)) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: resolveAvatarCached(ctx, value) })
     }
     return out
+  },
+
+  // Remove a member from the space, or put one back. Owner only, and enforced
+  // TWICE: here for a clear error, and deterministically in apply, where the
+  // existing `space` rule accepts an update only from the established owner - so
+  // a forged eviction from a non-owner is dropped identically on every peer.
+  //
+  // `evicted` is a revocable map, never a tombstone (a tombstone would trip the
+  // no-resurrection rule and make a re-invited member permanently unrosterable),
+  // which is what makes member:restore possible at all.
+  //
+  // This HIDES a member; it does not revoke them. The device stays an admitted
+  // Autobase writer and can still read the space. Real revocation is a separate
+  // T3 (proposals/2026-07-13-space-member-eviction.md, open question 2).
+  'member:remove': async ({ groupId, pubkey }, ctx) => setEvicted(ctx, groupId, pubkey, true),
+  'member:restore': async ({ groupId, pubkey }, ctx) => setEvicted(ctx, groupId, pubkey, false),
+
+  // The removed members, so the owner can put one back. Restore has to be reachable
+  // from the UI: an evicted pubkey stays evicted even if that device re-joins with a
+  // fresh invite (only the owner can write the `space` row, so the joiner cannot
+  // clear its own eviction). Without this the removal would be one-way in practice,
+  // whatever the data model allows.
+  'member:getRemoved': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const meta = await readRow(base, 'space')
+    const ev = (meta && meta.evicted) || {}
+    if (!Object.keys(ev).length) return []
+    const out = []
+    for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
+      if (value && value.pubkey && ev[value.pubkey]) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: resolveAvatarCached(ctx, value), at: ev[value.pubkey].at || 0 })
+    }
+    return out
+  },
+
+  // Leave a space. Self only: retires our OWN roster row with an additive `left`
+  // flag, which the owner-scoped member rule already permits (and which nobody
+  // else could write for us), then drops the space locally. Revocable: rejoining
+  // republishes the row without `left`.
+  //
+  // Best-effort ordering: the flag has to replicate to a peer BEFORE we tear the
+  // group down, else we vanish locally while staying in everyone else's roster.
+  // Same grace the owner's space:delete uses for its tombstone.
+  'space:leave': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const mine = await readRow(base, memberKey(pubkeyHex(ctx)))
+    await putRow(ctx, groupId, memberKey(pubkeyHex(ctx)), { ...(mine || {}), left: true })
+    await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
+    setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
+    return { ok: true }
   },
 
   // --- donation reminder (device-local) ----------------------------------
