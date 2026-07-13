@@ -177,9 +177,9 @@ function BottomSheet ({ open, onClose, title, children }) {
   )
 }
 
-function Toggle ({ on: isOn, onChange }) {
+function Toggle ({ on: isOn, onChange, disabled }) {
   return (
-    <button onClick={() => onChange(!isOn)} aria-label='toggle' style={{ width: 44, height: 26, flexShrink: 0, borderRadius: r.full, border: 'none', cursor: 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0 }}>
+    <button onClick={() => { if (!disabled) onChange(!isOn) }} disabled={disabled} aria-label='toggle' style={{ width: 44, height: 26, flexShrink: 0, borderRadius: r.full, border: 'none', cursor: disabled ? 'default' : 'pointer', background: isOn ? c.primary : c.track, position: 'relative', transition: 'background 160ms', padding: 0, opacity: disabled ? 0.4 : 1 }}>
       <span style={{ position: 'absolute', top: 3, left: isOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.35)', transition: 'left 160ms' }} />
     </button>
   )
@@ -2095,7 +2095,8 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
   const ABOUT = {
     Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
     'Background Sync': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
-    'Local AI Sorting': "Grocery lists group items by supermarket aisle. A fast built-in name matcher places common items instantly; anything it can't recognize is sorted by a small AI model that runs entirely on your phone - nothing about your lists ever leaves the device. It is a one-time ~0.8 GB download; turn it off to delete the model and reclaim the space (the name matcher keeps working). Powered by QVAC, Tether's local AI SDK.",
+    'Local AI': "Powers the on-device AI features: sorting grocery items into aisles, and turning a meal or recipe into a shopping list (\"Add from a recipe\"). A fast built-in name matcher still places common items instantly; the AI handles the rest and runs entirely on your phone - nothing about your lists ever leaves the device. One-time ~0.8 GB download; turn it off to delete the model and reclaim the space (the name matcher keeps working). Powered by QVAC, Tether's local AI SDK.",
+    'Loaded in memory': "Keeping the model in memory lets it sort and generate instantly, but uses some RAM. Turn this off to free the memory now - the model stays downloaded and reloads (a few seconds) the next time AI is used. It also loads on its own the first time you use AI each session.",
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
   }
   const Setting = ({ title, about, aboutLink, control, extra, first }) => (
@@ -2108,6 +2109,12 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
         {extra}
       </span>
       {control}
+    </div>
+  )
+  const Group = ({ title, children }) => (
+    <div style={{ marginBottom: sp.lg }}>
+      <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `0 ${sp.xs}px ${sp.xs}px` }}>{title}</div>
+      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>{children}</div>
     </div>
   )
 
@@ -2158,34 +2165,32 @@ function ProfileView ({ profile, theme, onTheme, onSaved }) {
         <button onClick={saveName} disabled={busy || !nameDirty} style={{ padding: '0 18px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, cursor: 'pointer', opacity: busy || !nameDirty ? 0.5 : 1 }}>Save</button>
       </div>
 
-      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>
+      <Group title='Appearance'>
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
-        <Setting title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+      </Group>
+      <Group title='Notifications'>
+        <Setting first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
         {bgSyncSupported ? <Setting title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
-        <Setting title='Local AI Sorting' about={ABOUT['Local AI Sorting']} aboutLink={{ label: 'QVAC documentation', url: 'https://docs.qvac.tether.io/' }}
+      </Group>
+      <Group title='On-device intelligence'>
+        <Setting first title='Local AI' about={ABOUT['Local AI']} aboutLink={{ label: 'QVAC documentation', url: 'https://docs.qvac.tether.io/' }}
           control={<Toggle on={!!ai?.consent} onChange={toggleAi} />}
-          extra={!ai || !ai.consent ? null
-            : (ai.state === 'downloading' || ai.state === 'loading') ? (
-              <>
-                <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
-                <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
-                </div>
-              </>
-            ) : ai.state === 'error' ? (
-              <span style={{ color: c.error, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
-            ) : (ai.state === 'idle' || ai.state === 'ready') ? (
-              // Memory-residency status + a control to load / free RAM without deleting the model.
-              <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, marginTop: 2 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: ai.state === 'ready' ? c.primary : c.text.muted }} />
-                <span style={{ flex: 1, fontSize: 12, color: c.text.muted }}>{ai.state === 'ready' ? 'Loaded in memory' : 'Not loaded (loads on use)'}</span>
-                <button onClick={ai.state === 'ready' ? unloadAi : loadAi} style={{ background: 'none', border: 'none', padding: 0, color: c.accent, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}>{ai.state === 'ready' ? 'Unload' : 'Load'}</button>
+          extra={ai && ai.consent && (ai.state === 'downloading' || ai.state === 'loading') ? (
+            <>
+              <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
+              <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
               </div>
-            ) : null} />
+            </>
+          ) : ai && ai.consent && ai.state === 'error' ? (
+            <span style={{ color: c.error, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
+          ) : null} />
+        <Setting title='Loaded in memory' about={ABOUT['Loaded in memory']}
+          control={<Toggle on={ai?.state === 'ready'} disabled={!ai?.consent || ai?.state === 'downloading' || ai?.state === 'loading'} onChange={(v) => v ? loadAi() : unloadAi()} />} />
         <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
-      </div>
+      </Group>
       <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
         {info?.link ? (
