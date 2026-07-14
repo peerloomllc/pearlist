@@ -27,7 +27,8 @@ const LIGHTNING_WALLETS = [
   { name: 'Phoenix', url: 'https://phoenix.acinq.co', desc: 'Self-custodial Lightning wallet' },
 ]
 // The shell injects window.__pearPlatform ('ios'|'android') before the bundle.
-// iOS hides the donation section per App Store guideline 3.1.1.
+// (The donation UI used to be hidden on iOS pending the App Store release; it now
+// ships on both platforms, so the only caller left is the tour's platform slide.)
 const isIOS = () => typeof window !== 'undefined' && window.__pearPlatform === 'ios'
 
 const openUrl = (url) => { try { call('shell:openUrl', { url }) } catch {} }
@@ -1049,8 +1050,7 @@ function GuidedTour ({ open, onDone, onCreate, onJoin }) {
   // Background-sync expectations, tailored to the platform: iOS pauses background
   // apps (so an all-iPhone space only syncs when open), while Android can keep
   // syncing in the background.
-  const isIOS = typeof window !== 'undefined' && window.__pearPlatform === 'ios'
-  const bgStep = isIOS
+  const bgStep = isIOS()
     ? { Icon: DeviceMobile, title: 'A note for iPhone', body: "iOS pauses apps in the background, so on iPhone PearList syncs and sends alerts mainly while it's open. If everyone in a space is on iPhone, updates only sync when someone has PearList open. Keep an Android device in the space for always-on background sync." }
     : { Icon: ArrowsClockwise, title: 'Syncing in the background', body: "On Android, PearList can keep syncing even when it's closed (Settings → Background Sync), so updates arrive right away, and it keeps iPhone members in your space synced too." }
   // First run only: the tour ends by handing off to create/join, so the space is
@@ -1307,10 +1307,11 @@ export default function App () {
     setNavRequest(null)
   }, [navRequest, phase, spaces])
 
-  // Two-week donation nudge: check once on reaching home, skip on iOS, show only
-  // once ever (mark shown as soon as it surfaces).
+  // Two-week donation nudge: check once on reaching home, show only once ever
+  // (mark shown as soon as it surfaces). Runs on iOS too now that the App Store
+  // release has shipped and the donation UI is no longer platform-gated.
   useEffect(() => {
-    if (phase !== 'home' || isIOS()) return
+    if (phase !== 'home') return
     let done = false
     call('donation:status', {}).then((s) => {
       if (!done && s?.due) { setDonateReminder(true); call('donation:dismiss', {}).catch(() => {}) }
@@ -2378,9 +2379,10 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
 function AboutView ({ onWallet }) {
   const [section, setSection] = useState(null)
   const toggle = (id) => setSection((s) => s === id ? null : id)
-  const ios = isIOS()
   // BTC is a chooser, not an auto-fire: always open the sheet, passing whether a
-  // Lightning wallet is installed so it can offer the one-tap hand-off.
+  // Lightning wallet is installed so it can offer the one-tap hand-off. On iOS the
+  // probe only works because `lightning` is declared in LSApplicationQueriesSchemes
+  // (app.json); without that, canOpenURL silently returns false for every scheme.
   async function donateBTC () {
     let can = false
     try { const r = await call('shell:canOpenURL', { url: 'lightning:test' }); can = !!r?.can } catch {}
@@ -2400,15 +2402,13 @@ function AboutView ({ onWallet }) {
         <div style={{ display: 'flex' }}><Pill onClick={() => openUrl('https://pears.com/')}>Learn about P2P ↗</Pill></div>
       </Collapsible>
 
-      {!ios && (
-        <Collapsible title='Support development' open={section === 'support'} onToggle={() => toggle('support')}>
-          <P>PearList is free and open source. If you receive value from it, please consider returning value.</P>
-          <div style={{ display: 'flex', gap: sp.sm }}>
-            <Pill primary onClick={donateBTC}>⚡ BTC ⚡</Pill>
-            <Pill onClick={() => openUrl(BUYMEACOFFEE_URL)}>$ USD $</Pill>
-          </div>
-        </Collapsible>
-      )}
+      <Collapsible title='Support development' open={section === 'support'} onToggle={() => toggle('support')}>
+        <P>PearList is free and open source. If you receive value from it, please consider returning value.</P>
+        <div style={{ display: 'flex', gap: sp.sm }}>
+          <Pill primary onClick={donateBTC}>⚡ BTC ⚡</Pill>
+          <Pill onClick={() => openUrl(BUYMEACOFFEE_URL)}>$ USD $</Pill>
+        </div>
+      </Collapsible>
 
       <Collapsible title='Learn about Bitcoin' open={section === 'btc'} onToggle={() => toggle('btc')}>
         <P>New to Bitcoin? The Satoshi Nakamoto Institute has a free, concise crash course explaining how Bitcoin works and why it matters.</P>
