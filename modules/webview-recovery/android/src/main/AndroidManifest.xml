@@ -1,0 +1,3 @@
+<!-- No permissions and no components: this module only calls
+     WebViewRenderProcess.terminate() on the host activity's own WebViews. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
