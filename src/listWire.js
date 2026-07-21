@@ -6,8 +6,15 @@
 //   list:{listId}            -> signed { id, name, kind?, assignee?, createdBy,
 //                                        createdAt, updatedAt, pubkey, deleted }
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
-//                                        assignee?, category?, catBy?, createdBy,
-//                                        createdAt, updatedAt, pubkey, deleted }
+//                                        assignee?, category?, catBy?, ord?,
+//                                        createdBy, createdAt, updatedAt,
+//                                        pubkey, deleted }
+//
+// `ord` is an optional fractional index used only by note lists (kind 'note'),
+// where a line's position must be the SAME on every device - unlike itemOrder,
+// which is a device-local preference. Additive like `category`: it rides through
+// applyOps as a plain signed field, old peers ignore it and keep sorting by
+// createdAt, and no merge rule is needed. See noteText.js.
 //
 // `category` is an optional grocery-aisle label (see aisles.js) written by the
 // ai:categorize methods. Additive: it rides through applyOps like any other
@@ -56,7 +63,15 @@ const inNamespace = (key) => typeof key === 'string' && NAMESPACES.some((n) => k
 // the hook completion notifications key off later (chore lists). Optional and
 // additive: old peers accept and ignore it, and a list without it defaults to
 // the generic 'list'. Chosen from a UI selector, NEVER inferred from the name.
-const LIST_KINDS = ['grocery', 'chore', 'todo', 'list']
+//
+// 'note' is a free-text note rather than a checklist (proposals/2026-07-20-note-
+// lists.md). Its body is stored as one ordinary item: row per LINE, carrying the
+// optional `ord` fractional index below; see noteText.js for why lines and not
+// one blob. Compat: normalizeKind runs ONLY on the local write path (list:create,
+// list:setKind), never on apply, and applyListOp stores rows verbatim, so an old
+// peer accepts a kind:'note' row byte-identically and merely renders it as a
+// generic list. No divergence, no fork.
+const LIST_KINDS = ['grocery', 'chore', 'todo', 'note', 'list']
 function normalizeKind (k) { return LIST_KINDS.includes(k) ? k : 'list' }
 
 // Completion-notification mode for a list (the return leg of the assign loop:

@@ -12,6 +12,7 @@ const sodium = require('sodium-universal')
 
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
+const { planNoteSave } = require('./noteText')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods -
 // the always-available baseline. `classifyItem` is the single seam a smarter
@@ -228,6 +229,13 @@ function viewFor (ctx, groupId) {
 
 // Linearize before reading so a mutate sees the latest committed state (e.g.
 // an item:add that just replicated or was appended a moment ago).
+// Is this list a free-text note? Used to keep note-only behaviour out of the
+// checklist paths (today: the autosuggest corpus). Failure is non-fatal and
+// answers "no", so a read hiccup can never block an add.
+async function isNoteList (ctx, groupId, listId) {
+  try { return (await readRow(viewFor(ctx, groupId), listKey(listId)))?.kind === 'note' } catch { return false }
+}
+
 async function readRow (base, key) {
   await base.update()
   const node = await base.view.get(key)
@@ -557,14 +565,61 @@ const methods = {
   },
 
   // --- items --------------------------------------------------------------
-  'item:add': async ({ groupId, listId, text, qty }, ctx) => {
+  'item:add': async ({ groupId, listId, text, qty, ord }, ctx) => {
     const itemId = newEntityId()
     await putRow(ctx, groupId, itemKey(listId, itemId), {
       id: itemId, listId, text: String(text ?? ''), qty: Number.isFinite(qty) ? qty : 1,
       checked: false, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+      ...(typeof ord === 'string' && ord ? { ord } : {}),
     })
-    await recordRecent(ctx, text).catch(() => {}) // learn this item for suggestions
+    // Learn this item for the add-item autosuggest - but NOT on a note list. A
+    // note's rows are lines of prose, and feeding them to the recents corpus
+    // would have sentences turning up as suggestions on the shopping list.
+    if (!(await isNoteList(ctx, groupId, listId))) await recordRecent(ctx, text).catch(() => {})
     return { itemId }
+  },
+
+  // Save a note (kind 'note') as a three-way merge, NOT an overwrite. The editor
+  // sends the rows as it LOADED them (`baseline`) plus what the user has now
+  // typed (`lines`); we re-read the note's rows here and derive the operations
+  // from baseline -> lines, applying them to what is actually stored.
+  //
+  // The consequence that matters: a line a peer added while the user was typing
+  // is not in the baseline, so nothing in the plan refers to it and this save
+  // cannot tombstone it. See planNoteSave in noteText.js.
+  'note:save': async ({ groupId, listId, baseline, lines }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    await base.update()
+    const list = await readRow(base, listKey(listId))
+    if (!list || list.deleted) throw new Error('list not found')
+
+    const rows = []
+    for await (const { value } of base.view.createReadStream(itemRange(listId))) {
+      if (value && !value.deleted) rows.push(value)
+    }
+    const byId = new Map(rows.map((r) => [String(r.id), r]))
+    const plan = planNoteSave(baseline, lines, rows)
+
+    // Read-modify-write each row so a concurrent edit to another FIELD is not
+    // clobbered, the same shape as item:edit.
+    for (const u of plan.updates) {
+      const existing = byId.get(String(u.id))
+      if (!existing) continue
+      await putRow(ctx, groupId, itemKey(listId, u.id), { ...existing, text: u.text })
+    }
+    for (const id of plan.deletes) {
+      const existing = byId.get(String(id))
+      if (!existing) continue
+      await putRow(ctx, groupId, itemKey(listId, id), { ...existing, deleted: true })
+    }
+    for (const ins of plan.inserts) {
+      const itemId = newEntityId()
+      await putRow(ctx, groupId, itemKey(listId, itemId), {
+        id: itemId, listId, text: ins.text, qty: 1, checked: false, ord: ins.ord,
+        createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+      })
+    }
+    return { updated: plan.updates.length, deleted: plan.deletes.length, inserted: plan.inserts.length }
   },
 
   // Suggest previously-added item texts for the add-item composer. Device-local

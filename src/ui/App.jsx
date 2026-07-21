@@ -6,7 +6,8 @@ import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
 import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
+import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
 
 // From app.json once the shell exists; hardcoded for now.
 const APP_VERSION = '0.0.1'
@@ -36,10 +37,17 @@ const openUrl = (url) => { try { call('shell:openUrl', { url }) } catch {} }
 // List categories. The `kind` field on a list row (see listWire.js LIST_KINDS)
 // drives its icon, color, and the Lists-page section it groups under. Array
 // order is the section display order; the generic 'list' is the default + last.
+//
+// 'note' is the odd one out: it is not a checklist at all, it opens a NoteEditor
+// instead of an item list (see noteText.js). Its colour is its own `c.note`
+// token rather than a reused one - the 2026-07-13 c.accent audit found the
+// palette's four list colours are all doing distinguishing work in a now
+// five-way selector, so a fifth kind needs a fifth colour.
 const CATEGORIES = [
   { key: 'grocery', label: 'Shopping', section: 'Shopping', Icon: ShoppingCart, color: c.success },
   { key: 'chore', label: 'Chores', section: 'Chores', Icon: Broom, color: c.warn },
   { key: 'todo', label: 'To-dos', section: 'To-dos', Icon: ListChecks, color: c.accent },
+  { key: 'note', label: 'Note', section: 'Notes', Icon: Note, color: c.note },
   { key: 'list', label: 'List', section: 'Lists', Icon: ListBullets, color: c.text.muted },
 ]
 const categoryOf = (kind) => CATEGORIES.find((x) => x.key === kind) || CATEGORIES[CATEGORIES.length - 1]
@@ -1173,6 +1181,22 @@ export default function App () {
     setItems(await call('item:getAll', { groupId, listId }))
   }, [])
 
+  // Commit a note edit and hand the freshly stored rows back to the editor, so
+  // it can adopt them as its new baseline.
+  //
+  // This deliberately CLOSES OVER the open list rather than reading it at call
+  // time. Backing out of a note sets openListId to null and unmounts the editor
+  // in the same render, and the editor's unmount flush is what commits the last
+  // keystrokes - so it has to target the list that was open a moment ago, not
+  // the null that replaced it.
+  const saveNote = useCallback(async (baseline, lines) => {
+    if (!gid || !openListId) return []
+    await call('note:save', { groupId: gid, listId: openListId, baseline, lines })
+    const fresh = await call('item:getAll', { groupId: gid, listId: openListId })
+    setItems(fresh)
+    return fresh
+  }, [gid, openListId])
+
   // Refresh the household roster, and publish our own member row once we are a
   // writable member and not yet listed (so peers can resolve our assignee pubkey).
   const loadMembers = useCallback(async (groupId, self) => {
@@ -1381,6 +1405,7 @@ export default function App () {
   useEffect(() => { setPendingUndo(null) }, [openListId])
 
   const openList = lists.find(l => l.id === openListId) || null
+  const isNoteList = openList?.kind === 'note'
 
   // Grocery aisle categorization, step 1 (keyword pass): when a grocery list is
   // open with items lacking a category, ask the worklet to classify them with the
@@ -1430,7 +1455,10 @@ export default function App () {
   const groupBuiltins = isGroceryList ? aisles.AISLES : []
   const fallbackLabel = isGroceryList ? aisles.FALLBACK : 'Ungrouped'
   const groupNoun = isGroceryList ? 'aisle' : 'section'
-  const grouped = isGroceryList || items.some((i) => i.category) // sections in use
+  // Sections in use. Never for a note: its rows are lines of text, and a list
+  // converted to a note can still carry stale aisle categories that would
+  // otherwise light up the (unreachable) collapse-all option.
+  const grouped = !isNoteList && (isGroceryList || items.some((i) => i.category))
 
   // Drag: reorder items/groups (device-local) or drop an item into another group
   // to re-file it (recategorize, which syncs via ai:setCategory).
@@ -1747,6 +1775,12 @@ export default function App () {
         // ===== List detail: the items of the open list + add-item bar =====
         <>
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
+          {isNoteList ? (
+            // A note is free text, not a checklist: the whole body is one editor,
+            // so there is no item list, no add-item composer and no aisle UI.
+            <NoteEditor rows={items} onSave={saveNote} />
+          ) : (
+          <>
           {/* Outside the scroll area so the consent prompt / download+loading
               progress stays pinned below the header and is visible no matter how
               far the list is scrolled (it used to scroll away with the items). */}
@@ -1786,6 +1820,8 @@ export default function App () {
             {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
           </div>
+          </>
+          )}
         </>
       ) : view === 'profile' ? (
         <ProfileView profile={profile} theme={theme} onTheme={applyTheme} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
@@ -1996,6 +2032,112 @@ function SectionHeader ({ cat, count }) {
       <Icon size={15} color={cat.color} weight='regular' />
       <span style={{ flex: 1, color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6 }}>{cat.section}</span>
       <span style={{ color: c.text.muted, fontSize: 12 }}>{count}</span>
+    </div>
+  )
+}
+
+// A note list's body: one plain textarea over the note's line rows.
+//
+// The rows are the source of truth and the textarea is a VIEW of them, so the
+// two have to be reconciled carefully:
+//
+//   - While the user has unsaved typing (`dirty`) or a save is in flight, an
+//     incoming `rows` prop must NOT re-hydrate the textarea. Otherwise a peer's
+//     sync, or the ordinary refresh poll, yanks the cursor mid-sentence.
+//   - A save sends the rows as we LOADED them (`baseline`) plus the current
+//     lines, and note:save derives the edit from that pair. So a line a peer
+//     added while we typed is untouched: it is not in our baseline, so nothing
+//     in the plan refers to it. See planNoteSave in noteText.js.
+//   - After a save we adopt the freshly stored rows as the new baseline, and
+//     only re-render the textarea from them if the user has stopped typing -
+//     which is also how a peer's edit finally becomes visible.
+//
+// Saves are debounced on idle and flushed on blur and on unmount, so leaving the
+// note by any route (back, tab, space switch) commits it.
+const NOTE_SAVE_DEBOUNCE_MS = 800
+function NoteEditor ({ rows, onSave }) {
+  const [text, setText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const textRef = useRef('')
+  const baseRef = useRef([])
+  const dirtyRef = useRef(false)
+  const savingRef = useRef(false)
+  const timerRef = useRef(null)
+  const aliveRef = useRef(true)
+  useEffect(() => () => { aliveRef.current = false }, [])
+
+  const adopt = useCallback((fresh, retext) => {
+    baseRef.current = sortNoteRows(fresh || []).map((r) => ({ id: r.id, text: String(r.text || '') }))
+    if (!retext) return
+    const next = joinLines(baseRef.current.map((b) => b.text))
+    textRef.current = next
+    setText(next)
+  }, [])
+
+  // Hydrate from the store, but only when there is nothing local to lose.
+  useEffect(() => {
+    if (dirtyRef.current || savingRef.current) return
+    adopt(rows, true)
+  }, [rows, adopt])
+
+  const flush = useCallback(async () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+    if (!dirtyRef.current) return
+    // A save is already in flight. Do NOT just drop this one: the keystrokes that
+    // triggered it would then sit unsaved until the next keystroke or a blur. Come
+    // back for them instead.
+    if (savingRef.current) { timerRef.current = setTimeout(() => flushRef.current(), NOTE_SAVE_DEBOUNCE_MS); return }
+    const sent = textRef.current
+    savingRef.current = true
+    if (aliveRef.current) setSaving(true)
+    try {
+      const fresh = await onSave(baseRef.current, splitLines(sent))
+      // Clear the dirty flag only if nothing was typed while we were saving;
+      // otherwise the next debounce picks the remainder up.
+      const stillCurrent = textRef.current === sent
+      if (stillCurrent) dirtyRef.current = false
+      if (aliveRef.current) adopt(fresh, stillCurrent)
+      else baseRef.current = []
+    } catch {
+      // Keep the text and stay dirty, so the next flush retries.
+    } finally {
+      savingRef.current = false
+      if (aliveRef.current) setSaving(false)
+    }
+  }, [onSave, adopt])
+
+  // Always flush the LATEST closure on unmount, without re-running the effect
+  // (and firing a save) every time flush is rebuilt.
+  const flushRef = useRef(flush)
+  useEffect(() => { flushRef.current = flush })
+  useEffect(() => () => { flushRef.current() }, [])
+
+  const onChange = (v) => {
+    textRef.current = v
+    dirtyRef.current = true
+    setText(v)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => flushRef.current(), NOTE_SAVE_DEBOUNCE_MS)
+  }
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <textarea
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => flushRef.current()}
+        placeholder='Write anything here. It syncs to everyone in the space.'
+        spellCheck
+        style={{
+          flex: 1, minHeight: 0, width: '100%', resize: 'none', border: 'none', outline: 'none',
+          background: c.surface.base, color: c.text.primary, fontFamily: FONT, fontSize: 16,
+          fontWeight: 300, lineHeight: 1.6,
+          padding: `${sp.base}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.xxl}px)`,
+        }}
+      />
+      {saving ? (
+        <span style={{ position: 'absolute', right: sp.base, bottom: `calc(var(--pear-safe-bottom) + ${sp.sm}px)`, color: c.text.muted, fontSize: 12, fontWeight: 300, pointerEvents: 'none' }}>Saving…</span>
+      ) : null}
     </div>
   )
 }

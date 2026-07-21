@@ -2,6 +2,42 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-20 - A note is one row PER LINE, not one body field
+Tier: T2. Proposal: 2026-07-20-note-lists (APPROVED, PR #72).
+Context: a user asked for "somewhere to put notes that aren't a check list". Items
+already carry a per-item `note` field, so the gap is text not attached to an item -
+today you invent a fake checklist item to hang it on.
+Choice: a fifth list `kind`, 'note', whose body is one ordinary `item:` row per LINE,
+each carrying a new optional `ord` fractional index. Three parts:
+- LINES, NOT A BLOB. The cheap build is a `body` string on the list row. Rejected:
+  every row is last-writer-wins (rowApplyDecision), so one blob makes the unit of
+  conflict the ENTIRE document and the later of two concurrent saves silently erases
+  the other's paragraphs. A shared household note is exactly what two people type
+  into at once. One row per line keeps LWW but shrinks the conflict unit to a line -
+  the same exposure a checklist item already has. Only a same-line collision can now
+  lose text.
+- THE `item:` NAMESPACE, NOT A NEW ONE. applyListOp drops keys outside NAMESPACES, so
+  a `para:` prefix would make an old peer SKIP the op while a new peer put()s it.
+  Divergent views, and Autobase indexers sign the view, so a released space forks.
+  Same reasoning as the 2026-07-13 eviction entry below.
+- `ord` IS A FRACTIONAL INDEX, and it is SHARED, unlike itemOrder. An integer position
+  renumbered on insert would rewrite every row in the note on every insert, which is
+  the whole-document clobber the line split exists to avoid. A fractional index makes
+  an insert touch ONE row.
+Saving is a THREE-WAY MERGE, not an overwrite: the editor sends the rows as it LOADED
+them plus the current lines, and note:save re-reads the stored rows and applies
+baseline -> lines against them. A line a peer added mid-edit is not in the baseline,
+so nothing in the plan refers to it and the save cannot tombstone it.
+Consequences: a stale editor's save does NOT resurrect a line someone else deleted
+(its baseline and its text agree nothing changed, so it plans nothing and the deleter
+wins) - the alternative is that anyone with the note open silently undoes everyone
+else's deletions. planNoteSave re-derives the baseline's order from the stored ords
+rather than trusting the caller, because an out-of-order baseline would silently
+degenerate into delete-everything-then-reinsert. Compat: an old peer stores a
+kind:'note' row verbatim and renders it as a generic checklist; `ord` is additive and
+ignored there, so a mid-note insert can look out of order until it upgrades. Cosmetic,
+self-correcting, no fork, no migration.
+
 ## 2026-07-13 - Writer revocation: gated, one-way, and it stops WRITES only
 Tier: T3 (Autobase writer membership is consensus state). Proposal:
 2026-07-13-writer-revocation (APPROVED). Phase 2 of the eviction work.

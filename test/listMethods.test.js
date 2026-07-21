@@ -435,3 +435,163 @@ test('space:retain prunes old blocks but items stay intact and writable', async 
   assert.equal((await call('item:getAll', { groupId, listId })).length, 201)
   await engine.close()
 })
+
+// --- note lists (proposals/2026-07-20-note-lists.md) ------------------------
+
+const { noteTextOf, sortNoteRows } = require('../src/noteText')
+
+// item:getAll returns rows in Hyperbee key order, so a baseline is built the way
+// the editor builds one: sorted into document order first.
+const baselineOf = (rows) => sortNoteRows(rows).map((r) => ({ id: r.id, text: r.text }))
+
+test("note:save writes a note's lines as ordered rows and reads back verbatim", async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Wifi', kind: 'note' })
+
+  const lists = await call('list:getAll', { groupId })
+  assert.equal(lists.find((l) => l.id === listId).kind, 'note', "'note' is a real kind, not normalized away")
+
+  const text = 'Router password\n\nhunter2\nback of the router'
+  await call('note:save', { groupId, listId, baseline: [], lines: text.split('\n') })
+
+  const rows = await call('item:getAll', { groupId, listId })
+  assert.equal(rows.length, 4, 'one row per line, blank line included')
+  assert.equal(noteTextOf(rows), text, 'round-trips exactly, blank line and all')
+  assert.equal(rows.every((r) => typeof r.ord === 'string' && r.ord), true, 'every line carries an ord')
+  await engine.close()
+})
+
+test('note:save edits one line in place, keeping the row and its ord', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'N', kind: 'note' })
+
+  await call('note:save', { groupId, listId, baseline: [], lines: ['one', 'two', 'three'] })
+  const before = await call('item:getAll', { groupId, listId })
+  const baseline = baselineOf(before)
+  const target = before.find((r) => r.text === 'two')
+
+  const res = await call('note:save', { groupId, listId, baseline, lines: ['one', 'TWO', 'three'] })
+  assert.deepEqual({ ...res }, { updated: 1, deleted: 0, inserted: 0 }, 'an edit is one update, not a delete + insert')
+
+  const after = await call('item:getAll', { groupId, listId })
+  assert.equal(after.length, 3)
+  const edited = after.find((r) => r.id === target.id)
+  assert.equal(edited.text, 'TWO', 'the same row now holds the new text')
+  assert.equal(edited.ord, target.ord, 'its position is untouched')
+  assert.equal(noteTextOf(after), 'one\nTWO\nthree')
+  await engine.close()
+})
+
+test('note:save inserts a line in the middle without renumbering the others', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'N', kind: 'note' })
+
+  await call('note:save', { groupId, listId, baseline: [], lines: ['one', 'three'] })
+  const before = await call('item:getAll', { groupId, listId })
+  const ords = Object.fromEntries(before.map((r) => [r.text, r.ord]))
+
+  await call('note:save', {
+    groupId, listId, baseline: baselineOf(before), lines: ['one', 'two', 'three'],
+  })
+  const after = await call('item:getAll', { groupId, listId })
+  assert.equal(noteTextOf(after), 'one\ntwo\nthree')
+  // The whole point of a fractional index: the neighbours were not rewritten.
+  for (const t of ['one', 'three']) assert.equal(after.find((r) => r.text === t).ord, ords[t], t + ' kept its ord')
+  await engine.close()
+})
+
+test('note:save does not clobber a line another writer added mid-edit', async () => {
+  // The three-way merge, end to end. We load the note, something else appends to
+  // it, and only THEN do we save an edit derived from the stale baseline.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'N', kind: 'note' })
+
+  await call('note:save', { groupId, listId, baseline: [], lines: ['one', 'two'] })
+  const loaded = await call('item:getAll', { groupId, listId })
+  const staleBaseline = baselineOf(loaded)
+
+  // Someone else appends a third line while our editor is open.
+  await call('note:save', {
+    groupId, listId, baseline: staleBaseline, lines: ['one', 'two', 'theirs'],
+  })
+
+  // We now save our own edit, still derived from the baseline we loaded.
+  await call('note:save', { groupId, listId, baseline: staleBaseline, lines: ['one', 'TWO'] })
+
+  const after = await call('item:getAll', { groupId, listId })
+  assert.equal(after.some((r) => r.text === 'theirs'), true, "their line survived our save")
+  assert.equal(after.some((r) => r.text === 'TWO'), true, 'our edit landed')
+  assert.equal(after.length, 3)
+  await engine.close()
+})
+
+test('note:save deleting a line tombstones it, and no-resurrection holds', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'N', kind: 'note' })
+
+  await call('note:save', { groupId, listId, baseline: [], lines: ['keep', 'drop'] })
+  const before = await call('item:getAll', { groupId, listId })
+  const baseline = baselineOf(before)
+
+  await call('note:save', { groupId, listId, baseline, lines: ['keep'] })
+  let after = await call('item:getAll', { groupId, listId })
+  assert.deepEqual(after.map((r) => r.text), ['keep'])
+
+  // A stale editor still showing the deleted line does not resurrect it. Its
+  // baseline and its text agree that the line is unchanged, so it plans nothing
+  // and whoever deleted the line wins. The stale screen catches up on its next
+  // hydration - which is the right way round: the alternative is that anyone with
+  // the note open silently undoes everyone else's deletions.
+  await call('note:save', { groupId, listId, baseline, lines: ['keep', 'drop'] })
+  after = await call('item:getAll', { groupId, listId })
+  assert.deepEqual(after.map((r) => r.text), ['keep'], "a peer's delete beats a stale view")
+
+  // Deliberately typing the line again, from an up-to-date baseline, DOES add it
+  // back - as a new row, since no-resurrection makes the tombstoned key unusable.
+  const fresh = await call('item:getAll', { groupId, listId })
+  await call('note:save', { groupId, listId, baseline: baselineOf(fresh), lines: ['keep', 'drop'] })
+  after = await call('item:getAll', { groupId, listId })
+  assert.deepEqual(sortNoteRows(after).map((r) => r.text), ['keep', 'drop'])
+  assert.equal(after.some((r) => r.text === 'drop' && r.id === baseline[1].id), false, 'a new row, not the old key')
+  await engine.close()
+})
+
+test('note:save rejects a missing or deleted list', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'N', kind: 'note' })
+  await assert.rejects(() => call('note:save', { groupId, listId: 'nope', baseline: [], lines: ['x'] }))
+  await call('list:delete', { groupId, listId })
+  await assert.rejects(() => call('note:save', { groupId, listId, baseline: [], lines: ['x'] }))
+  await engine.close()
+})
+
+test('a note line does not pollute the shopping autosuggest corpus', async () => {
+  // item:add feeds the recents corpus. Note prose must not turn up as a
+  // suggestion when someone is adding groceries.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const note = await call('list:create', { groupId, name: 'Note', kind: 'note' })
+  const shop = await call('list:create', { groupId, name: 'Shop', kind: 'grocery' })
+
+  await call('item:add', { groupId, listId: note.listId, text: 'milkshake recipe from mum' })
+  await call('item:add', { groupId, listId: shop.listId, text: 'milk' })
+
+  // 'mil' rather than 'milk': item:suggest excludes an exact match, since there
+  // would be nothing left to autocomplete.
+  const suggestions = await call('item:suggest', { prefix: 'mil' })
+  assert.deepEqual(suggestions, ['milk'], 'only the grocery item was learned')
+  await engine.close()
+})
