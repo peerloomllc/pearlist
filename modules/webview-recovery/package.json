@@ -1,0 +1,8 @@
+{
+  "name": "webview-recovery",
+  "version": "1.0.0",
+  "description": "Recovers the Android WebView from the GrapheneOS/Vanadium resume-freeze by terminating its stale render process",
+  "main": "index.ts",
+  "license": "MIT",
+  "author": "PeerLoom"
+}

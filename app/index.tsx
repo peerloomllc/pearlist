@@ -4,7 +4,7 @@
 // WebView camera permission for the in-WebView QR scanner.
 
 import { useEffect, useRef, useState } from 'react'
-import { View, Platform, Share, StatusBar, BackHandler } from 'react-native'
+import { View, Platform, Share, StatusBar, BackHandler, AppState } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Worklet } from 'react-native-bare-kit'
@@ -19,6 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
+import { terminateWebViewRenderer } from '../modules/webview-recovery'
 import { classifyAisleAI, expandToItems, getAiStatus, loadModelNow, unloadFromMemory, setAiConsent, removeAiModel, setProgressSink } from './qvac'
 
 // --- local notifications (assignment + join + completion; ON by default) ----
@@ -87,6 +88,13 @@ function fireNotify (channelId: string, title: string, body: string, data?: any)
     trigger: null, // deliver now
   }).catch(() => {})
 }
+
+// How long the app must have been backgrounded before a resume terminates the
+// WebView's render process (GrapheneOS/Vanadium freeze recovery; see the AppState
+// effect below). The recovery costs a WebView reload, roughly 1-2s and a scroll
+// reset, so this gate keeps quick app-switches free. Raise it if that reload
+// starts feeling too eager.
+const WEBVIEW_RECOVERY_MIN_BG_MS = 20_000
 
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
@@ -486,6 +494,33 @@ export default function Shell () {
     }
   }
 
+  // GrapheneOS/Vanadium resume-freeze recovery, Android only. See
+  // modules/webview-recovery and WEBVIEW_FREEZE_FIX_PORT.md.
+  //
+  // The cached-app freezer freezes the WebView's out-of-process renderer while we
+  // are backgrounded; since Vanadium 151 (2026-07-19) it comes back thawed but
+  // never re-attaches its compositor to the new window surface, so the UI is
+  // frozen even though JS and touch still work. Terminating the renderer on
+  // resume forces a fresh one, and onRenderProcessGone below reloads into it.
+  //
+  // Gated on a minimum background duration: a quick app-switch never hit the
+  // freezer, so reloading then would cost a visible reload for nothing.
+  const backgroundedAt = useRef(0)
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background' || state === 'inactive') {
+        if (backgroundedAt.current === 0) backgroundedAt.current = Date.now()
+        return
+      }
+      if (state !== 'active') return
+      const backgroundedFor = backgroundedAt.current ? Date.now() - backgroundedAt.current : 0
+      backgroundedAt.current = 0
+      if (backgroundedFor >= WEBVIEW_RECOVERY_MIN_BG_MS) terminateWebViewRenderer()
+    })
+    return () => sub.remove()
+  }, [])
+
   const onLoad = () => {
     webViewLoaded.current = true
     injectInsets()
@@ -508,6 +543,16 @@ export default function Shell () {
         source={{ html, baseUrl: 'https://localhost/' }}
         onMessage={onMessage}
         onLoad={onLoad}
+        // The other half of the resume-freeze recovery above: reload into the
+        // fresh render process. didCrash=false is our own deliberate terminate;
+        // didCrash=true is a real renderer crash, and reloading is the right
+        // response to both. webViewLoaded is reset so queued IPC waits for the
+        // reloaded UI rather than being injected into a dead page.
+        onRenderProcessGone={(e: any) => {
+          console.warn('[webview] render process gone, didCrash=' + e?.nativeEvent?.didCrash + ' -> reload')
+          webViewLoaded.current = false
+          webViewRef.current?.reload()
+        }}
         style={{ flex: 1, backgroundColor: '#0d0d0d' }}
         originWhitelist={['*']}
         javaScriptEnabled

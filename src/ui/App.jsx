@@ -524,6 +524,24 @@ function ItemRow ({ item, members, onToggle, onOpen, dragHandle }) {
   )
 }
 
+// Where the user was: the space and, if any, the list they had open. Device-local
+// and purely navigational.
+//
+// This matters more than it looks. The GrapheneOS/Vanadium freeze recovery
+// (modules/webview-recovery) reloads the WebView on any resume after ~20s
+// backgrounded, and a reload resets all in-memory UI state - so without this,
+// glancing away mid-shop and coming back drops you at the lists overview, in
+// whichever space happens to be first. Restoring is always best-effort: a saved
+// id that no longer resolves (space left, list deleted) is simply ignored.
+const PLACE_KEY = 'pearlist:place'
+function loadPlace () { try { return JSON.parse(localStorage.getItem(PLACE_KEY) || '{}') || {} } catch { return {} } }
+function savePlace (patch) { try { localStorage.setItem(PLACE_KEY, JSON.stringify({ ...loadPlace(), ...patch })) } catch {} }
+// Snapshotted at load, which is exactly once per WebView load, so the restore
+// reads where we WERE. Reading it inside the component instead would race the
+// writer effect below, whose first run (openListId still null) would wipe the
+// saved list a moment before we tried to restore it.
+const BOOT_PLACE = loadPlace()
+
 // Device-local view preferences for a grocery list (collapsed aisles + custom
 // order), stored in localStorage keyed by list id. Purely presentational, never
 // synced (see 2026-07-11 hybrid decision: reorder/collapse are per-device).
@@ -1231,10 +1249,32 @@ export default function App () {
       call('profile:get', {}).then(setProfile).catch(() => {})
       call('identity:get', {}).then((r) => setSelfPubkey(r?.pubkey || null)).catch(() => {})
       const sp = await loadSpaces()
-      if (sp.length) { setActiveSpaceId(sp[0].groupId); setPhase('home') }
-      else setPhase('onboarding')
+      if (sp.length) {
+        // Reopen the space we were last in, if it is still one we are in.
+        const saved = BOOT_PLACE.groupId
+        setActiveSpaceId(sp.some((s) => s.groupId === saved) ? saved : sp[0].groupId)
+        setPhase('home')
+      } else setPhase('onboarding')
     })().catch((e) => { console.error(e); setPhase('onboarding') })
   }, [loadSpaces])
+
+  // Remember where we are, so a reload (notably the WebView freeze recovery) can
+  // put us back. Written on change rather than on unload: the recovery terminates
+  // the render process outright, so there is no unload event to hook.
+  useEffect(() => { if (activeSpaceId) savePlace({ groupId: activeSpaceId }) }, [activeSpaceId])
+
+  // Reopen the list we had open, once its space's lists have arrived. Runs at
+  // most once per load: `restoredPlace` latches immediately, so this can never
+  // fight the user by yanking them back to an old list later in the session.
+  const restoredPlace = useRef(false)
+  useEffect(() => {
+    if (restoredPlace.current || phase !== 'home' || !lists.length) return
+    restoredPlace.current = true
+    if (BOOT_PLACE.listId && lists.some((l) => l.id === BOOT_PLACE.listId)) setOpenListId(BOOT_PLACE.listId)
+  }, [phase, lists])
+  // Persist only AFTER the restore has had its chance, so the initial null does
+  // not overwrite the list we are about to reopen.
+  useEffect(() => { if (restoredPlace.current) savePlace({ listId: openListId }) }, [openListId])
 
   // Screenshot mode: once home and the active space's lists have loaded, route
   // to the scene's target screen (open a list by name, or open a sheet). Applied
@@ -2134,6 +2174,18 @@ function NoteEditor ({ rows, onSave }) {
   const flushRef = useRef(flush)
   useEffect(() => { flushRef.current = flush })
   useEffect(() => () => { flushRef.current() }, [])
+
+  // Also flush when the app goes to the background. An unmount flush is not
+  // enough: the GrapheneOS freeze recovery TERMINATES the WebView's render
+  // process on resume (see modules/webview-recovery), and a killed process does
+  // not unmount anything - so a debounce still pending when the user backgrounds
+  // mid-sentence would die with it. visibilitychange fires while the page is
+  // still alive, which is the last safe moment to commit.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushRef.current() }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  }, [])
 
   const onChange = (v) => {
     textRef.current = v
