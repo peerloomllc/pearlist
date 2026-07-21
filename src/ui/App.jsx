@@ -2194,7 +2194,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped,
   const canDelete = list.kind !== 'chore' || !list.createdBy || list.createdBy === selfPubkey
   return (
     <BottomSheet open={open} onClose={onClose} title={list.name}>
-      <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename list</span></Row>
+      <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename</span></Row>
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
@@ -2249,11 +2249,13 @@ function CategorySheet ({ open, current, title = 'Category', onClose, onSave }) 
   )
 }
 
+// Rename copy stays GENERIC ("Rename", not "Rename list"). The sheet is opened
+// from a list of any kind, including a note, which is not a list at all.
 function RenameListSheet ({ open, current, onClose, onSave }) {
   const [name, setName] = useState('')
   useEffect(() => { if (open) setName(current || '') }, [open, current])
   return (
-    <BottomSheet open={open} onClose={onClose} title='Rename list'>
+    <BottomSheet open={open} onClose={onClose} title='Rename'>
       <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
         <Field value={name} onChange={setName} autoFocus onEnter={() => name.trim() && onSave(name.trim())} />
         <Button onClick={() => name.trim() && onSave(name.trim())}>Save</Button>
