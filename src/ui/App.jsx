@@ -1727,6 +1727,29 @@ export default function App () {
     await call('list:delete', { groupId: gid, listId: openListId })
     setOpenListId(null); setSheet(null); await loadLists(gid)
   }
+  // Deleting from the options sheet asks first. An item delete is forgiving (it
+  // leaves an Undo toast), but a list delete is not: it writes a shared tombstone,
+  // so it is gone for everyone in the space, no-resurrection means it cannot come
+  // back, and there is no undo. A note raises the stakes again, since one holds
+  // typed prose rather than a few retypeable checkboxes.
+  //
+  // Deliberately NOT inside deleteOpenList: ListCompleteSheet ("All done - delete
+  // the list?") is already a confirmation, and routing it through here too would
+  // ask twice for one decision.
+  async function confirmDeleteOpenList () {
+    if (!openList) return
+    const isNote = openList.kind === 'note'
+    const ok = await askConfirm({
+      title: `Delete "${openList.name || (isNote ? 'this note' : 'this list')}"?`,
+      message: isNote
+        ? 'This removes the note for everyone in the space, along with everything written in it. This cannot be undone.'
+        : 'This removes the list for everyone in the space, along with its items. This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
+    await deleteOpenList()
+  }
   // Reset a list: uncheck every checked item (the recurring-chore action - re-open
   // the list for a new round). Unchecks are shared item edits, so they replicate to
   // everyone, which is the point for a shared chore list.
@@ -1859,7 +1882,7 @@ export default function App () {
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
         onReset={resetOpenList}
-        onDelete={deleteOpenList} />
+        onDelete={confirmDeleteOpenList} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
