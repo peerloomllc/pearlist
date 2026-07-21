@@ -112,6 +112,84 @@ XCODE_PATH=$(printf '%s' "$PATH" | sed 's|/opt/homebrew/bin:||g; s|:/opt/homebre
 echo "Running pod install..."
 ( cd "$REPO_ROOT/ios" && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install ) 2>&1 | tail -3
 
+# ── Version + build number ──────────────────────────────────────────────────
+# Everything Apple sees comes from the LITERALS in ios/<App>/Info.plist:
+# CFBundleShortVersionString (the 1.0.2 users see) and CFBundleVersion (the
+# build number). NOTHING else reaches the bundle:
+#
+#   - `expo prebuild` is the only thing that rewrites Info.plist from app.json,
+#     and release.sh runs it as `--clean -p android` - ANDROID ONLY. The iOS
+#     project is never regenerated.
+#   - The pbxproj MARKETING_VERSION / CURRENT_PROJECT_VERSION that release.sh
+#     seds are inert: this Info.plist holds literals and does not reference
+#     $(MARKETING_VERSION) or $(CURRENT_PROJECT_VERSION).
+#   - release.sh rsyncs ios/ to the Mac (it excludes only ios/Pods, ios/build
+#     and the xcworkspace), so the Mac's Info.plist is OVERWRITTEN by the repo
+#     copy on every release.
+#
+# So both literals were frozen at whatever the last iOS prebuild wrote. That
+# shipped v1.0.2 to App Store Connect labelled 1.0.0, and before that made every
+# upload reuse one build number until Apple rejected it ("bundle version must be
+# higher than the previously uploaded version").
+#
+# Fix: set both here, immediately before the archive, and mirror them into the
+# pbxproj and app.json so the three cannot drift apart again.
+#   - Marketing version: taken verbatim from app.json expo.version (release.sh
+#     has already set that to the release being cut). Override: IOS_MARKETING_VERSION.
+#   - Build number: max of the three current values + 1, which self-heals when
+#     they disagree - and they always do, since the rsync keeps re-planting a
+#     stale plist. Override: IOS_BUILD_NUMBER.
+INFO_PLIST="$REPO_ROOT/ios/${APP_NAME}/Info.plist"
+PBXPROJ="$REPO_ROOT/${XCODE_PROJECT:-ios/${APP_NAME}.xcodeproj/project.pbxproj}"
+
+# ── Marketing version (CFBundleShortVersionString) ──
+if [ -n "${IOS_MARKETING_VERSION:-}" ]; then
+  MARKETING="$IOS_MARKETING_VERSION"
+  echo "Version: ${MARKETING} (forced via IOS_MARKETING_VERSION)"
+else
+  MARKETING=$(node -p "require('$REPO_ROOT/app.json').expo.version" 2>/dev/null || echo "")
+  _plist_marketing=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" 2>/dev/null || echo "")
+  echo "Version: ${MARKETING} (from app.json; plist was ${_plist_marketing:-unset})"
+fi
+if ! printf '%s' "$MARKETING" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+  echo "Error: refusing to archive - marketing version '${MARKETING}' is not a dotted number."
+  echo "  Set expo.version in app.json, or pass IOS_MARKETING_VERSION=<x.y.z>."
+  exit 1
+fi
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${MARKETING}" "$INFO_PLIST"
+perl -0pi -e "s/MARKETING_VERSION = [0-9][0-9.]*;/MARKETING_VERSION = ${MARKETING};/g" "$PBXPROJ"
+
+# ── Build number (CFBundleVersion) ──
+
+_plist_build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST" 2>/dev/null | tr -dc '0-9')
+_pbx_build=$(grep -m1 'CURRENT_PROJECT_VERSION' "$PBXPROJ" | tr -dc '0-9')
+_json_build=$(node -p "parseInt(require('$REPO_ROOT/app.json').expo.ios.buildNumber||'0',10)" 2>/dev/null || echo 0)
+_plist_build=${_plist_build:-0}; _pbx_build=${_pbx_build:-0}; _json_build=${_json_build:-0}
+
+if [ -n "${IOS_BUILD_NUMBER:-}" ]; then
+  NEXT_BUILD="$IOS_BUILD_NUMBER"
+  echo "Build number: ${NEXT_BUILD} (forced via IOS_BUILD_NUMBER)"
+else
+  _max=$_plist_build
+  for n in "$_pbx_build" "$_json_build"; do
+    [ "$n" -gt "$_max" ] && _max="$n"
+  done
+  NEXT_BUILD=$(( _max + 1 ))
+  echo "Build number: ${NEXT_BUILD} (was plist=${_plist_build} pbxproj=${_pbx_build} app.json=${_json_build}; bumped)"
+fi
+
+# Write NEXT_BUILD everywhere: the plist literal is what actually ships; the
+# pbxproj and app.json are kept in sync so release.sh and a later prebuild agree.
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${NEXT_BUILD}" "$INFO_PLIST"
+perl -0pi -e "s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = ${NEXT_BUILD};/g" "$PBXPROJ"
+NEXT_BUILD="$NEXT_BUILD" node -e "
+  const fs = require('fs'), f = '$REPO_ROOT/app.json';
+  const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+  j.expo.ios = j.expo.ios || {};
+  j.expo.ios.buildNumber = String(process.env.NEXT_BUILD);
+  fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+"
+
 # ── Archive ─────────────────────────────────────────────────────────────────
 rm -rf "$ARCHIVE_PATH"
 echo "Archiving..."
