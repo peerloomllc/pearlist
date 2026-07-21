@@ -2175,6 +2175,18 @@ function NoteEditor ({ rows, onSave }) {
   useEffect(() => { flushRef.current = flush })
   useEffect(() => () => { flushRef.current() }, [])
 
+  // Also flush when the app goes to the background. An unmount flush is not
+  // enough: the GrapheneOS freeze recovery TERMINATES the WebView's render
+  // process on resume (see modules/webview-recovery), and a killed process does
+  // not unmount anything - so a debounce still pending when the user backgrounds
+  // mid-sentence would die with it. visibilitychange fires while the page is
+  // still alive, which is the last safe moment to commit.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushRef.current() }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  }, [])
+
   const onChange = (v) => {
     textRef.current = v
     dirtyRef.current = true
