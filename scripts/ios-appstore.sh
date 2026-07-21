@@ -112,23 +112,54 @@ XCODE_PATH=$(printf '%s' "$PATH" | sed 's|/opt/homebrew/bin:||g; s|:/opt/homebre
 echo "Running pod install..."
 ( cd "$REPO_ROOT/ios" && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install ) 2>&1 | tail -3
 
-# ── Build number ────────────────────────────────────────────────────────────
-# This script archives the existing ios/ project as-is (no `expo prebuild`), so
-# the shipped CFBundleVersion is the LITERAL in ios/<App>/Info.plist. app.json's
-# ios.buildNumber and the pbxproj CURRENT_PROJECT_VERSION only reach the bundle
-# when a prebuild regenerates the project, which never happens here. Nothing was
-# bumping that literal, so every run re-uploaded the same build and App Store
-# Connect rejected it: "bundle version must be higher than the previously
-# uploaded version". (release.sh avoids this because its --clean prebuild rewrites
-# Info.plist from app.json; the standalone iOS path had no such step.)
+# ── Version + build number ──────────────────────────────────────────────────
+# Everything Apple sees comes from the LITERALS in ios/<App>/Info.plist:
+# CFBundleShortVersionString (the 1.0.2 users see) and CFBundleVersion (the
+# build number). NOTHING else reaches the bundle:
 #
-# Fix: pick the next build number and write it to all three places so they stay
-# in lockstep. Source of truth is the max the three files currently hold (self-
-# healing when they disagree, as they did here: plist=4, pbxproj=6, app.json=7),
-# plus one. Set IOS_BUILD_NUMBER=<n> to force a value when a build was uploaded
-# from another machine and the local files are behind App Store Connect.
+#   - `expo prebuild` is the only thing that rewrites Info.plist from app.json,
+#     and release.sh runs it as `--clean -p android` - ANDROID ONLY. The iOS
+#     project is never regenerated.
+#   - The pbxproj MARKETING_VERSION / CURRENT_PROJECT_VERSION that release.sh
+#     seds are inert: this Info.plist holds literals and does not reference
+#     $(MARKETING_VERSION) or $(CURRENT_PROJECT_VERSION).
+#   - release.sh rsyncs ios/ to the Mac (it excludes only ios/Pods, ios/build
+#     and the xcworkspace), so the Mac's Info.plist is OVERWRITTEN by the repo
+#     copy on every release.
+#
+# So both literals were frozen at whatever the last iOS prebuild wrote. That
+# shipped v1.0.2 to App Store Connect labelled 1.0.0, and before that made every
+# upload reuse one build number until Apple rejected it ("bundle version must be
+# higher than the previously uploaded version").
+#
+# Fix: set both here, immediately before the archive, and mirror them into the
+# pbxproj and app.json so the three cannot drift apart again.
+#   - Marketing version: taken verbatim from app.json expo.version (release.sh
+#     has already set that to the release being cut). Override: IOS_MARKETING_VERSION.
+#   - Build number: max of the three current values + 1, which self-heals when
+#     they disagree - and they always do, since the rsync keeps re-planting a
+#     stale plist. Override: IOS_BUILD_NUMBER.
 INFO_PLIST="$REPO_ROOT/ios/${APP_NAME}/Info.plist"
 PBXPROJ="$REPO_ROOT/${XCODE_PROJECT:-ios/${APP_NAME}.xcodeproj/project.pbxproj}"
+
+# ── Marketing version (CFBundleShortVersionString) ──
+if [ -n "${IOS_MARKETING_VERSION:-}" ]; then
+  MARKETING="$IOS_MARKETING_VERSION"
+  echo "Version: ${MARKETING} (forced via IOS_MARKETING_VERSION)"
+else
+  MARKETING=$(node -p "require('$REPO_ROOT/app.json').expo.version" 2>/dev/null || echo "")
+  _plist_marketing=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" 2>/dev/null || echo "")
+  echo "Version: ${MARKETING} (from app.json; plist was ${_plist_marketing:-unset})"
+fi
+if ! printf '%s' "$MARKETING" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+  echo "Error: refusing to archive - marketing version '${MARKETING}' is not a dotted number."
+  echo "  Set expo.version in app.json, or pass IOS_MARKETING_VERSION=<x.y.z>."
+  exit 1
+fi
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${MARKETING}" "$INFO_PLIST"
+perl -0pi -e "s/MARKETING_VERSION = [0-9][0-9.]*;/MARKETING_VERSION = ${MARKETING};/g" "$PBXPROJ"
+
+# ── Build number (CFBundleVersion) ──
 
 _plist_build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST" 2>/dev/null | tr -dc '0-9')
 _pbx_build=$(grep -m1 'CURRENT_PROJECT_VERSION' "$PBXPROJ" | tr -dc '0-9')
