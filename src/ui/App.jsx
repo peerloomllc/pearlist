@@ -2181,6 +2181,11 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 
 // List options (rename / category / notify / assign / delete), opened from the
 // detail header. The completion-notify row shows only on chore lists.
+//
+// Row copy stays GENERIC ("Rename", "Delete"), because this sheet also opens on
+// a note, which is not a list. ListCompleteSheet still says "Delete list" and
+// should: it only ever fires when every item on a list is checked, and a note's
+// lines are never checked, so a note cannot reach it.
 function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
@@ -2200,7 +2205,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped,
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
       {grouped ? <Row onClick={onToggleCollapseAll}><span style={{ flex: 1, textAlign: 'left' }}>{allCollapsed ? `Expand all ${groupNoun}s` : `Collapse all ${groupNoun}s`}</span></Row> : null}
       {canReset ? <Row onClick={onReset}><span style={{ flex: 1, textAlign: 'left' }}>Uncheck all</span></Row> : null}
-      {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete list</span></Row> : null}
+      {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete</span></Row> : null}
     </BottomSheet>
   )
 }
