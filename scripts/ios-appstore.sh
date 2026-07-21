@@ -112,6 +112,53 @@ XCODE_PATH=$(printf '%s' "$PATH" | sed 's|/opt/homebrew/bin:||g; s|:/opt/homebre
 echo "Running pod install..."
 ( cd "$REPO_ROOT/ios" && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install ) 2>&1 | tail -3
 
+# ── Build number ────────────────────────────────────────────────────────────
+# This script archives the existing ios/ project as-is (no `expo prebuild`), so
+# the shipped CFBundleVersion is the LITERAL in ios/<App>/Info.plist. app.json's
+# ios.buildNumber and the pbxproj CURRENT_PROJECT_VERSION only reach the bundle
+# when a prebuild regenerates the project, which never happens here. Nothing was
+# bumping that literal, so every run re-uploaded the same build and App Store
+# Connect rejected it: "bundle version must be higher than the previously
+# uploaded version". (release.sh avoids this because its --clean prebuild rewrites
+# Info.plist from app.json; the standalone iOS path had no such step.)
+#
+# Fix: pick the next build number and write it to all three places so they stay
+# in lockstep. Source of truth is the max the three files currently hold (self-
+# healing when they disagree, as they did here: plist=4, pbxproj=6, app.json=7),
+# plus one. Set IOS_BUILD_NUMBER=<n> to force a value when a build was uploaded
+# from another machine and the local files are behind App Store Connect.
+INFO_PLIST="$REPO_ROOT/ios/${APP_NAME}/Info.plist"
+PBXPROJ="$REPO_ROOT/${XCODE_PROJECT:-ios/${APP_NAME}.xcodeproj/project.pbxproj}"
+
+_plist_build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST" 2>/dev/null | tr -dc '0-9')
+_pbx_build=$(grep -m1 'CURRENT_PROJECT_VERSION' "$PBXPROJ" | tr -dc '0-9')
+_json_build=$(node -p "parseInt(require('$REPO_ROOT/app.json').expo.ios.buildNumber||'0',10)" 2>/dev/null || echo 0)
+_plist_build=${_plist_build:-0}; _pbx_build=${_pbx_build:-0}; _json_build=${_json_build:-0}
+
+if [ -n "${IOS_BUILD_NUMBER:-}" ]; then
+  NEXT_BUILD="$IOS_BUILD_NUMBER"
+  echo "Build number: ${NEXT_BUILD} (forced via IOS_BUILD_NUMBER)"
+else
+  _max=$_plist_build
+  for n in "$_pbx_build" "$_json_build"; do
+    [ "$n" -gt "$_max" ] && _max="$n"
+  done
+  NEXT_BUILD=$(( _max + 1 ))
+  echo "Build number: ${NEXT_BUILD} (was plist=${_plist_build} pbxproj=${_pbx_build} app.json=${_json_build}; bumped)"
+fi
+
+# Write NEXT_BUILD everywhere: the plist literal is what actually ships; the
+# pbxproj and app.json are kept in sync so release.sh and a later prebuild agree.
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${NEXT_BUILD}" "$INFO_PLIST"
+perl -0pi -e "s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = ${NEXT_BUILD};/g" "$PBXPROJ"
+NEXT_BUILD="$NEXT_BUILD" node -e "
+  const fs = require('fs'), f = '$REPO_ROOT/app.json';
+  const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+  j.expo.ios = j.expo.ios || {};
+  j.expo.ios.buildNumber = String(process.env.NEXT_BUILD);
+  fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+"
+
 # ── Archive ─────────────────────────────────────────────────────────────────
 rm -rf "$ARCHIVE_PATH"
 echo "Archiving..."
