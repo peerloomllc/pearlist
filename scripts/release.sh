@@ -983,11 +983,14 @@ APP_VERSION="$APP_VERSION" node -e "
   j.expo.version = v;
   if (!j.expo.android) j.expo.android = {};
   j.expo.android.versionCode = versionCode;
+  // NOTE: ios.buildNumber is deliberately NOT bumped here. scripts/ios-appstore.sh
+  // owns it now and takes it from App Store Connect immediately before archiving.
+  // Bumping it here was worse than redundant: this file only travels Linux -> Mac
+  // via rsync, so the number the Mac actually shipped never came back, and the
+  // next release incremented a stale value straight into a collision.
   if (!j.expo.ios) j.expo.ios = {};
-  const prevBuild = parseInt(j.expo.ios.buildNumber || '1', 10);
-  j.expo.ios.buildNumber = String(prevBuild + 1);
   fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
-  console.log('Updated app.json to ' + v + ' (versionCode: ' + versionCode + ', iOS buildNumber: ' + j.expo.ios.buildNumber + ')');
+  console.log('Updated app.json to ' + v + ' (versionCode: ' + versionCode + ', iOS buildNumber: left to ios-appstore.sh)');
 "
 
 # Derive APP_VERSION_CODE from the version string for Gradle
@@ -995,7 +998,11 @@ IFS='.' read -r _vmaj _vmin _vpat <<< "$APP_VERSION"
 APP_VERSION_CODE=$(( _vmaj * 1000000 + _vmin * 1000 + _vpat ))
 export APP_VERSION_CODE
 
-# Sync iOS version into project.pbxproj so xcodebuild picks up the right values
+# Keep project.pbxproj tidy for anyone opening it in Xcode. These values do NOT
+# decide what iOS ships: this Info.plist holds literal CFBundleShortVersionString
+# / CFBundleVersion rather than referencing $(MARKETING_VERSION) /
+# $(CURRENT_PROJECT_VERSION), so the pbxproj is inert. ios-appstore.sh writes the
+# authoritative pair into Info.plist immediately before archiving.
 _ios_build_number=$(node -p "require('./app.json').expo.ios.buildNumber")
 sed -i \
   "s/CURRENT_PROJECT_VERSION = [0-9][0-9]*/CURRENT_PROJECT_VERSION = ${_ios_build_number}/g; \
@@ -1004,7 +1011,7 @@ sed -i \
 
 echo "    Version     : $(node -p "require('./app.json').expo.version")"
 echo "    versionCode : $(node -p "require('./app.json').expo.android.versionCode")"
-echo "    iOS build   : $(node -p "require('./app.json').expo.ios.buildNumber")"
+echo "    iOS build   : decided at archive time from App Store Connect (last local: ${_ios_build_number})"
 _confirm "app.json version looks correct — proceed with bundle builds?"
 
 # ---------------------------------------------------------------------------
