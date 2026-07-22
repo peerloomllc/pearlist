@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 // Foreground service that keeps the app process - and therefore the Bare worklet
@@ -22,20 +23,66 @@ class BgSyncService : Service() {
     private const val CHANNEL_ID = "pearlist_sync"
     private const val NOTIF_ID = 4201
     const val EXTRA_WAKE_HOST = "wakeHost"
+    private const val TAG = "BgSyncService"
   }
+
+  // False once the dataSync budget is spent (see tryStartForeground). Gates every
+  // path that would otherwise walk back into the same throw.
+  private var foregrounded = false
 
   override fun onCreate() {
     super.onCreate()
     createChannel()
-    startForeground(NOTIF_ID, buildNotification())
+    foregrounded = tryStartForeground()
+    // Could not go foreground: stop quietly rather than let the throw escape as
+    // "Unable to create service BgSyncService". Stopping promptly is also what
+    // keeps the startForegroundService() contract - the system only complains if
+    // we neither go foreground nor stop.
+    if (!foregrounded) stopSelf()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    // Never went foreground: START_NOT_STICKY so the system does not keep
+    // recreating us straight back into the same exception. START_STICKY here was
+    // a crash loop - every restart re-entered onCreate with the budget still spent.
+    if (!foregrounded) return START_NOT_STICKY
     // Cold-started by the boot receiver or an OS restart (no Activity / JS host
     // running): bring the app up so index.tsx starts the worklet and rejoins the
     // swarm. A no-op on the normal path where JS itself started the service.
     if (intent?.getBooleanExtra(EXTRA_WAKE_HOST, false) == true) wakeHost()
     return START_STICKY
+  }
+
+  // Android 15 (API 35) caps dataSync foreground services at 6 hours per 24, and
+  // signals the end of the budget here. We MUST stop within a few seconds or the
+  // system escalates to RemoteServiceException "a foreground service of type
+  // dataSync did not stop within its timeout". The budget resets when the user
+  // next brings the app to the foreground, and index.tsx re-arms on that.
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    Log.i(TAG, "dataSync budget exhausted (onTimeout); stopping")
+    foregrounded = false
+    stopSelf()
+  }
+
+  // API 34's single-argument form. Only fires for shortService today, so it is
+  // belt-and-braces, but an unhandled timeout is a crash and the body is one line.
+  override fun onTimeout(startId: Int) {
+    Log.i(TAG, "foreground service timeout (legacy callback); stopping")
+    foregrounded = false
+    stopSelf()
+  }
+
+  // Android 15+ throws ForegroundServiceStartNotAllowedException here once the
+  // app has spent its 6h/24h dataSync allowance ("Time limit already exhausted
+  // for foreground service type dataSync"). That is a normal state, not a bug, so
+  // it must not be fatal. Catches Exception rather than the specific type because
+  // that class only exists on API 31+ and minSdk here is 24.
+  private fun tryStartForeground(): Boolean = try {
+    startForeground(NOTIF_ID, buildNotification())
+    true
+  } catch (e: Exception) {
+    Log.w(TAG, "startForeground refused; background sync paused until next foreground: ${e.message}")
+    false
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
@@ -44,6 +91,9 @@ class BgSyncService : Service() {
   // near-future restart so background sync resumes. A true force-stop / reinstall
   // cannot be revived until the user reopens the app.
   override fun onTaskRemoved(rootIntent: Intent?) {
+    // If we never made it to foreground the budget is spent, so a restart would
+    // only reproduce the failure. Leave it to the next app foreground to re-arm.
+    if (!foregrounded) { super.onTaskRemoved(rootIntent); return }
     try {
       val restart = Intent(applicationContext, BgSyncService::class.java)
         .putExtra(EXTRA_WAKE_HOST, true)

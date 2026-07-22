@@ -19,7 +19,15 @@ class BgSyncModule : Module() {
       val ctx: Context = appContext.reactContext ?: return@Function null
       ctx.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         .edit().putBoolean("enabled", true).apply()
-      ContextCompat.startForegroundService(ctx, Intent(ctx, BgSyncService::class.java))
+      // startForegroundService itself throws when the app is not allowed to start
+      // one right now (background-start restrictions, or the Android 15+ dataSync
+      // budget already spent). The opt-in is still recorded above, so the next
+      // foreground re-arm picks it up; failing here must not take the app down.
+      try {
+        ContextCompat.startForegroundService(ctx, Intent(ctx, BgSyncService::class.java))
+      } catch (e: Exception) {
+        android.util.Log.w("BgSyncModule", "could not start sync service: ${e.message}")
+      }
       null
     }
 

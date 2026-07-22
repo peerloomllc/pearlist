@@ -16,6 +16,12 @@ class BgSyncBootReceiver : BroadcastReceiver() {
     if (!prefs.getBoolean("enabled", false)) return
     val svc = Intent(context, BgSyncService::class.java)
       .putExtra(BgSyncService.EXTRA_WAKE_HOST, true)
-    ContextCompat.startForegroundService(context, svc)
+    // A throw inside a BroadcastReceiver crashes the app just as loudly as one in
+    // the service, and BOOT_COMPLETED is exactly when we cannot afford that.
+    try {
+      ContextCompat.startForegroundService(context, svc)
+    } catch (e: Exception) {
+      android.util.Log.w("BgSyncBoot", "could not start sync service at boot: ${e.message}")
+    }
   }
 }
