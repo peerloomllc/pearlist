@@ -56,6 +56,19 @@ ARCHIVE_PATH="${ARCHIVE_PATH:-/tmp/${APP_NAME}.xcarchive}"
 EXPORT_PATH="/tmp/${APP_NAME}-appstore"
 EXPORT_OPTIONS="/tmp/ExportOptions.plist"
 
+# ── Authenticate ────────────────────────────────────────────────────────────
+# Log in BEFORE the archive, not just before the upload: the build number below
+# is read from App Store Connect, so the session has to exist by then.
+if $USE_ASC; then
+  ASC_KEY_FILE="${ASC_PRIVATE_KEY_PATH:-$HOME/.appstoreconnect/AuthKey_${ASC_KEY_ID}.p8}"
+  asc auth login \
+    --bypass-keychain \
+    --name "${APP_NAME}-CI" \
+    --key-id "$ASC_KEY_ID" \
+    --issuer-id "$ASC_ISSUER_ID" \
+    --private-key "$ASC_KEY_FILE"
+fi
+
 # ── Write ExportOptions.plist ───────────────────────────────────────────────
 cat > "$EXPORT_OPTIONS" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -160,22 +173,49 @@ fi
 perl -0pi -e "s/MARKETING_VERSION = [0-9][0-9.]*;/MARKETING_VERSION = ${MARKETING};/g" "$PBXPROJ"
 
 # ── Build number (CFBundleVersion) ──
-
+# App Store Connect is the source of truth, NOT any local file. Local state
+# cannot be trusted here: release.sh rsyncs Linux -> Mac only, so a build number
+# this script writes on the Mac never travels back, and the next release starts
+# from a stale value and collides. Asking Apple sidesteps that entirely.
+#
+# next-build-number counts uploads that have not finished processing yet, so
+# back-to-back runs do not collide. Deliberately NOT scoped with --version:
+# per-version it restarts at 1 for a train that has no builds yet (verified:
+# 1.0.3 returns nextBuildNumber 1), while unscoped it returns the app-wide
+# maximum and stays monotonic forever.
+#
+# The local max is kept as a FLOOR, so a failed or unavailable query (altool
+# auth, no network, asc missing) degrades to the previous behaviour rather than
+# shipping a number below what the local files already claim.
 _plist_build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST" 2>/dev/null | tr -dc '0-9')
 _pbx_build=$(grep -m1 'CURRENT_PROJECT_VERSION' "$PBXPROJ" | tr -dc '0-9')
 _json_build=$(node -p "parseInt(require('$REPO_ROOT/app.json').expo.ios.buildNumber||'0',10)" 2>/dev/null || echo 0)
 _plist_build=${_plist_build:-0}; _pbx_build=${_pbx_build:-0}; _json_build=${_json_build:-0}
 
+_local_max=$_plist_build
+for n in "$_pbx_build" "$_json_build"; do
+  [ "$n" -gt "$_local_max" ] && _local_max="$n"
+done
+_local_next=$(( _local_max + 1 ))
+
+_asc_next=0
+if $USE_ASC; then
+  _asc_next=$(asc builds next-build-number --app "$ASC_APP_ID" --platform IOS 2>/dev/null \
+    | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(String(parseInt(JSON.parse(s).nextBuildNumber,10)||0))}catch(e){process.stdout.write('0')}})" 2>/dev/null || echo 0)
+  _asc_next=$(printf '%s' "${_asc_next:-0}" | tr -dc '0-9')
+  _asc_next=${_asc_next:-0}
+fi
+
 if [ -n "${IOS_BUILD_NUMBER:-}" ]; then
   NEXT_BUILD="$IOS_BUILD_NUMBER"
   echo "Build number: ${NEXT_BUILD} (forced via IOS_BUILD_NUMBER)"
+elif [ "$_asc_next" -gt 0 ]; then
+  NEXT_BUILD=$_asc_next
+  [ "$_local_next" -gt "$NEXT_BUILD" ] && NEXT_BUILD=$_local_next
+  echo "Build number: ${NEXT_BUILD} (App Store Connect next=${_asc_next}, local floor=${_local_next})"
 else
-  _max=$_plist_build
-  for n in "$_pbx_build" "$_json_build"; do
-    [ "$n" -gt "$_max" ] && _max="$n"
-  done
-  NEXT_BUILD=$(( _max + 1 ))
-  echo "Build number: ${NEXT_BUILD} (was plist=${_plist_build} pbxproj=${_pbx_build} app.json=${_json_build}; bumped)"
+  NEXT_BUILD=$_local_next
+  echo "Build number: ${NEXT_BUILD} (App Store Connect unavailable, fell back to local max: plist=${_plist_build} pbxproj=${_pbx_build} app.json=${_json_build})"
 fi
 
 # Write NEXT_BUILD everywhere: the plist literal is what actually ships; the
@@ -230,14 +270,6 @@ echo "Export complete: $IPA_PATH"
 # ── Upload ──────────────────────────────────────────────────────────────────
 echo "Uploading to App Store Connect..."
 if $USE_ASC; then
-  ASC_KEY_FILE="${ASC_PRIVATE_KEY_PATH:-$HOME/.appstoreconnect/AuthKey_${ASC_KEY_ID}.p8}"
-  asc auth login \
-    --bypass-keychain \
-    --name "${APP_NAME}-CI" \
-    --key-id "$ASC_KEY_ID" \
-    --issuer-id "$ASC_ISSUER_ID" \
-    --private-key "$ASC_KEY_FILE"
-
   asc builds upload --app "$ASC_APP_ID" --ipa "$IPA_PATH"
 else
   xcrun altool \
