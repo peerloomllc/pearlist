@@ -2,7 +2,7 @@
   "expo": {
     "name": "PearList",
     "slug": "pearlist",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "newArchEnabled": true,
     "orientation": "portrait",
     "scheme": "pear",
@@ -10,7 +10,7 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.pearlist",
-      "buildNumber": "4",
+      "buildNumber": "9",
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan space invite QR codes.",
         "NSLocalNetworkUsageDescription": "PearList connects directly to your peers' devices on your Wi-Fi to sync lists peer-to-peer.",
@@ -25,7 +25,7 @@
     },
     "android": {
       "package": "com.pearlist",
-      "versionCode": 1000000,
+      "versionCode": 1000002,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0d0d0d"
@@ -94,7 +94,8 @@
       "./plugins/with-android-standalone-debug",
       "./plugins/with-android-release-signing",
       "./plugins/with-strip-aps",
-      "@qvac/sdk/expo-plugin"
+      "@qvac/sdk/expo-plugin",
+      "./plugins/with-drop-unused-ggml-backends"
     ],
     "assets": [
       "./assets/bare-universal.bundle",
