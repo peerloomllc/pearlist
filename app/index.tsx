@@ -517,6 +517,12 @@ export default function Shell () {
       const backgroundedFor = backgroundedAt.current ? Date.now() - backgroundedAt.current : 0
       backgroundedAt.current = 0
       if (backgroundedFor >= WEBVIEW_RECOVERY_MIN_BG_MS) terminateWebViewRenderer()
+      // Android 15+ allows only 6h of dataSync foreground service per 24h. When
+      // that runs out the service stops itself (see BgSyncService.onTimeout), and
+      // the allowance resets precisely when the app is foregrounded - here. Re-arm
+      // so background sync resumes instead of staying dead until the next launch.
+      // startBackgroundSync is a no-op if it is already running and never throws.
+      bgSyncEnabled().then((on) => { if (on) startBackgroundSync() })
     })
     return () => sub.remove()
   }, [])
