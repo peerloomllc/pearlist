@@ -5,8 +5,10 @@
 // list:* / item:* methods come from listMethods.
 
 const { createGroupEngine } = require('@peerloom/core/engine')
+const Hyperswarm = require('hyperswarm')
 const { applyListOp } = require('./listWire')
 const { authorizeRevoke, admitWriter } = require('./revocation')
+const relay = require('./relay')
 const listMethods = require('./listMethods')
 
 // Pairing/writer-admission trace (diagnostic, 2026-07-01). The core emits marks
@@ -48,6 +50,19 @@ const engine = createGroupEngine({
   // small spaces are untouched and only long-churned ones shrink.
   retentionInterval: 30 * 60 * 1000,
   retentionKeepRecent: 512,
+  // The off-LAN relay backstop (proposals/2026-07-23-blind-relay-adoption.md).
+  // Core's default swarm takes no options, so we build it here purely to attach
+  // `relayThrough`. It is a FUNCTION, not a static key, so both the baked relay
+  // key and the user's privacy toggle are read live on every dial: direct-first
+  // always, the relay only after Hyperswarm marks the peer as unpunchable.
+  //
+  // The engine calls this during init(), right after localDb is ready, which is
+  // why hydrating the toggle from here is safe. It is deliberately not awaited
+  // (createSwarm is sync): until the read lands the policy relays nothing.
+  createSwarm: ({ keyPair }) => {
+    relay.hydrate(engine.localDb).catch(() => {})
+    return new Hyperswarm({ keyPair, relayThrough: relay.swarmRelayThrough })
+  },
 })
 _engine = engine
 

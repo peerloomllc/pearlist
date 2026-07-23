@@ -2,6 +2,35 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-23 - The off-LAN backstop is a relay POLICY, not a relay MECHANISM
+Tier: T2. Proposal: 2026-07-23-blind-relay-adoption (the T3 design and the node are
+PearTune's, ../peartune/proposals/2026-07-23-blind-relay.md).
+Context: PearList is phone-to-phone, so both ends can be on a carrier CGNAT - the
+hardest hole-punch case - and there is NO blind seeder for PearList to bridge them.
+A pair that cannot punch has no path at all today, not a slow one.
+Choice: point the swarm at the shared PeerLoom blind relay. Three things fell out of
+reading the source before writing code, and each removed work the draft assumed:
+- HYPERSWARM ALREADY DOES THE ESCALATION. 4.17.0 accepts `relayThrough` and sets
+  `forceRelaying` after HOLEPUNCH_ABORTED / DOUBLE_RANDOMIZED_NATS /
+  REMOTE_NOT_HOLEPUNCHABLE. We supply a policy function, not a fallback path. No raw
+  `dht.connect`, no second transport, no per-peer bookkeeping.
+- THE REMOTE PEER NEEDS NOTHING. hyperdht 6.32 relays on `payload.relayThrough` alone
+  (connect.js:518, server.js:401), so one end escalating is sufficient. No coordinated
+  rollout: a new peer and an old peer still connect.
+- NO CORE CHANGE. Core's `createSwarm` seam already exists, so PearList attaches
+  `relayThrough` itself. Considered pushing a `relayThrough` option into
+  @peerloom/core so every core app inherits it, and deferred: it costs a second repo
+  and a merge-order dependency for a knob only one app currently wants. Revisit when
+  a second core app needs it, at which point the policy module moves, not the wiring.
+`relayThrough` is a FUNCTION rather than the key itself, which is what makes the
+privacy toggle live: the next dial after the user flips it already obeys, with no
+reconnect. Its cache starts UNHYDRATED and relays nothing until the stored preference
+is read, so opting out cannot be defeated by the startup window; a read that throws
+falls back to ON, so a database hiccup cannot silently disable the backstop.
+Honesty constraint on the copy: the relay sees which two device keys talk and how many
+bytes, and the Settings explainer says so. "It cannot read your lists" is true;
+"it sees nothing" would not be.
+
 ## 2026-07-20 - A note is one row PER LINE, not one body field
 Tier: T2. Proposal: 2026-07-20-note-lists (APPROVED, PR #72).
 Context: a user asked for "somewhere to put notes that aren't a check list". Items
