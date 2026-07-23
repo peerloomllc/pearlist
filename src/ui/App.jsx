@@ -2464,6 +2464,13 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
   async function toggleBgSync (v) {
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
+  // "Connect Anywhere" - the off-LAN relay backstop. Default on, so an unanswered
+  // read shows on rather than flickering off and back.
+  const [relayOn, setRelayOn] = useState(true)
+  useEffect(() => { call('relay:get', {}).then((r) => setRelayOn(r?.useRelay !== false)).catch(() => {}) }, [])
+  async function toggleRelay (v) {
+    try { const r = await call('relay:set', { on: v }); setRelayOn(r?.useRelay !== false) } catch {}
+  }
   const [ai, setAi] = useState(null)
   useEffect(() => { call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [])
   useEffect(() => on('ai:status', setAi), [])
@@ -2488,6 +2495,7 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
     'Local AI': "Powers the on-device AI features: sorting grocery items into aisles, and turning a meal or recipe into a shopping list (\"Add from a recipe\"). A fast built-in name matcher still places common items instantly; the AI handles the rest and runs entirely on your phone - nothing about your lists ever leaves the device. One-time ~0.8 GB download; turn it off to delete the model and reclaim the space (the name matcher keeps working). Powered by QVAC, Tether's local AI SDK.",
     'Loaded in memory': "Keeping the model in memory lets it sort and generate instantly, but uses some RAM. Turn this off to free the memory now - the model stays downloaded and reloads (a few seconds) the next time AI is used. It also loads on its own the first time you use AI each session.",
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
+    'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
   }
   const Setting = ({ title, about, aboutLink, control, extra, first }) => (
@@ -2558,6 +2566,9 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
 
       <Group title='Appearance'>
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
+      </Group>
+      <Group title='Connection'>
+        <Setting first title='Connect Anywhere' about={ABOUT['Connect Anywhere']} control={<Toggle on={relayOn} onChange={toggleRelay} />} />
       </Group>
       <Group title='Notifications'>
         <Setting first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />

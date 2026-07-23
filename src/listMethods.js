@@ -13,6 +13,7 @@ const sodium = require('sodium-universal')
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
+const relay = require('./relay')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods -
 // the always-available baseline. `classifyItem` is the single seam a smarter
@@ -496,6 +497,19 @@ const methods = {
     row.shown = true
     await ctx.localDb.put('donateReminder', row)
     return { ok: true }
+  },
+
+  // --- connection ---------------------------------------------------------
+
+  // The off-LAN relay toggle ("Connect Anywhere"), device-local and never synced.
+  // The swarm's relayThrough function reads the cached value live on every dial,
+  // so flipping it applies to the next connection with no reconnect. See
+  // proposals/2026-07-23-blind-relay-adoption.md.
+  'relay:get': async () => ({ useRelay: relay.getUseRelay(), configured: !!relay.RELAY_PUBLIC_KEY }),
+  'relay:set': async ({ on }, ctx) => {
+    const useRelay = relay.setUseRelay(on)
+    await ctx.localDb.put(relay.PREF_KEY, { useRelay })
+    return { useRelay }
   },
 
   // --- lists --------------------------------------------------------------

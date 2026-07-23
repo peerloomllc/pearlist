@@ -191,6 +191,9 @@ const mockMethods = {
   // Donation reminder: ?donate forces "due" so it can be previewed on demand.
   'donation:status': async () => ({ due: /(?:\?|&)donate/.test(window.location.search || ''), shown: false, firstUseAt: 0 }),
   'donation:dismiss': async () => ({ ok: true }),
+  // Off-LAN relay toggle. In the preview it is just a remembered boolean.
+  'relay:get': async () => ({ useRelay: mock.useRelay !== false, configured: true }),
+  'relay:set': async ({ on }) => { mock.useRelay = on !== false; return { useRelay: mock.useRelay } },
   // Shell actions (real shell intercepts these; here we approximate for preview).
   'shell:openUrl': async ({ url }) => { try { window.open(url, '_blank', 'noopener') } catch {} return { ok: true } },
   'shell:share': async ({ title, text }) => { try { if (navigator.share) await navigator.share({ title, text }); else alert('Share:\n\n' + text) } catch {} return { ok: true } },
