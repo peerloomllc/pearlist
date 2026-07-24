@@ -506,6 +506,22 @@ const methods = {
   // so flipping it applies to the next connection with no reconnect. See
   // proposals/2026-07-23-blind-relay-adoption.md.
   'relay:get': async () => ({ useRelay: relay.getUseRelay(), configured: !!relay.RELAY_PUBLIC_KEY }),
+  // Whether the relay is actually doing anything, which is otherwise invisible:
+  // a relayed connection looks exactly like a direct one from up here. NOTE the
+  // counters live on hyperdht's SERVER side (lib/server.js), so they climb on the
+  // peer that ACCEPTED a relayed connection, not on the one that asked for it.
+  // In a two-device test, read both phones.
+  'relay:stats': async (_args, ctx) => {
+    const dht = ctx.swarm && ctx.swarm.dht
+    const stats = (dht && dht.stats) || {}
+    return {
+      useRelay: relay.getUseRelay(),
+      relaying: { attempts: 0, successes: 0, aborts: 0, ...(stats.relaying || {}) },
+      punches: { consistent: 0, random: 0, open: 0, ...(stats.punches || {}) },
+      connections: (ctx.swarm && ctx.swarm.connections && ctx.swarm.connections.size) || 0,
+      randomized: !!(dht && dht.randomized),
+    }
+  },
   'relay:set': async ({ on }, ctx) => {
     const useRelay = relay.setUseRelay(on)
     await ctx.localDb.put(relay.PREF_KEY, { useRelay })

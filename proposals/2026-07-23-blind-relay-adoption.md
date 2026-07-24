@@ -67,8 +67,15 @@ A failed read falls back to on, so a database hiccup cannot silently disable the
 
 Everything above the socket. A relayed connection hands back the same UDX stream and the same
 Noise-authenticated `remotePublicKey`, so Autobase replication, the pairing channel, writer
-admission and revocation are unchanged. `confirmDirectUpgrade` in hyperdht tears the relay down
-if a direct path later appears, so a relayed session upgrades itself for free.
+admission and revocation are unchanged.
+
+**Correction, checked against the version we ship (2026-07-23).** PearTune's proposal cites
+`confirmDirectUpgrade` in `hyperdht/lib/relay-connection.js`, which tears the relay down if a
+direct path later appears. **That file does not exist in hyperdht 6.32.0**, the version PearList
+resolves (both directly and through hyperswarm); it arrives in 6.33. So here a relayed session
+**stays relayed for its lifetime** - it does not silently upgrade itself when the network improves.
+That is a performance ceiling, not a correctness problem: the connection works, and the next
+reconnect tries direct first as always. Bumping hyperdht is tracked in TODO.md.
 
 ## Privacy posture, stated honestly
 

@@ -2444,6 +2444,18 @@ function aiSubtitle (ai) {
   return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`
 }
 
+// One plain line under the "Connect Anywhere" row saying whether the relay has
+// actually been needed. The counters reset when the app restarts, and they only
+// climb on the phone that ACCEPTED a relayed connection, so "none so far" on one
+// device is not proof that neither device relayed. See relay:stats.
+function relaySummary (s, on) {
+  if (!on) return 'Off. Your phones will sync only when they can reach each other directly.'
+  const { successes = 0, attempts = 0 } = s.relaying || {}
+  if (successes > 0) return `Used for ${successes} connection${successes > 1 ? 's' : ''} since PearList started.`
+  if (attempts > 0) return `Tried ${attempts} time${attempts > 1 ? 's' : ''} since PearList started, without completing.`
+  return 'On. Not needed so far, every connection has been direct.'
+}
+
 function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -2471,6 +2483,17 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
   async function toggleRelay (v) {
     try { const r = await call('relay:set', { on: v }); setRelayOn(r?.useRelay !== false) } catch {}
   }
+  // Whether the relay has actually carried anything. Without this a relayed
+  // connection is indistinguishable from a direct one, which makes the off-LAN
+  // behaviour untestable in the field. Polled while Settings is open.
+  const [relayStats, setRelayStats] = useState(null)
+  useEffect(() => {
+    let live = true
+    const poll = () => call('relay:stats', {}).then((r) => { if (live) setRelayStats(r) }).catch(() => {})
+    poll()
+    const t = setInterval(poll, 5000)
+    return () => { live = false; clearInterval(t) }
+  }, [])
   const [ai, setAi] = useState(null)
   useEffect(() => { call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [])
   useEffect(() => on('ai:status', setAi), [])
@@ -2568,7 +2591,9 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
       </Group>
       <Group title='Connection'>
-        <Setting first title='Connect Anywhere' about={ABOUT['Connect Anywhere']} control={<Toggle on={relayOn} onChange={toggleRelay} />} />
+        <Setting first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
+          extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
+          control={<Toggle on={relayOn} onChange={toggleRelay} />} />
       </Group>
       <Group title='Notifications'>
         <Setting first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
