@@ -95,7 +95,8 @@
       "./plugins/with-android-release-signing",
       "./plugins/with-strip-aps",
       "@qvac/sdk/expo-plugin",
-      "./plugins/with-drop-unused-ggml-backends"
+      "./plugins/with-drop-unused-ggml-backends",
+      "./plugins/with-compressed-debug-libs"
     ],
     "assets": [
       "./assets/bare-universal.bundle",
