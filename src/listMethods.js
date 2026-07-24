@@ -103,6 +103,20 @@ function recentScore (x, now) {
   return (x.count || 1) * Math.pow(0.5, ageDays / 30) // frequency, 30-day recency half-life
 }
 const recentMatches = (norm, p) => norm.startsWith(p) || norm.split(/\s+/).some((w) => w.startsWith(p))
+// Saved list templates, device-local (see the template:* methods below).
+const TEMPLATES_KEY = 'listTemplates'
+const TEMPLATES_CAP = 30       // templates kept, newest first
+const TEMPLATE_ITEMS_CAP = 200 // entries snapshotted from one list
+
+async function readTemplates (ctx) {
+  const doc = (await ctx.localDb.get(TEMPLATES_KEY))?.value
+  return Array.isArray(doc?.templates) ? doc.templates : []
+}
+
+async function writeTemplates (ctx, templates) {
+  await ctx.localDb.put(TEMPLATES_KEY, { templates })
+}
+
 async function recordRecent (ctx, text) {
   const t = String(text || '').trim(); if (!t) return
   const norm = t.toLowerCase()
@@ -526,6 +540,102 @@ const methods = {
     const useRelay = relay.setUseRelay(on)
     await ctx.localDb.put(relay.PREF_KEY, { useRelay })
     return { useRelay }
+  },
+
+  // --- saved list templates (device-local) ---------------------------------
+  //
+  // A template is a snapshot of a list's items kept on THIS phone, the same shape
+  // of thing as the item:suggest recents: local, private, never synced. See
+  // proposals/2026-07-23-saved-list-templates.md for why local rather than shared.
+  //
+  // What is snapshotted is the list's SHAPE, not its state: text, qty, aisle and
+  // note-line order, never `checked`, never assignees, never who created it. So
+  // starting a list from a template gives a fresh, all-unchecked list.
+
+  'template:save': async ({ groupId, listId, name }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    await base.update()
+    const list = await readRow(base, listKey(listId))
+    if (!list || list.deleted) throw new Error('list not found')
+
+    const entries = []
+    for await (const { value } of base.view.createReadStream(itemRange(listId))) {
+      if (!value || value.deleted) continue
+      entries.push({
+        text: String(value.text ?? ''),
+        qty: Number.isFinite(value.qty) ? value.qty : 1,
+        ...(value.category ? { category: value.category, catBy: value.catBy } : {}),
+        ...(typeof value.ord === 'string' && value.ord ? { ord: value.ord } : {}),
+      })
+      if (entries.length >= TEMPLATE_ITEMS_CAP) break
+    }
+    if (!entries.length) throw new Error('nothing to save: the list is empty')
+
+    const title = String(name ?? list.name ?? '').trim() || 'Saved list'
+    const templates = await readTemplates(ctx)
+    // Re-saving under a name already used REPLACES it, so refreshing a template
+    // after adding an item is one tap and does not leave two near-identical
+    // entries behind. Matching is case-insensitive for the same reason.
+    const norm = title.toLowerCase()
+    const existing = templates.find((t) => String(t.name || '').toLowerCase() === norm)
+    const row = {
+      id: existing ? existing.id : newEntityId(),
+      name: title,
+      kind: normalizeKind(list.kind),
+      entries,
+      savedAt: existing?.savedAt || Date.now(),
+      updatedAt: Date.now(),
+    }
+    const next = templates.filter((t) => t.id !== row.id)
+    next.unshift(row)
+    if (next.length > TEMPLATES_CAP) next.length = TEMPLATES_CAP
+    await writeTemplates(ctx, next)
+    return { id: row.id, name: row.name, count: entries.length, replaced: !!existing }
+  },
+
+  // Summaries only - the UI never needs every entry to render the picker, and a
+  // 30 x 200 payload over IPC on every open would be silly.
+  'template:list': async (_args, ctx) => {
+    const templates = await readTemplates(ctx)
+    return templates.map((t) => ({
+      id: t.id, name: t.name, kind: t.kind, count: (t.entries || []).length, updatedAt: t.updatedAt,
+    }))
+  },
+
+  'template:delete': async ({ id }, ctx) => {
+    const templates = await readTemplates(ctx)
+    const next = templates.filter((t) => t.id !== id)
+    await writeTemplates(ctx, next)
+    return { deleted: next.length !== templates.length }
+  },
+
+  // Create a NEW list from a template. Everything it writes is ordinary signed
+  // list:/item: rows, so peers see a normal list appear - there is nothing about
+  // it a peer could fail to understand, which is the whole point of keeping
+  // templates device-local.
+  'template:apply': async ({ groupId, id, name }, ctx) => {
+    const templates = await readTemplates(ctx)
+    const t = templates.find((x) => x.id === id)
+    if (!t) throw new Error('template not found')
+
+    const listId = newEntityId()
+    await putRow(ctx, groupId, listKey(listId), {
+      id: listId, name: String(name ?? t.name ?? '').trim() || t.name, kind: normalizeKind(t.kind),
+      assignee: null, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+    })
+    for (const e of (t.entries || [])) {
+      const itemId = newEntityId()
+      await putRow(ctx, groupId, itemKey(listId, itemId), {
+        id: itemId, listId, text: String(e.text ?? ''), qty: Number.isFinite(e.qty) ? e.qty : 1,
+        checked: false, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+        ...(e.category ? { category: e.category, ...(e.catBy ? { catBy: e.catBy } : {}) } : {}),
+        ...(e.ord ? { ord: e.ord } : {}),
+      })
+    }
+    // Deliberately NOT recordRecent'd: the autosuggest corpus is meant to learn
+    // what you TYPE, and one template application would otherwise dump 20 items
+    // into it at once and skew the ranking.
+    return { listId, added: (t.entries || []).length }
   },
 
   // --- lists --------------------------------------------------------------
