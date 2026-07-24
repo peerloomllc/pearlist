@@ -191,6 +191,28 @@ const mockMethods = {
   // Donation reminder: ?donate forces "due" so it can be previewed on demand.
   'donation:status': async () => ({ due: /(?:\?|&)donate/.test(window.location.search || ''), shown: false, firstUseAt: 0 }),
   'donation:dismiss': async () => ({ ok: true }),
+  // Saved list templates, device-local. The preview keeps them in the mock only.
+  'template:list': async () => (mock.templates || []).map((t) => ({ id: t.id, name: t.name, kind: t.kind, count: t.entries.length, updatedAt: t.updatedAt })),
+  'template:save': async ({ groupId, listId, name }) => {
+    const g = mockGroup(groupId)
+    const list = g.lists.get(listId)
+    if (!list) throw new Error('list not found')
+    const entries = [...g.items.values()].filter((i) => i.listId === listId && !i.deleted).map((i) => ({ text: i.text, qty: i.qty || 1 }))
+    if (!entries.length) throw new Error('nothing to save: the list is empty')
+    mock.templates = mock.templates || []
+    const title = (name || list.name || 'Saved list').trim()
+    mock.templates = mock.templates.filter((t) => t.name.toLowerCase() !== title.toLowerCase())
+    mock.templates.unshift({ id: 'tpl' + Date.now(), name: title, kind: list.kind, entries, updatedAt: Date.now() })
+    return { name: title, count: entries.length }
+  },
+  'template:delete': async ({ id }) => { mock.templates = (mock.templates || []).filter((t) => t.id !== id); return { deleted: true } },
+  'template:apply': async ({ groupId, id }) => {
+    const t = (mock.templates || []).find((x) => x.id === id)
+    if (!t) throw new Error('template not found')
+    const { listId } = await mockCall('list:create', { groupId, name: t.name, kind: t.kind })
+    for (const e of t.entries) await mockCall('item:add', { groupId, listId, text: e.text, qty: e.qty })
+    return { listId, added: t.entries.length }
+  },
   // Off-LAN relay toggle. In the preview it is just a remembered boolean.
   'relay:get': async () => ({ useRelay: mock.useRelay !== false, configured: true }),
   'relay:set': async ({ on }) => { mock.useRelay = on !== false; return { useRelay: mock.useRelay } },

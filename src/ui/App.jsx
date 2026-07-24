@@ -1747,6 +1747,38 @@ export default function App () {
     setListDraft(''); setSheet(null)
     await loadLists(gid)               // new list appears in the overview; do not auto-open
   }
+  // Saved list templates. Device-local by design (see
+  // proposals/2026-07-23-saved-list-templates.md), so nothing here touches the
+  // space and other members never see a template - only the list it produces.
+  const [templates, setTemplates] = useState([])
+  const loadTemplates = useCallback(async () => {
+    try { const r = await call('template:list', {}); setTemplates(Array.isArray(r) ? r : []) } catch {}
+  }, [])
+  useEffect(() => { loadTemplates() }, [loadTemplates])
+  async function saveOpenListAsTemplate () {
+    if (!gid || !openListId) return
+    try {
+      await call('template:save', { groupId: gid, listId: openListId })
+      await loadTemplates()
+      setSheet('templates')   // the saved template is now in the list: that IS the confirmation
+    } catch (e) {
+      setSheet(null)
+      alert(String(e?.message || e).includes('empty') ? 'Add an item first - there is nothing to save yet.' : 'Could not save that as a template.')
+    }
+  }
+  async function useTemplate (t) {
+    if (!gid || !t) return
+    setSheet(null)
+    await call('template:apply', { groupId: gid, id: t.id })
+    await loadLists(gid)      // the new list appears in the overview; do not auto-open
+  }
+  async function deleteTemplate (t) {
+    if (!t) return
+    const ok = await askConfirm({ title: 'Forget this template?', message: `"${t.name}" is only on this phone, so this does not affect anyone else in the space.`, confirmLabel: 'Forget', danger: true })
+    if (!ok) return
+    await call('template:delete', { id: t.id })
+    await loadTemplates()
+  }
   async function setListKind (listId, kind) {
     if (!gid || !listId) return
     await call('list:setKind', { groupId: gid, listId, kind })
@@ -1903,6 +1935,11 @@ export default function App () {
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
               : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
           </div>
+          {templates.length && !listDraft.trim() ? (
+            <button onClick={() => setSheet('templates')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: `${sp.sm}px 0 0`, background: 'none', border: 'none', cursor: 'pointer', color: c.primary, fontSize: 14, fontWeight: 300 }}>
+              Start from a saved list
+            </button>
+          ) : null}
           <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' />
         </>
       )}
@@ -1922,7 +1959,9 @@ export default function App () {
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
         onReset={resetOpenList}
+        onSaveTemplate={saveOpenListAsTemplate}
         onDelete={confirmDeleteOpenList} />
+      <TemplatesSheet open={sheet === 'templates'} templates={templates} onClose={() => setSheet(null)} onUse={useTemplate} onDelete={deleteTemplate} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
@@ -2261,7 +2300,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 // a note, which is not a list. ListCompleteSheet still says "Delete list" and
 // should: it only ever fires when every item on a list is checked, and a note's
 // lines are never checked, so a note cannot reach it.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -2280,7 +2319,42 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped,
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
       {grouped ? <Row onClick={onToggleCollapseAll}><span style={{ flex: 1, textAlign: 'left' }}>{allCollapsed ? `Expand all ${groupNoun}s` : `Collapse all ${groupNoun}s`}</span></Row> : null}
       {canReset ? <Row onClick={onReset}><span style={{ flex: 1, textAlign: 'left' }}>Uncheck all</span></Row> : null}
+      <Row onClick={onSaveTemplate}><span style={{ flex: 1, textAlign: 'left' }}>Save as template</span><span style={{ color: c.text.muted, fontSize: 13 }}>this phone</span></Row>
       {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete</span></Row> : null}
+    </BottomSheet>
+  )
+}
+
+// Saved lists ("templates"), kept on this phone only. Tapping one creates a NEW
+// list in the current space from its items; the trash forgets it here and touches
+// nothing anyone else can see. The copy leans on that distinction, because "saved
+// on this phone" is exactly the thing a household app makes people guess about.
+function TemplatesSheet ({ open, templates, onClose, onUse, onDelete }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Saved lists'>
+      <p style={{ color: c.text.muted, fontSize: 13, textAlign: 'center', lineHeight: 1.45, margin: `0 0 ${sp.sm}px` }}>
+        Saved on this phone only. Starting one creates a new list that everyone in the space can see.
+      </p>
+      {templates.length === 0 ? (
+        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `${sp.md}px 0` }}>
+          Nothing saved yet. Open a list, tap its options and choose "Save as template".
+        </p>
+      ) : templates.map((t) => {
+        const cat = categoryOf(t.kind)
+        const CatIcon = cat.Icon
+        return (
+          <div key={t.id} style={{ display: 'flex', alignItems: 'center', borderTop: `1px solid ${c.divider}` }}>
+            <button onClick={() => onUse(t)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300 }}>
+              <CatIcon size={18} color={cat.color} weight='regular' />
+              <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+              <span style={{ color: c.text.muted, fontSize: 13, flexShrink: 0 }}>{t.count} item{t.count === 1 ? '' : 's'}</span>
+            </button>
+            <button onClick={() => onDelete(t)} aria-label={`Forget ${t.name}`} style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}>
+              <Trash size={18} weight='regular' />
+            </button>
+          </div>
+        )
+      })}
     </BottomSheet>
   )
 }

@@ -595,3 +595,108 @@ test('a note line does not pollute the shopping autosuggest corpus', async () =>
   assert.deepEqual(suggestions, ['milk'], 'only the grocery item was learned')
   await engine.close()
 })
+
+// --- saved list templates (device-local) ------------------------------------
+
+test('save a list as a template, then start a new list from it', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const shop = await call('list:create', { groupId, name: 'Weekly shop', kind: 'grocery' })
+  await call('item:add', { groupId, listId: shop.listId, text: 'milk', qty: 2 })
+  const bread = await call('item:add', { groupId, listId: shop.listId, text: 'bread' })
+
+  // Check one off: the template must capture the SHAPE, not the state.
+  await call('item:toggle', { groupId, listId: shop.listId, itemId: bread.itemId, checked: true })
+
+  const saved = await call('template:save', { groupId, listId: shop.listId })
+  assert.equal(saved.count, 2)
+  assert.equal(saved.name, 'Weekly shop')
+
+  const listed = await call('template:list', {})
+  assert.equal(listed.length, 1)
+  assert.equal(listed[0].kind, 'grocery')
+  assert.equal(listed[0].count, 2)
+
+  const applied = await call('template:apply', { groupId, id: saved.id })
+  assert.equal(applied.added, 2)
+  assert.notEqual(applied.listId, shop.listId, 'a NEW list, not the one it was saved from')
+
+  const items = await call('item:getAll', { groupId, listId: applied.listId })
+  assert.deepEqual(items.map((i) => i.text).sort(), ['bread', 'milk'])
+  assert.ok(items.every((i) => !i.checked), 'a list started from a template begins unchecked')
+  assert.equal(items.find((i) => i.text === 'milk').qty, 2, 'quantities carry over')
+
+  const lists = await call('list:getAll', { groupId })
+  assert.equal(lists.filter((l) => l.name === 'Weekly shop').length, 2, 'original and the new one')
+  assert.equal(lists.find((l) => l.id === applied.listId).kind, 'grocery', 'kind carries over')
+  await engine.close()
+})
+
+test('re-saving under the same name replaces rather than duplicates', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const l = await call('list:create', { groupId, name: 'Shop', kind: 'grocery' })
+  await call('item:add', { groupId, listId: l.listId, text: 'milk' })
+  const first = await call('template:save', { groupId, listId: l.listId })
+
+  await call('item:add', { groupId, listId: l.listId, text: 'eggs' })
+  const second = await call('template:save', { groupId, listId: l.listId })
+
+  assert.equal(second.replaced, true)
+  assert.equal(second.id, first.id, 'same template, refreshed')
+  const listed = await call('template:list', {})
+  assert.equal(listed.length, 1, 'not two near-identical entries')
+  assert.equal(listed[0].count, 2)
+  await engine.close()
+})
+
+test('templates are device-local: nothing about them reaches the space', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const l = await call('list:create', { groupId, name: 'Shop' })
+  await call('item:add', { groupId, listId: l.listId, text: 'milk' })
+  await call('template:save', { groupId, listId: l.listId })
+
+  // The replicated view holds exactly the one list and its one item. A template
+  // that leaked into it would be a row an older peer could not interpret.
+  const lists = await call('list:getAll', { groupId })
+  assert.equal(lists.length, 1)
+  assert.equal((await call('item:getAll', { groupId, listId: l.listId })).length, 1)
+  await engine.close()
+})
+
+test('saving an empty list is refused, and deleting forgets it', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const empty = await call('list:create', { groupId, name: 'Empty' })
+  await assert.rejects(() => call('template:save', { groupId, listId: empty.listId }), /empty/)
+
+  const l = await call('list:create', { groupId, name: 'Shop' })
+  await call('item:add', { groupId, listId: l.listId, text: 'milk' })
+  const t = await call('template:save', { groupId, listId: l.listId })
+  assert.equal((await call('template:delete', { id: t.id })).deleted, true)
+  assert.deepEqual(await call('template:list', {}), [])
+  await assert.rejects(() => call('template:apply', { groupId, id: t.id }), /not found/)
+  await engine.close()
+})
+
+test('a deleted item is not carried into the template', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const l = await call('list:create', { groupId, name: 'Shop' })
+  await call('item:add', { groupId, listId: l.listId, text: 'milk' })
+  const gone = await call('item:add', { groupId, listId: l.listId, text: 'anchovies' })
+  await call('item:delete', { groupId, listId: l.listId, itemId: gone.itemId })
+
+  const t = await call('template:save', { groupId, listId: l.listId })
+  assert.equal(t.count, 1)
+  const applied = await call('template:apply', { groupId, id: t.id })
+  const items = await call('item:getAll', { groupId, listId: applied.listId })
+  assert.deepEqual(items.map((i) => i.text), ['milk'])
+  await engine.close()
+})
