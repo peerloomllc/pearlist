@@ -194,6 +194,7 @@ const mockMethods = {
   // Off-LAN relay toggle. In the preview it is just a remembered boolean.
   'relay:get': async () => ({ useRelay: mock.useRelay !== false, configured: true }),
   'relay:set': async ({ on }) => { mock.useRelay = on !== false; return { useRelay: mock.useRelay } },
+  'relay:stats': async () => ({ useRelay: mock.useRelay !== false, relaying: { attempts: 0, successes: 0, aborts: 0 }, punches: { consistent: 0, random: 0, open: 0 }, connections: 1, randomized: false }),
   // Shell actions (real shell intercepts these; here we approximate for preview).
   'shell:openUrl': async ({ url }) => { try { window.open(url, '_blank', 'noopener') } catch {} return { ok: true } },
   'shell:share': async ({ title, text }) => { try { if (navigator.share) await navigator.share({ title, text }); else alert('Share:\n\n' + text) } catch {} return { ok: true } },
