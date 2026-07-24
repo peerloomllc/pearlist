@@ -1057,9 +1057,24 @@ echo "==> Stopping any warm Gradle daemons (so the next build picks up JAVA_HOME
 )
 
 echo "==> Building signed release APK (this takes a few minutes)..."
+# Compress the native libraries in the SIDELOAD APK, and only there.
+#
+# gradle.properties sets expo.useLegacyPackaging=false, which stores every .so
+# uncompressed so Android can map it straight out of the APK. That is the right
+# default for the Play AAB below, where uncompressed means a SMALLER install.
+# But this APK is a direct download, and libbare-kit.so alone is 60 MB stored
+# against 16.7 MB deflated - it is V8, and it compresses about 3.6x. Measured
+# 2026-07-23: the APK goes ~143 MB -> ~100 MB.
+#
+# The trade is real and lands on install rather than download: Android extracts
+# the libs at install time, so that file costs ~77 MB on disk (17 in the APK plus
+# 60 extracted) instead of 60, and installs are slower. For a sideload that is
+# the right way round - the download is the part people wait on and abandon.
+#
+# Drop the -P flag to revert. The AAB below deliberately does NOT get it.
 (
   export KEYSTORE_FILE KEY_ALIAS KEYSTORE_PASSWORD KEY_PASSWORD APP_VERSION APP_VERSION_CODE
-  cd android && ./gradlew assembleRelease -q
+  cd android && ./gradlew assembleRelease -q -Pexpo.useLegacyPackaging=true
 )
 
 if $PUBLISH_PLAY; then
