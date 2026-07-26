@@ -603,6 +603,19 @@ async function aiEnableConfirmed () {
   let caps
   try { caps = await call('shell:deviceCaps', {}) } catch { return true }
   if (!caps || !caps.lowEnd) return true
+  // Below the floor it does not "maybe" fail, it fails: the model downloads and
+  // then cannot be loaded into memory. Measured on an iPhone SE (2nd gen, 3 GB),
+  // where the ~0.8 GB download completed and the load was refused under memory
+  // pressure. Do not spend the user's 0.8 GB and ten minutes to reach that.
+  if (caps.tooSmall) {
+    await askConfirm({
+      acknowledge: true,
+      title: 'This phone is too small for the AI',
+      message: `The on-device AI needs to hold a ~0.8 GB model in memory, and this phone has about ${(caps.totalMemMB / 1000).toFixed(1)} GB of RAM in total. It would download the model and then fail to start it, so PearList will not offer it here. The fast name-matcher still sorts most groceries instantly, and it costs you nothing.`,
+      confirmLabel: 'Got it',
+    })
+    return false
+  }
   const parts = []
   if (caps.lowMem) parts.push(`only ~${(caps.totalMemMB / 1000).toFixed(1)} GB of RAM`)
   if (caps.lowStorage) parts.push(`~${(caps.freeStorageMB / 1000).toFixed(1)} GB of free storage`)
@@ -623,11 +636,17 @@ function ConfirmHost () {
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.base}px` }}>{state?.message}</p>
       {/* Equal-width buttons: the confirm and Cancel carry the same weight, so one
           does not read as the obvious choice by size alone. Applies to every
-          askConfirm (Remove, Stronger removal, Leave, Clear learned aisles...). */}
-      <div style={{ display: 'flex', gap: sp.sm }}>
-        <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
-        <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
-      </div>
+          askConfirm (Remove, Stronger removal, Leave, Clear learned aisles...).
+          `acknowledge` collapses this to a single dismiss button, for the cases
+          where there is nothing to decide - the answer is already no. */}
+      {state?.acknowledge
+        ? <button onClick={() => done(false)} style={{ width: '100%', padding: '11px 14px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'OK'}</button>
+        : (
+          <div style={{ display: 'flex', gap: sp.sm }}>
+            <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
+            <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        )}
     </BottomSheet>
   )
 }
@@ -1478,6 +1497,12 @@ export default function App () {
   // ai:status event (download progress, ready).
   const [aiStatus, setAiStatus] = useState(null)
   const [aiPromptDismissed, setAiPromptDismissed] = useState(false)
+  // Read once: on a phone too small to ever load the model, do not offer it at
+  // all. Repeatedly pitching a feature the device cannot run is worse than the
+  // feature being absent. Only hides the PITCH - a device that somehow already
+  // has consent keeps its existing UI.
+  const [deviceCaps, setDeviceCaps] = useState(null)
+  useEffect(() => { call('shell:deviceCaps', {}).then(setDeviceCaps).catch(() => {}) }, [])
   useEffect(() => {
     call('shell:aiStatus', {}).then(setAiStatus).catch(() => {})
     return on('ai:status', setAiStatus)
@@ -1922,7 +1947,7 @@ export default function App () {
           {/* Outside the scroll area so the consent prompt / download+loading
               progress stays pinned below the header and is visible no matter how
               far the list is scrolled (it used to scroll away with the items). */}
-          {openList?.kind === 'grocery' && !aiPromptDismissed
+          {openList?.kind === 'grocery' && !aiPromptDismissed && !(deviceCaps?.tooSmall && !aiStatus?.consent)
             ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onLoad={() => call('shell:aiLoad', {}).then(setAiStatus).catch(() => {})} onDismiss={() => setAiPromptDismissed(true)} />
             : null}
           <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>

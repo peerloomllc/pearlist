@@ -22,6 +22,10 @@ import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../mod
 import { terminateWebViewRenderer } from '../modules/webview-recovery'
 import { classifyAisleAI, expandToItems, getAiStatus, loadModelNow, unloadFromMemory, setAiConsent, removeAiModel, setProgressSink } from './qvac'
 
+// Whether this phone can run the on-device model at all (thresholds + the devices
+// they were calibrated on are documented there).
+const { capsFor } = require('../src/deviceTier.js')
+
 // --- local notifications (assignment + join + completion; ON by default) ----
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
 // default (permission requested on first run; user can turn it off in Profile).
@@ -471,11 +475,9 @@ export default function Shell () {
           const totalMemMB = Math.round((Device.totalMemory || 0) / 1e6)
           let freeStorageMB = 0
           try { freeStorageMB = Math.round((await FileSystem.getFreeDiskStorageAsync()) / 1e6) } catch {}
-          // ~4600 MB warns 4GB-class devices (they report ~3.8-3.9GB) while 6GB+
-          // (report ~5.5GB+) pass. It's a warning, not a hard block.
-          const lowMem = totalMemMB > 0 && totalMemMB < 4600
-          const lowStorage = freeStorageMB > 0 && freeStorageMB < 1500
-          return reply(id, { ok: true, totalMemMB, freeStorageMB, lowMem, lowStorage, lowEnd: lowMem || lowStorage })
+          // Thresholds + their calibration live in src/deviceTier.js, where they
+          // are unit-tested against the two phones we have actually measured.
+          return reply(id, { ok: true, ...capsFor({ totalMemMB, freeStorageMB }) })
         }
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')
