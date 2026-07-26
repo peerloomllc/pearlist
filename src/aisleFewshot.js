@@ -19,8 +19,9 @@ const AISLES = ['Produce', 'Dairy & Eggs', 'Meat & Seafood', 'Bakery', 'Frozen',
   'Pantry', 'Baking', 'Condiments', 'Snacks', 'Beverages', 'Alcohol', 'Household',
   'Personal Care', 'Pet', 'Other']
 
-// The shipped prompt, verbatim. app/qvac.ts builds its history from FULL, so this
-// is the one place the production prompt lives - a variant is a subset of it.
+// The ELEVEN-example few-shot the app shipped from 2026-07-11 to 2026-07-26. Kept
+// verbatim as the reference point every variant is a subset of, and as what the
+// measurements below were taken against. It is NO LONGER what ships - see SHIPPED.
 const FULL = [
   ['SunChips', 'Snacks'],
   ['La Croix', 'Beverages'],
@@ -44,12 +45,41 @@ const pick = (...names) => FULL.filter(([item]) => names.includes(item))
 // pet rule (the one instruction the taxonomy cannot infer). v0 leans entirely on
 // the system prompt plus the json_schema enum.
 const VARIANTS = {
-  v11: FULL,                                                                  // shipped
+  v11: FULL,                                                                  // shipped until 2026-07-26
   v6: pick('SunChips', 'Tide Pods', 'Chobani', 'Eggo waffles', 'sriracha', 'cat food'),
-  v4: pick('SunChips', 'Tide Pods', 'Chobani', 'cat food'),
+  v4: pick('SunChips', 'Tide Pods', 'Chobani', 'cat food'),                   // SHIPPED from 2026-07-26
   v2: pick('SunChips', 'cat food'),
   v0: [],
 }
+
+// WHAT SHIPS, and why it is four examples rather than eleven.
+//
+// Measured 2026-07-26 on the iOS Simulator: 652 calls, 26 labelled items the
+// keyword pass cannot place, 5 repeats each, graded on the majority vote.
+//
+//   examples  tokens  ms/call  prefill   accuracy   paired vs 11 examples
+//   11 (old)     349      871    714ms        50%   baseline
+//    6           229      623    466ms        50%   net  0 items
+//    4           180      526    373ms        54%   net +1 item     <- this one
+//    2           130      427    272ms        58%   net +2 items
+//    0            84      412    176ms        19%   net -8 items    <- collapse
+//
+// Prefill fell almost exactly in proportion to the prompt, which is the whole
+// mechanism: 81% of the cost was re-reading the few-shot to emit 8 tokens of JSON.
+//
+// FOUR, not two, even though two measured slightly faster and no worse: with 26
+// items a +2 difference is well inside noise, so the accuracy column cannot
+// separate them, and four keeps one example of each thing the prompt has to
+// teach - a brand mapping to a product (SunChips), a non-food brand (Tide Pods),
+// a dairy brand (Chobani) and the pet rule, which is the one instruction the
+// taxonomy cannot infer. Zero examples is a genuine collapse, so the few-shot is
+// doing real work; it just does not need eleven.
+//
+// The number the model gets right is 50-58% either way. That is the more
+// important finding and it is NOT a prompt problem: eight items (Sargento,
+// Modelo, Barefoot, Progresso, Stouffers, Applegate, Kikkoman, RXBAR) are wrong
+// in EVERY variant. A 1B model does not know those brands. See TODO.md.
+const SHIPPED = VARIANTS.v4
 
 const SYSTEM = 'You assign a grocery item to the single best supermarket aisle. Items are often BRAND NAMES - map the brand to the product it sells (e.g. a chip brand -> Snacks). Reply with JSON only.'
 
@@ -143,4 +173,4 @@ function score (runs) {
   }
 }
 
-module.exports = { AISLES, SYSTEM, FULL, VARIANTS, ITEMS, history, majorityVote, score }
+module.exports = { AISLES, SYSTEM, FULL, SHIPPED, VARIANTS, ITEMS, history, majorityVote, score }

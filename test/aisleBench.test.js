@@ -9,30 +9,62 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 const aisles = require('../src/aisles')
-const { AISLES, SYSTEM, FULL, VARIANTS, ITEMS, history, majorityVote, score } = require('../src/aisleFewshot')
+const { AISLES, SYSTEM, FULL, SHIPPED, VARIANTS, ITEMS, history, majorityVote, score } = require('../src/aisleFewshot')
 
-test('the shipped prompt is byte-identical to the pre-refactor wording', () => {
-  // If this fails, either the prompt changed (which invalidates every number the
-  // harness has produced and changes what users get), or the builder broke.
-  const msgs = history('Sargento', FULL)
-  assert.equal(msgs.length, 2 + FULL.length * 2, 'system + 11 example pairs + the item')
+test('what ships is the FOUR-example prompt, and exactly these four', () => {
+  // Cut from eleven on 2026-07-26 after measuring all five variants: ~1.7x faster
+  // for no measurable accuracy cost (the numbers are in src/aisleFewshot.js).
+  // Each of the four earns its place, so losing one silently is a regression:
+  //   SunChips  a brand -> the product it sells, the core skill
+  //   Tide Pods a NON-FOOD brand, so household items do not land in a food aisle
+  //   Chobani   a dairy brand
+  //   cat food  the pet rule, the one instruction the taxonomy cannot infer
+  assert.deepEqual(SHIPPED, [
+    ['SunChips', 'Snacks'],
+    ['Tide Pods', 'Household'],
+    ['Chobani', 'Dairy & Eggs'],
+    ['cat food', 'Pet'],
+  ])
+  assert.equal(SHIPPED, VARIANTS.v4, 'SHIPPED must BE a measured variant, not a hand-edited copy')
+})
+
+test('the shipped prompt renders exactly as the model sees it', () => {
+  const msgs = history('Sargento', SHIPPED)
+  assert.equal(msgs.length, 2 + SHIPPED.length * 2, 'system + 4 example pairs + the item')
   assert.equal(msgs[0].role, 'system')
   assert.equal(msgs[0].content, 'You assign a grocery item to the single best supermarket aisle. Items are often BRAND NAMES - map the brand to the product it sells (e.g. a chip brand -> Snacks). Reply with JSON only.')
   assert.deepEqual(msgs.slice(1, 5), [
     { role: 'user', content: 'Item: "SunChips"' },
     { role: 'assistant', content: '{"aisle":"Snacks"}' },
-    { role: 'user', content: 'Item: "La Croix"' },
-    { role: 'assistant', content: '{"aisle":"Beverages"}' },
+    { role: 'user', content: 'Item: "Tide Pods"' },
+    { role: 'assistant', content: '{"aisle":"Household"}' },
   ])
   assert.deepEqual(msgs[msgs.length - 1], { role: 'user', content: 'Item: "Sargento"' })
   assert.equal(SYSTEM, msgs[0].content)
 })
 
-test('app/qvac.ts builds its prompt from the shared module, not a copy', () => {
-  // The 11 examples used to be inline in qvac.ts. If they come back, the harness
-  // would be grading a prompt the app no longer uses.
+test('the old eleven-example prompt is preserved verbatim as the reference', () => {
+  // Every measurement is expressed as a delta against this, and every variant is a
+  // subset of it, so it has to stay exactly as it shipped even though it no longer
+  // does. If it drifts, the comparison table stops meaning anything.
+  assert.equal(FULL.length, 11)
+  assert.deepEqual(FULL.slice(0, 3), [['SunChips', 'Snacks'], ['La Croix', 'Beverages'], ['Tide Pods', 'Household']])
+  assert.deepEqual(FULL.slice(-2), [['cat food', 'Pet'], ['dog food', 'Pet']])
+  assert.equal(VARIANTS.v11, FULL)
+})
+
+test('the shipped prompt really is shorter than the old one', () => {
+  const len = (shots) => history('x', shots).map((m) => m.content).join('').length
+  assert.ok(len(SHIPPED) < len(FULL) * 0.65, 'the whole point was cutting prefill; this must stay well under the old size')
+})
+
+test('app/qvac.ts uses SHIPPED from the shared module, not a copy', () => {
+  // The examples used to be inline in qvac.ts. If they come back, the harness
+  // would be grading a prompt the app no longer uses - and the app would keep the
+  // eleven-example cost forever.
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'app', 'qvac.ts'), 'utf8')
-  assert.match(src, /require\('\.\.\/src\/aisleFewshot\.js'\)/)
+  assert.match(src, /SHIPPED: AISLE_FEWSHOT/, 'the app must take the SHIPPED prompt')
+  assert.doesNotMatch(src, /FULL: AISLE_FEWSHOT/, 'the app must not go back to the eleven-example prompt')
   assert.doesNotMatch(src, /Item: "SunChips"/, 'few-shot examples must not be inline in qvac.ts')
 })
 

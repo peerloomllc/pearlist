@@ -167,11 +167,11 @@ export async function removeAiModel (): Promise<AiStatus> {
 }
 
 // The few-shot AND the prompt builder live in src/aisleFewshot.js, so the shipped
-// prompt, the trimmed variants the harness grades (app/bench.ts) and the test that
-// guards the shipped wording are all one definition. FULL is the shipped 11
-// examples: teaching the JSON shape + brand->product mapping is what a 1B model
-// badly needs for lesser-known brands (SunChips -> Snacks, etc).
-const { FULL: AISLE_FEWSHOT, VARIANTS: AISLE_VARIANTS, history: aisleHistory } = require('../src/aisleFewshot.js')
+// prompt, the trimmed variants the harness grades (app/bench.ts) and the tests
+// that guard both are one definition. SHIPPED is four examples, cut from eleven
+// on 2026-07-26 after measuring all five variants - roughly 1.7x faster for no
+// measurable accuracy cost. The reasoning and the numbers are in that file.
+const { SHIPPED: AISLE_FEWSHOT, VARIANTS: AISLE_VARIANTS, history: aisleHistory } = require('../src/aisleFewshot.js')
 
 // One classification call. Returns the aisle (or null if unusable) plus whatever
 // timing/token counts the SDK reported, which is what the harness measures. The

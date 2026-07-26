@@ -113,7 +113,14 @@ trap "kill $STREAM_PID 2>/dev/null || true; xcrun simctl terminate '$UDID' '$BUN
 sleep 2
 
 # Merge whatever the app has written into the accumulated results.
+#
+# ONLY EVER CALLED WITH THE APP STOPPED. The app rewrites its whole results file
+# on every call, so reading and then truncating it while the app is alive races
+# the write - it can take a partial copy and then discard answers that arrived in
+# between. Harvest at launch boundaries, where the file is at rest.
 harvest () {
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+  sleep 1
   [ -s "$RESULTS_FILE" ] || return 0
   cat "$RESULTS_FILE" >> "$JSONL"
   : > "$RESULTS_FILE"
