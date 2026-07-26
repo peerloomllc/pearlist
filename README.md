@@ -17,10 +17,12 @@ Part of the [PeerLoom](https://peerloomllc.com) suite of account-free, peer-to-p
 - **Shared lists per household** - one space holds many lists; anyone in it can add, check off, rename, assign and delete items, and every change syncs to everyone
 - **Multiple spaces** - one identity, many private groups (family, roommates, a trip crew); switch between them, and no one sees your other spaces
 - **Assign items and lists** - assign an item or a whole list to a person, so any list doubles as a shared chore board
-- **Quantities, notes and links** - set a quantity, add a note, or attach a store link to any item
+- **Quantities, notes and links** - set a quantity, add a note or attach a store link to any item
 - **Check off like paper** - checked items get a felt-tip marker strike; swipe a row to delete with a quick undo
 - **Join by QR or link** - scan a code or tap an invite to join a space; no account, no email
-- **On-device AI, fully offline** - optional. Sorts items into store aisles and turns a pasted recipe into a shopping list, running the model on your phone. Nothing is sent anywhere. Off by default (see below)
+- **Grocery aisles and sections** - a grocery list groups itself by store aisle so you shop one aisle at a time; other lists take sections you name yourself. Drag to reorder either, and optionally let an aisle fold away once you have everything in it
+- **Saved lists** - save a list you shop again and again, then start a fresh one from it instead of retyping the weekly shop
+- **On-device AI, fully offline** - optional. Sorts items into store aisles and turns a pasted recipe into a shopping list, running the model on your phone. Nothing about your lists is sent anywhere. Off by default (see below)
 - **Local notifications** - get a heads-up when someone assigns you an item or joins your space (opt-in, off by default)
 - **No accounts** - your identity is a cryptographic key pair generated on your device; nothing is tied to an email or phone number
 - **No data collection** - PeerLoom, Google, Apple and no third party ever sees your lists
@@ -32,7 +34,7 @@ Part of the [PeerLoom](https://peerloomllc.com) suite of account-free, peer-to-p
 PearList uses **peer-to-peer technology** powered by [Hypercore Protocol](https://hypercore-protocol.org) to sync your lists directly between the devices in your household.
 
 ### No servers
-Most shared-list apps route your lists through a central server. The app company can read your data, sell it, get hacked, go down, or shut down. PearList has no central server. Your lists never leave your devices.
+Most shared-list apps route your lists through a central server. The app company can read your data, sell it, get hacked, go down or shut down. PearList has no central server. Your lists never leave your devices.
 
 ### How sync works
 When devices in the same space are online at the same time - whether on the same Wi-Fi network or anywhere on the internet - they find each other using a distributed hash table (DHT), a technology similar to how BitTorrent works. Once connected, they sync directly, device to device, with no middleman.
@@ -54,8 +56,8 @@ the model and reclaims the space.
 Two honest notes, because the design is more interesting than the marketing:
 
 - **Aisle sorting is keyword-first, model-second.** A small hand-written matcher
-  handles the common items instantly and, on our own benchmarks, more accurately
-  than the model does. The model is the fallback for what the matcher cannot
+  handles the common items instantly and, in our own testing, more accurately
+  than the model did. The model is the fallback for what the matcher cannot
   place. We shipped the hybrid because it measured better than either half.
 - **The model is not fast.** Expect several seconds per item on a phone. The
   instant matcher keeps working whether or not the model is enabled, so nothing
@@ -70,7 +72,7 @@ You join a space via a one-time invite link or QR code. The link encodes the cry
 
 - No accounts or sign-up required
 - No analytics, tracking or telemetry
-- No third-party SDKs
+- No advertising or attribution SDKs. The only third-party code that touches the network at all is the peer-to-peer stack itself and the optional on-device AI, which reaches out once to download its model and never again
 - All sync traffic is encrypted end-to-end
 - Your lists stay on the devices in your spaces - never uploaded anywhere
 
@@ -103,4 +105,4 @@ See the [full privacy policy](https://peerloomllc.com/pearlist/privacy) and a [p
 
 ## Feedback & Bug Reports
 
-Please open an [issue](../../issues) on GitHub. Include your platform (Android or iOS), OS version, and a description of what happened.
+Please open an [issue](../../issues) on GitHub. Include your platform (Android or iOS), OS version and a description of what happened.
