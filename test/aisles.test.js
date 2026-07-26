@@ -94,6 +94,60 @@ test('brand + category together still resolve (real shopping-list wording)', () 
   assert.equal(classifyAisle('Swanson chicken broth'), 'Pantry')
 })
 
+// THE PATH REAL USERS WALK. The on-device model only ever sees items the keyword
+// pass leaves as 'Other', and the model is right about half the time on those. But
+// people write "Kikkoman soy sauce", not "Kikkoman" - and with the noun present the
+// keyword pass places it instantly, correctly, and the model is never asked.
+//
+// Measured while grading the model (2026-07-26): of 26 brand items written the way
+// someone actually writes a list, 23 are placed here and only 3 reach the model.
+// That is the whole argument for spending effort on this list rather than on the
+// prompt, so it is pinned: a regression here silently pushes work onto a 4-second
+// coin flip.
+test('brand + the actual product resolves without the model', () => {
+  const cases = [
+    ['Sargento cheese', 'Dairy & Eggs'],
+    ['Kerrygold butter', 'Dairy & Eggs'],
+    ['Modelo beer', 'Alcohol'],
+    ['Barefoot wine', 'Alcohol'],
+    ['Folgers coffee', 'Beverages'],
+    ['Spindrift sparkling water', 'Beverages'],
+    ['Neutrogena face wash', 'Personal Care'],
+    // Hand soap is Personal Care; DISH soap is Household. Mrs Meyers makes both,
+    // which is exactly why the noun decides it and the brand cannot.
+    ['Mrs Meyers hand soap', 'Personal Care'],
+    ['Mrs Meyers dish soap', 'Household'],
+    ['Seventh Generation detergent', 'Household'],
+    ['Barilla pasta', 'Pantry'],
+    ['Progresso soup', 'Pantry'],
+    ['Duncan Hines cake mix', 'Baking'],
+    ['Stouffers frozen lasagna', 'Frozen'],
+    ['Ore-Ida frozen fries', 'Frozen'],
+    ['Kings Hawaiian rolls', 'Bakery'],
+    ['Sara Lee bread', 'Bakery'],
+    ['Butterball turkey', 'Meat & Seafood'],
+    ['Applegate deli ham', 'Meat & Seafood'],
+    ['Cholula hot sauce', 'Condiments'],
+    ['Kikkoman soy sauce', 'Condiments'],
+    ['RXBAR protein bar', 'Snacks'],
+    ['Clif bar', 'Snacks'],
+    ['Fresh Step cat litter', 'Pet'],
+  ]
+  for (const [item, expected] of cases) {
+    assert.equal(classifyAisle(item), expected, `${item} should be ${expected} without asking the model`)
+  }
+})
+
+test('the brand ALONE is what actually reaches the model', () => {
+  // The same products with the noun stripped. These are the model's real workload,
+  // and it gets roughly half of them wrong (see src/aisleFewshot.js), so anything
+  // moved OUT of this list is a straight win: instant instead of seconds, and
+  // right instead of a coin flip.
+  for (const brand of ['Sargento', 'Modelo', 'Barefoot', 'Folgers', 'Progresso', 'Kikkoman', 'RXBAR']) {
+    assert.equal(classifyAisle(brand), FALLBACK, `${brand} alone falls through to the model today`)
+  }
+})
+
 test('unknown or empty items fall back to Other, never null', () => {
   assert.equal(classifyAisle('flux capacitor'), FALLBACK)
   assert.equal(classifyAisle(''), FALLBACK)
