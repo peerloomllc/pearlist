@@ -33,7 +33,13 @@ TIMEOUT="${TIMEOUT:-5400}"
 OUT_DIR="$REPO_ROOT/metadata/bench"
 JSONL="$OUT_DIR/android-aisle-bench.jsonl"
 mkdir -p "$OUT_DIR"
-[ "${FRESH:-0}" = "1" ] && : > "$JSONL"
+# FRESH clears the APP's results file too - see the iOS driver for the run this
+# cost. Clearing only the driver's copy leaves stale answers to be harvested.
+if [ "${FRESH:-0}" = "1" ]; then
+  : > "$JSONL"
+  $ADB shell am force-stop "$APP_ID" >/dev/null 2>&1 || true
+  $ADB shell run-as "$APP_ID" rm -f files/bench-results.jsonl >/dev/null 2>&1 || true
+fi
 touch "$JSONL"
 
 ADB="adb -s $SERIAL"

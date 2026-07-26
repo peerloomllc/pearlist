@@ -54,31 +54,32 @@ const VARIANTS = {
 
 // WHAT SHIPS, and why it is four examples rather than eleven.
 //
-// Measured 2026-07-26 on the iOS Simulator: 652 calls, 26 labelled items the
-// keyword pass cannot place, 5 repeats each, graded on the majority vote.
+// Two runs, both on the iOS Simulator, majority vote over 5 repeats:
 //
-//   examples  tokens  ms/call  prefill   accuracy   paired vs 11 examples
-//   11 (old)     349      871    714ms        50%   baseline
-//    6           229      623    466ms        50%   net  0 items
-//    4           180      526    373ms        54%   net +1 item     <- this one
-//    2           130      427    272ms        58%   net +2 items
-//    0            84      412    176ms        19%   net -8 items    <- collapse
+//   26 items (retired set, 652 calls)   11: 871ms 50%   4: 526ms 54%   2: 427ms 58%
+//   70 items (current set, 1050 calls)  11: 854ms 37%   4: 519ms 34%   2: 418ms 41%
 //
-// Prefill fell almost exactly in proportion to the prompt, which is the whole
+// and the winner re-timed on the TCL, the phone the 5.9s/item baseline came from:
+//   11 examples  349 tokens  6494ms/item  prefill 5237ms
+//    4 examples  180 tokens  3985ms/item  prefill 2790ms   = 1.63x faster
+//
+// SPEED IS THE WHOLE CASE. Prefill falls in proportion to the prompt, which is the
 // mechanism: 81% of the cost was re-reading the few-shot to emit 8 tokens of JSON.
+// ACCURACY IS A WASH and the wider run says so plainly - 4 examples measured net +1
+// item on 26 and net -2 on 70. At n=70 one standard error is 5.9 points, so nothing
+// under ~20 points is resolvable. Do not read those deltas as a finding; the honest
+// statement is that 11, 4 and 2 examples cannot be told apart on accuracy.
 //
-// FOUR, not two, even though two measured slightly faster and no worse: with 26
-// items a +2 difference is well inside noise, so the accuracy column cannot
-// separate them, and four keeps one example of each thing the prompt has to
-// teach - a brand mapping to a product (SunChips), a non-food brand (Tide Pods),
-// a dairy brand (Chobani) and the pet rule, which is the one instruction the
-// taxonomy cannot infer. Zero examples is a genuine collapse, so the few-shot is
-// doing real work; it just does not need eleven.
+// FOUR rather than two, given they cannot be separated: four keeps one example of
+// each thing the prompt must teach - brand->product (SunChips), a NON-food brand
+// (Tide Pods), a dairy brand (Chobani) and the pet rule, the one instruction the
+// taxonomy cannot infer. Zero examples DOES collapse (19%, net -8 on 26 items), so
+// the few-shot earns its place; it just did not need eleven.
 //
-// The number the model gets right is 50-58% either way. That is the more
-// important finding and it is NOT a prompt problem: eight items (Sargento,
-// Modelo, Barefoot, Progresso, Stouffers, Applegate, Kikkoman, RXBAR) are wrong
-// in EVERY variant. A 1B model does not know those brands. See TODO.md.
+// THE NUMBER THAT MATTERS IS 37%. On the current set, 36 of 70 items are wrong in
+// every variant. These are brands that survived a 346-entry keyword list, so they
+// are genuinely obscure - but it means the model is guessing, not classifying, and
+// no prompt fixes that. See TODO.md.
 const SHIPPED = VARIANTS.v4
 
 const SYSTEM = 'You assign a grocery item to the single best supermarket aisle. Items are often BRAND NAMES - map the brand to the product it sells (e.g. a chip brand -> Snacks). Reply with JSON only.'
@@ -102,33 +103,95 @@ function history (text, fewshot) {
 // would measure work the model never does. Two per aisle, deliberately excluding
 // items whose "right" aisle is arguable (pasta sauce, canned tuna, syrup), so a
 // wrong answer means the model was wrong and not that the label was.
+// The items to grade on: 70 brands, 5 per aisle across 14 aisles.
+//
+// Every one FALLS THROUGH the keyword pass (test/aisleBench.test.js enforces it),
+// because those are the only items the model is ever asked about. Grading it on
+// items the keyword pass already handles would measure work it never does.
+//
+// REBUILT 2026-07-26 after the keyword list gained 346 brands. The previous
+// 26-item set was retired because 25 of its 26 items are now answered instantly
+// by keywords - which is the good outcome, and exactly why the fixture test that
+// caught it exists. It also means these numbers cannot be compared item-for-item
+// with the 26-item run; what carries over is the method, not the score.
+//
+// 70 rather than 26 because 26 could not separate an 8-point accuracy difference
+// from chance, which left the v4-vs-v2 comparison unresolved.
+//
+// Brands whose right aisle is arguable are deliberately excluded (Tillamook is
+// cheese and ice cream, Turkey Hill is milk and ice cream, Bolthouse is juice and
+// carrots), so a wrong answer means the model was wrong and not that the label was.
 const ITEMS = [
-  ['Sargento', 'Dairy & Eggs'],
-  ['Kerrygold', 'Dairy & Eggs'],
-  ['Modelo', 'Alcohol'],
-  ['Barefoot', 'Alcohol'],
-  ['Folgers', 'Beverages'],
-  ['Spindrift', 'Beverages'],
-  ['Neutrogena', 'Personal Care'],
-  ['Claritin', 'Personal Care'],
-  ['Mrs Meyers', 'Household'],
-  ['Seventh Generation', 'Household'],
-  ['Barilla', 'Pantry'],
-  ['Progresso', 'Pantry'],
-  ['Krusteaz', 'Baking'],
-  ['Duncan Hines', 'Baking'],
-  ['Stouffers', 'Frozen'],
-  ['Ore-Ida', 'Frozen'],
-  ["King's Hawaiian", 'Bakery'],
-  ['Sara Lee', 'Bakery'],
-  ['Butterball', 'Meat & Seafood'],
-  ['Applegate', 'Meat & Seafood'],
-  ['Cholula', 'Condiments'],
-  ['Kikkoman', 'Condiments'],
-  ['RXBAR', 'Snacks'],
-  ['Clif', 'Snacks'],
-  ['Fresh Step', 'Pet'],
-  ['Kong', 'Pet'],
+  ["Kite Hill", "Dairy & Eggs"],
+  ["Good Culture", "Dairy & Eggs"],
+  ["Stonyfield", "Dairy & Eggs"],
+  ["Belgioioso", "Dairy & Eggs"],
+  ["Crystal Farms", "Dairy & Eggs"],
+  ["Boars Head", "Meat & Seafood"],
+  ["Wellshire", "Meat & Seafood"],
+  ["Niman Ranch", "Meat & Seafood"],
+  ["Bell & Evans", "Meat & Seafood"],
+  ["Aidells", "Meat & Seafood"],
+  ["Franz", "Bakery"],
+  ["Rudis", "Bakery"],
+  ["Alpine Valley", "Bakery"],
+  ["Aunt Millies", "Bakery"],
+  ["Brownberry", "Bakery"],
+  ["Michelinas", "Frozen"],
+  ["Banquet", "Frozen"],
+  ["Devour", "Frozen"],
+  ["Evol", "Frozen"],
+  ["Alexia", "Frozen"],
+  ["Waterloo", "Beverages"],
+  ["Bubly", "Beverages"],
+  ["Canada Dry", "Beverages"],
+  ["Schweppes", "Beverages"],
+  ["Jarritos", "Beverages"],
+  ["Pabst", "Alcohol"],
+  ["Natural Light", "Alcohol"],
+  ["Rolling Rock", "Alcohol"],
+  ["New Belgium", "Alcohol"],
+  ["Shiner", "Alcohol"],
+  ["Funyuns", "Snacks"],
+  ["Bugles", "Snacks"],
+  ["Pop Secret", "Snacks"],
+  ["Orville Redenbacher", "Snacks"],
+  ["Late July", "Snacks"],
+  ["Tasty Bite", "Pantry"],
+  ["Seeds of Change", "Pantry"],
+  ["Thai Kitchen", "Pantry"],
+  ["San-J", "Pantry"],
+  ["Eden Foods", "Pantry"],
+  ["Swans Down", "Baking"],
+  ["White Lily", "Baking"],
+  ["Hodgson Mill", "Baking"],
+  ["Arrowhead Mills", "Baking"],
+  ["Guittard", "Baking"],
+  ["Lea & Perrins", "Condiments"],
+  ["Maille", "Condiments"],
+  ["Cattlemans", "Condiments"],
+  ["Texas Pete", "Condiments"],
+  ["El Yucateco", "Condiments"],
+  ["Zep", "Household"],
+  ["Goo Gone", "Household"],
+  ["Bon Ami", "Household"],
+  ["Soft Scrub", "Household"],
+  ["Formula 409", "Household"],
+  ["Curel", "Personal Care"],
+  ["St Ives", "Personal Care"],
+  ["Ponds", "Personal Care"],
+  ["Noxzema", "Personal Care"],
+  ["Biore", "Personal Care"],
+  ["Alpo", "Pet"],
+  ["Nutrish", "Pet"],
+  ["Merrick", "Pet"],
+  ["Instinct", "Pet"],
+  ["Orijen", "Pet"],
+  ["NatureSweet", "Produce"],
+  ["Ocean Mist", "Produce"],
+  ["Grimmway", "Produce"],
+  ["Melissas", "Produce"],
+  ["Manns", "Produce"],
 ]
 
 // The answer a run of repeats settles on: most frequent, ties broken by first

@@ -102,7 +102,14 @@ mkdir -p "$APP_CONTAINER/Documents"
 #
 # Append, do not truncate: calls already recorded are answers already paid for, so
 # a re-run of this script resumes rather than starting over. FRESH=1 to discard.
-[ "${FRESH:-0}" = "1" ] && { : > "$LOG"; : > "$JSONL"; }
+# FRESH must also clear the APP's own results file, not just the driver's. It did
+# not, and 652 lines from a retired item set merged silently into the next run -
+# caught only because two variants that were never requested appeared in the table.
+if [ "${FRESH:-0}" = "1" ]; then
+  : > "$LOG"; : > "$JSONL"
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+  rm -f "$APP_CONTAINER/Documents/bench-results.jsonl"
+fi
 touch "$LOG" "$JSONL"
 RESULTS_FILE="$APP_CONTAINER/Documents/bench-results.jsonl"
 xcrun simctl spawn "$UDID" log stream --style compact --level debug \

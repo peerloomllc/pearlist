@@ -104,14 +104,18 @@ test('every labelled item is one the keyword matcher CANNOT place', () => {
 })
 
 test('every label is a real aisle, and the set is not lopsided', () => {
+  // 70 items, 5 per aisle across 14 aisles (rebuilt 2026-07-26; see src/aisleFewshot.js).
   const byAisle = new Map()
   for (const [item, expected] of ITEMS) {
     assert.ok(AISLES.includes(expected), `${item} -> ${expected} is not an aisle`)
     assert.notEqual(expected, aisles.FALLBACK, `${item} cannot be labelled Other - that is the failure answer`)
     byAisle.set(expected, (byAisle.get(expected) || 0) + 1)
   }
-  assert.ok(byAisle.size >= 10, `only ${byAisle.size} aisles covered`)
-  for (const [aisle, n] of byAisle) assert.ok(n <= 4, `${aisle} has ${n} items, the set is skewed toward it`)
+  assert.ok(byAisle.size >= 12, `only ${byAisle.size} aisles covered`)
+  // Even coverage: no aisle may carry more than a seventh of the set, so a variant
+  // cannot look good by being right about one popular aisle.
+  const cap = Math.ceil(ITEMS.length / 7)
+  for (const [aisle, n] of byAisle) assert.ok(n <= cap, `${aisle} has ${n} of ${ITEMS.length} items, the set is skewed toward it`)
 })
 
 test('no duplicate items, and no item is also a few-shot example', () => {
