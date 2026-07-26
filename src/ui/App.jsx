@@ -9,8 +9,12 @@ import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
 
-// From app.json once the shell exists; hardcoded for now.
-const APP_VERSION = '0.0.1'
+// Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
+// __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
+// runs `npm run verify` -> build:ui), so the number on the Settings screen cannot
+// drift from the shipped one. The typeof guard keeps a bundler that does not
+// define it from crashing the whole UI on an undefined global.
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
 // Suite donation config (shared across PeerLoom apps). See the canonical spec at
 // peerloomllc/patterns/btc-donation-sheet.md; constants are identical everywhere.
 const LIGHTNING_ADDRESS = 'peerloomllc@strike.me'

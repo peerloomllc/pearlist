@@ -7,12 +7,18 @@
 import { build } from 'esbuild'
 import { readFileSync, writeFileSync } from 'node:fs'
 
+// The version the Settings screen shows comes from app.json, the same field that
+// becomes the Android versionName and the iOS marketing version. Baked in here so
+// there is exactly one place to bump.
+const APP_VERSION = JSON.parse(readFileSync('app.json', 'utf8')).expo.version
+if (!/^\d+\.\d+\.\d+/.test(APP_VERSION)) throw new Error(`app.json expo.version is not a dotted version: ${APP_VERSION}`)
+
 await build({
   entryPoints: ['src/ui/main.jsx'],
   bundle: true,
   format: 'iife',
   jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(APP_VERSION) },
   outfile: 'assets/app-ui.bundle',
   legalComments: 'none',
 })
@@ -34,4 +40,4 @@ const html = `<!DOCTYPE html>
 </html>
 `
 writeFileSync('assets/index.html', html)
-console.log('built assets/app-ui.bundle + self-contained assets/index.html')
+console.log(`built assets/app-ui.bundle + self-contained assets/index.html (v${APP_VERSION})`)
