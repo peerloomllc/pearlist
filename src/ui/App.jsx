@@ -7,6 +7,7 @@ import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadThem
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
+import { nextCollapseState } from '../autoCollapse.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
@@ -552,6 +553,13 @@ const BOOT_PLACE = loadPlace()
 const aisleViewKey = (listId) => `pearlist:aisleview:${listId}`
 function loadAisleView (listId) { try { return JSON.parse(localStorage.getItem(aisleViewKey(listId)) || '{}') || {} } catch { return {} } }
 function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(listId), ...patch }; localStorage.setItem(aisleViewKey(listId), JSON.stringify(v)); return v } catch { return patch } }
+
+// Device-local preference: close a group once every item in it is checked off
+// (GH #90). Off by default, so an update never changes how anyone's list behaves
+// until they ask for it. One switch for every list, not per list.
+const AUTOCOLLAPSE_KEY = 'pearlist:autocollapse'
+function loadAutoCollapse () { try { return localStorage.getItem(AUTOCOLLAPSE_KEY) === '1' } catch { return false } }
+function saveAutoCollapse (on) { try { localStorage.setItem(AUTOCOLLAPSE_KEY, on ? '1' : '0') } catch {} }
 
 // User-made aisle names remembered per space (device-local), so a custom aisle
 // stays offered in the picker even after its last item leaves it (an empty aisle
@@ -1480,17 +1488,29 @@ export default function App () {
   // Device-local grocery view prefs (collapsed aisles + custom aisle/item order),
   // per list, persisted to localStorage. Tapping a header toggles collapse;
   // long-press drag reorders (see useAisleDrag).
-  const [aisleView, setAisleViewState] = useState({ collapsed: [], aisleOrder: [], itemOrder: [] })
-  useEffect(() => { setAisleViewState({ collapsed: [], aisleOrder: [], itemOrder: [], ...(openListId ? loadAisleView(openListId) : {}) }) }, [openListId])
+  // `auto` is the subset of `collapsed` that the auto-collapse rule closed, so
+  // unchecking reopens only those and never a group the user shut by hand.
+  // `forList` marks which list the loaded prefs are for. Only the auto-collapse
+  // effect reads it, to keep from acting on the previous list's state in the render
+  // between opening a list and its prefs landing. Never persisted (state only).
+  const [aisleView, setAisleViewState] = useState({ collapsed: [], auto: [], aisleOrder: [], itemOrder: [], forList: null })
+  useEffect(() => { setAisleViewState({ collapsed: [], auto: [], aisleOrder: [], itemOrder: [], ...(openListId ? loadAisleView(openListId) : {}), forList: openListId }) }, [openListId])
   const patchAisleView = useCallback((patch) => {
     setAisleViewState((prev) => ({ ...prev, ...patch }))
     if (openListId) saveAisleView(openListId, patch)
   }, [openListId])
   const collapsedSet = new Set(aisleView.collapsed || [])
+  const [autoCollapse, setAutoCollapseState] = useState(loadAutoCollapse)
+  const setAutoCollapse = useCallback((on) => { setAutoCollapseState(!!on); saveAutoCollapse(on) }, [])
   const toggleAisle = useCallback((aisle) => {
     const cur = aisleView.collapsed || []
-    patchAisleView({ collapsed: cur.includes(aisle) ? cur.filter((a) => a !== aisle) : [...cur, aisle] })
-  }, [aisleView.collapsed, patchAisleView])
+    // Tapping a header is the user taking over: the group stops counting as
+    // auto-collapsed, so the rule leaves it alone until it is finished afresh.
+    patchAisleView({
+      collapsed: cur.includes(aisle) ? cur.filter((a) => a !== aisle) : [...cur, aisle],
+      auto: (aisleView.auto || []).filter((a) => a !== aisle),
+    })
+  }, [aisleView.collapsed, aisleView.auto, patchAisleView])
 
   // Grocery lists group by a fixed aisle taxonomy (+ AI); other lists group by
   // user-defined SECTIONS (same category field, no built-ins, no AI) once the
@@ -1548,8 +1568,27 @@ export default function App () {
   const toggleCollapseAll = useCallback(() => {
     const present = [...new Set(items.map((i) => aisles.bucketOf(i.category)))]
     const collapsed = present.length > 0 && present.every((a) => (aisleView.collapsed || []).includes(a))
-    patchAisleView({ collapsed: collapsed ? [] : present })
+    patchAisleView({ collapsed: collapsed ? [] : present, auto: [] }) // a deliberate collapse-all, so nothing is the rule's to reopen
   }, [items, aisleView.collapsed, patchAisleView])
+
+  // Auto-collapse a finished group (GH #90), when the "Tidy finished aisles"
+  // setting is on. The decision itself lives in src/autoCollapse.js, which explains
+  // why it is transition-based; `doneRef` is the baseline it needs. Reset when the
+  // list changes or the setting flips, so switching it on acts on the list as it
+  // stands rather than waiting for the next check-off.
+  const doneRef = useRef(null)
+  useEffect(() => { doneRef.current = null }, [openListId, autoCollapse])
+  useEffect(() => {
+    if (!autoCollapse || !grouped || !openListId) return
+    // Both the prefs and the rows are loaded per list, a render apart from the
+    // switch itself. Acting on either while it still holds the previous list's
+    // data would write that list's aisles into this list's prefs.
+    if (aisleView.forList !== openListId) return
+    if (items.length && items[0].listId && items[0].listId !== openListId) return
+    const next = nextCollapseState({ items, prevDone: doneRef.current, collapsed: aisleView.collapsed, auto: aisleView.auto })
+    doneRef.current = next.done
+    if (next.changed) patchAisleView({ collapsed: next.collapsed, auto: next.auto })
+  }, [autoCollapse, grouped, openListId, items, aisleView.collapsed, aisleView.auto, aisleView.forList, patchAisleView])
 
   // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
   // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
@@ -1923,7 +1962,7 @@ export default function App () {
           )}
         </>
       ) : view === 'profile' ? (
-        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2534,7 +2573,7 @@ function relaySummary (s, on) {
   return 'On. Not needed so far, every connection has been direct.'
 }
 
-function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2597,6 +2636,7 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
     'Loaded in memory': "Keeping the model in memory lets it sort and generate instantly, but uses some RAM. Turn this off to free the memory now - the model stays downloaded and reloads (a few seconds) the next time AI is used. It also loads on its own the first time you use AI each session.",
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
+    'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
   }
   const Setting = ({ title, about, aboutLink, control, extra, first }) => (
@@ -2667,6 +2707,10 @@ function ProfileView ({ profile, theme, onTheme, onReplayTour, onSaved }) {
 
       <Group title='Appearance'>
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
+      </Group>
+      <Group title='Lists'>
+        <Setting first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
+          control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
       </Group>
       <Group title='Connection'>
         <Setting first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
