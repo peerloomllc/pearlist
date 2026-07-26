@@ -104,6 +104,16 @@ test('brand + category together still resolve (real shopping-list wording)', () 
 // That is the whole argument for spending effort on this list rather than on the
 // prompt, so it is pinned: a regression here silently pushes work onto a 4-second
 // coin flip.
+test('cleaning brands are not drinks or snacks', () => {
+  // Found while building the model's test set: "Scotch-Brite" matched 'scotch' and
+  // filed under Alcohol, "Bar Keepers Friend" matched 'bar' and filed under Snacks.
+  // Same class as the misfires above - one everyday word inside a brand name.
+  assert.equal(classifyAisle('Scotch-Brite'), 'Household')
+  assert.equal(classifyAisle('Bar Keepers Friend'), 'Household')
+  assert.equal(classifyAisle('scotch'), 'Alcohol')      // the word itself is untouched
+  assert.equal(classifyAisle('granola bar'), 'Snacks')
+})
+
 test('brand + the actual product resolves without the model', () => {
   const cases = [
     ['Sargento cheese', 'Dairy & Eggs'],
