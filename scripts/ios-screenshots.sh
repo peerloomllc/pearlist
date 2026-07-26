@@ -28,9 +28,29 @@ OUT_DIR="${OUT_DIR:-$REPO_ROOT/metadata/ios/screenshots}"
 SCENES=(1 2 3 4 5 6)
 APPEARANCES=(light)
 
-# Devices from IOS_SCREENSHOT_DEVICES (space-separated "DeviceName|UDID"
+# Devices from IOS_SCREENSHOT_DEVICES (space-separated "DeviceName|DeviceType"
 # pairs, set in scripts/app.conf). iPhone 17 Pro Max = 6.9" App Store size.
-read -ra DEVICES <<<"${IOS_SCREENSHOT_DEVICES:-iPhone-17-Pro-Max|BB87E9B2-1A75-4118-B03E-9FBADD5A97F4}"
+#
+# NAME, not UDID, on purpose. This used to carry hardcoded UDIDs, and when one of
+# those simulators was deleted the script died on "Invalid device" AFTER a full pod
+# install and Xcode build - the most expensive possible place to find out. Now each
+# entry names a simulator and the device type to create it from if it is missing, so
+# a wiped simulator costs one create instead of a broken release chore.
+read -ra DEVICES <<<"${IOS_SCREENSHOT_DEVICES:-iPhone-17-Pro-Max|com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max}"
+
+# Resolve a simulator by name, creating it from the given device type if absent.
+# Echoes the UDID. The `|| true` matters: under pipefail a no-match grep would fail
+# the pipeline and `set -e` would kill the script exactly when the sim is missing.
+resolve_sim () {
+  local name="$1" type="$2" udid runtime
+  udid=$(xcrun simctl list devices available | grep -E "^ *${name} \(" | head -1 | sed -E 's/.*\(([0-9A-Fa-f-]{36})\).*/\1/' || true)
+  if [ -z "$udid" ]; then
+    runtime=$(xcrun simctl list runtimes | awk '/^iOS /{print $NF}' | tail -1)
+    echo "    creating simulator $name ($type on $runtime)" >&2
+    udid=$(xcrun simctl create "$name" "$type" "$runtime")
+  fi
+  echo "$udid"
+}
 
 # ── Build ──
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
@@ -59,7 +79,8 @@ mkdir -p "$OUT_DIR"
 
 for dev in "${DEVICES[@]}"; do
   NAME="${dev%%|*}"
-  UDID="${dev##*|}"
+  TYPE="${dev##*|}"
+  UDID=$(resolve_sim "$NAME" "$TYPE")
   echo ""
   echo "==> Device: $NAME ($UDID)"
 
