@@ -23,9 +23,12 @@ cd "$REPO_ROOT"
 npm run build:ui 2>&1 | tail -1
 
 echo "==> Syncing to $MAC_MINI"
+# metadata/bench/ is EXCLUDED because results only travel Mac -> here. Syncing it
+# outbound copied a stale local log over the Mac's accumulated one and threw away
+# 50 answered calls - the log is the run's memory, and the Mac is where it lives.
 rsync -az --checksum --exclude='.git' --exclude='node_modules' --exclude='android' \
   --exclude='ios/Pods/' --exclude='ios/build/' --exclude="ios/${APP_NAME:-PearList}.xcworkspace/" \
-  --exclude='.expo/' \
+  --exclude='.expo/' --exclude='metadata/bench/' \
   "$REPO_ROOT/" "$MAC_MINI:$MAC_REPO/"
 
 # @qvac/sdk/dist/worker.mobile.bundle.js is NOT in the npm tarball - `expo prebuild`

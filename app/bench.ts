@@ -16,17 +16,41 @@
 // per variant, so a driver script can read it out of `xcrun simctl ... log stream`
 // (iOS) or `adb logcat` (Android) without a UI. See scripts/ios-aisle-bench.sh.
 
+import * as FileSystem from 'expo-file-system/legacy'
 import { classifyAisleVariant, setAiConsent, getAiStatus, loadModelNow } from './qvac'
 
 const { VARIANTS, ITEMS, history, score } = require('../src/aisleFewshot.js')
+
+// Results go to a FILE, and the console is only a nicety. A Release build's
+// info-level console.log does not reliably reach the device log - the driver saw
+// error-level lines from other modules while every [BENCH] line vanished, which
+// looked exactly like the app doing nothing. The driver reads this file out of the
+// app container after each launch instead. It is rewritten after every call, so a
+// launch that dies mid-run still leaves everything it managed.
+const RESULTS = FileSystem.documentDirectory + 'bench-results.jsonl'
+const written: string[] = []
 
 export interface BenchConfig {
   variants?: string[]   // names from VARIANTS; default all of them, shipped prompt first
   repeats?: number      // runs per item per variant; default 5
   items?: number        // cap the labelled set (first N) for a quick smoke run
+  // Explicit work list as [variant, item] pairs, which is how the driver RESUMES.
+  // The host process exits mid-run: observed 2026-07-26 on the Simulator, ~50
+  // calls in, clean exit 0, 60ms after a successful classification, nothing
+  // logged. So a 650-call matrix cannot assume one surviving process. The driver
+  // relaunches with whatever is still missing and the report stitches every
+  // launch together from the per-call lines.
+  pairs?: Array<[string, string]>
 }
 
-const log = (obj: any) => console.log('[BENCH] ' + JSON.stringify(obj))
+function log (obj: any) {
+  const line = JSON.stringify(obj)
+  console.log('[BENCH] ' + line)
+  written.push(line)
+  // Fire and forget: a failed write must not stop the measurement, and the next
+  // call rewrites the whole file anyway.
+  FileSystem.writeAsStringAsync(RESULTS, written.join('\n') + '\n').catch(() => {})
+}
 
 // Rough token estimate for the prompt, so a variant's cost is visible even when
 // the SDK reports no promptTokens. Deliberately crude (chars/4): the SDK's own
@@ -35,11 +59,18 @@ const estTokens = (text: string) => Math.round(text.length / 4)
 const promptChars = (fewshot: any) => history('placeholder', fewshot).map((m: any) => m.content).join('\n').length
 
 export async function runAisleBench (cfg: BenchConfig = {}): Promise<void> {
-  const names: string[] = cfg.variants?.length ? cfg.variants : Object.keys(VARIANTS)
   const repeats = Math.max(1, cfg.repeats ?? 5)
-  const items: Array<[string, string]> = cfg.items ? ITEMS.slice(0, cfg.items) : ITEMS
+  const allItems: Array<[string, string]> = cfg.items ? ITEMS.slice(0, cfg.items) : ITEMS
+  const expectedFor = new Map(allItems)  // item -> its labelled aisle
 
-  log({ type: 'start', variants: names, repeats, items: items.length, calls: names.length * items.length * repeats })
+  // A resume run gets its work list handed to it; a fresh run builds the matrix.
+  // Either way the unit of work is (variant, item) x repeats.
+  const work: Array<[string, string]> = cfg.pairs?.length
+    ? cfg.pairs.filter(([v, item]) => VARIANTS[v] && expectedFor.has(item))
+    : (cfg.variants?.length ? cfg.variants : Object.keys(VARIANTS)).flatMap((v) => allItems.map(([item]) => [v, item] as [string, string]))
+  const names = [...new Set(work.map(([v]) => v))]
+
+  log({ type: 'start', variants: names, repeats, items: allItems.length, calls: work.length * repeats, resumed: !!cfg.pairs?.length })
 
   // The bench must not sit waiting on a consent tap, so opt in here. It also has to
   // be in memory before the first timing, or that call absorbs the model load.
@@ -57,6 +88,7 @@ export async function runAisleBench (cfg: BenchConfig = {}): Promise<void> {
 
     const runs: Array<{ item: string, expected: string, answers: Array<string | null> }> = []
     let msTotal = 0; let ttftTotal = 0; let ttftSeen = 0; let promptTokens = 0; let promptSeen = 0
+    const items: Array<[string, string]> = work.filter(([v]) => v === variant).map(([, item]) => [item, expectedFor.get(item) as string])
 
     for (const [item, expected] of items) {
       const answers: Array<string | null> = []

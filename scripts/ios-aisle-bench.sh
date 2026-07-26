@@ -86,19 +86,25 @@ done
 APP_CONTAINER=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data)
 mkdir -p "$APP_CONTAINER/Documents"
 
-# Build the config the shell reads at launch.
-CFG="{\"repeats\":$REPEATS"
-[ -n "$VARIANTS" ] && CFG="$CFG,\"variants\":[$(echo "$VARIANTS" | awk -F, '{for(i=1;i<=NF;i++){printf "%s\"%s\"", (i>1?",":""), $i}}')]"
-[ -n "$ITEMS" ] && CFG="$CFG,\"items\":$ITEMS"
-CFG="$CFG}"
-echo "    Config: $CFG"
-printf '%s' "$CFG" > "$APP_CONTAINER/Documents/bench-config"
-
 # ── Run ──
-# Stream the sim's console BEFORE launching so nothing is missed. The predicate is
-# deliberately broad (the RN console goes through several subsystems); [BENCH] is
-# what we filter on when reading it back.
-: > "$LOG"
+# THE APP DOES NOT SURVIVE A FULL MATRIX. Observed 2026-07-26: it exits cleanly
+# (code 0, nothing logged, 60ms after a successful classification) around 50 calls
+# in. So this is a LOOP: work out what is still missing, launch with that as the
+# work list, watch until the app goes quiet or finishes, repeat. The log is
+# appended to across launches and the report rebuilds the grades from every call
+# line, so a run is the sum of its launches.
+# Results come from the app's OWN FILE (Documents/bench-results.jsonl), not the
+# console. A Release build's info-level console.log does not reliably reach the
+# device log: error lines from other modules arrived while every [BENCH] line
+# vanished, so the driver saw silence and relaunched forever while the app was in
+# fact loading the model each time. The console stream is still captured, because
+# it is where a native crash would show up, but nothing depends on it.
+#
+# Append, do not truncate: calls already recorded are answers already paid for, so
+# a re-run of this script resumes rather than starting over. FRESH=1 to discard.
+[ "${FRESH:-0}" = "1" ] && { : > "$LOG"; : > "$JSONL"; }
+touch "$LOG" "$JSONL"
+RESULTS_FILE="$APP_CONTAINER/Documents/bench-results.jsonl"
 xcrun simctl spawn "$UDID" log stream --style compact --level debug \
   --predicate "processImagePath CONTAINS \"$APP_NAME\"" >> "$LOG" 2>/dev/null &
 STREAM_PID=$!
@@ -106,28 +112,71 @@ STREAM_PID=$!
 trap "kill $STREAM_PID 2>/dev/null || true; xcrun simctl terminate '$UDID' '$BUNDLE_ID' 2>/dev/null || true; rm -f '$APP_CONTAINER/Documents/bench-config'" EXIT
 sleep 2
 
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-echo "==> Launching harness (up to ${TIMEOUT}s; the first run downloads ~0.8 GB)"
-xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null
+# Merge whatever the app has written into the accumulated results.
+harvest () {
+  [ -s "$RESULTS_FILE" ] || return 0
+  cat "$RESULTS_FILE" >> "$JSONL"
+  : > "$RESULTS_FILE"
+}
 
-# Wait for the harness to finish, reporting progress as variants complete.
+# Seconds without a new [BENCH] line before we call the app dead and relaunch.
+# A single call takes about a second on an M-series Mac, so 60s is not ambiguous.
+QUIET_S="${QUIET_S:-60}"
+MAX_LAUNCHES="${MAX_LAUNCHES:-40}"
 DEADLINE=$(( $(date +%s) + TIMEOUT ))
-LAST_SEEN=0
-while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-  if grep -q '\[BENCH\].*"type":"done"' "$LOG" 2>/dev/null; then echo "==> Harness finished"; break; fi
-  if grep -q '\[BENCH\].*"type":"abort"' "$LOG" 2>/dev/null; then echo "==> Harness ABORTED (see $LOG)"; break; fi
-  N=$(grep -c '\[BENCH\]' "$LOG" 2>/dev/null || echo 0)
-  if [ "$N" -gt "$LAST_SEEN" ]; then
-    grep '\[BENCH\]' "$LOG" | tail -n $(( N - LAST_SEEN )) | grep -E '"type":"(start|model|variant-start|variant|skip|error)"' || true
-    LAST_SEEN=$N
-  fi
-  sleep 10
+LAUNCH=0
+
+while [ "$LAUNCH" -lt "$MAX_LAUNCHES" ] && [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  harvest
+  PAIRS=$(node "$REPO_ROOT/scripts/aisle-bench-plan.mjs" "$JSONL" "$REPEATS" "$VARIANTS" "$ITEMS" || true)
+  if [ -z "$PAIRS" ]; then echo "==> Every (variant, item) has its ${REPEATS} answers"; break; fi
+
+  REMAINING=$(printf '%s' "$PAIRS" | grep -o '\[\"' | wc -l | tr -d ' ')
+  LAUNCH=$(( LAUNCH + 1 ))
+  echo "==> Launch $LAUNCH: $REMAINING (variant, item) pairs still short of $REPEATS answers"
+
+  CFG="{\"repeats\":$REPEATS,\"pairs\":$PAIRS"
+  [ -n "$ITEMS" ] && CFG="$CFG,\"items\":$ITEMS"
+  CFG="$CFG}"
+  printf '%s' "$CFG" > "$APP_CONTAINER/Documents/bench-config"
+
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+  xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null
+
+  # Watch this launch via the app's own results file: finished, aborted, or gone
+  # quiet (= died, relaunch). The first call also has to wait out the model load,
+  # which is why the quiet window is generous.
+  LAST_N=0
+  LAST_CHANGE=$(date +%s)
+  while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+    N=$(wc -l < "$RESULTS_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+    [ -z "$N" ] && N=0
+    if [ "$N" -gt "$LAST_N" ]; then
+      LAST_N=$N; LAST_CHANGE=$(date +%s)
+      DONE_CALLS=$(grep -c '"type":"call"' "$RESULTS_FILE" 2>/dev/null || echo 0)
+      printf '\r    %s calls this launch   ' "$DONE_CALLS"
+    fi
+    if grep -q '"type":"done"' "$RESULTS_FILE" 2>/dev/null; then echo ""; echo "    launch finished its work list"; break; fi
+    if grep -q '"type":"abort"' "$RESULTS_FILE" 2>/dev/null; then
+      echo ""
+      echo "    ABORTED: $(grep '"type":"abort"' "$RESULTS_FILE" | tail -1)"
+      harvest
+      break 2
+    fi
+    if [ $(( $(date +%s) - LAST_CHANGE )) -ge "$QUIET_S" ]; then
+      echo ""
+      echo "    app went quiet after $LAST_N lines - relaunching to continue"
+      break
+    fi
+    sleep 5
+  done
 done
 
 # ── Results ──
-grep -o '\[BENCH\] .*' "$LOG" | sed 's/^\[BENCH\] //' > "$JSONL" || true
+harvest
 echo ""
 echo "==> [BENCH] lines: $(wc -l < "$JSONL" | tr -d ' ')  ->  $JSONL"
-echo "==> Summary:"
-grep '"type":"variant"' "$JSONL" 2>/dev/null || echo "    (no variant summaries - check $LOG)"
-grep '"type":"summary"' "$JSONL" 2>/dev/null || true
+echo ""
+# Graded here rather than trusting any single launch's summary: the run is the
+# sum of its launches, and the report is what stitches them together.
+node "$REPO_ROOT/scripts/aisle-bench-report.mjs" "$JSONL" || true
