@@ -20,7 +20,6 @@ import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
 import { terminateWebViewRenderer } from '../modules/webview-recovery'
-import { classifyAisleAI, expandToItems, getAiStatus, loadModelNow, unloadFromMemory, setAiConsent, removeAiModel, setProgressSink } from './qvac'
 
 // --- local notifications (assignment + join + completion; ON by default) ----
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
@@ -117,9 +116,22 @@ function emitEvent (event: string, data?: any) {
   _webViewRef?.current?.injectJavaScript(`window.__pearEvent(${JSON.stringify(event)}, ${JSON.stringify(data ?? null)}); true;`)
 }
 
-// Push QVAC model download progress / state to the WebView (Settings + the
-// in-list consent prompt subscribe to ai:status).
-setProgressSink((s) => emitEvent('ai:status', s))
+// ONE-TIME RECLAIM for anyone who enabled the on-device AI before it was removed.
+// The model was ~0.8 GB in the SDK's own store under Documents/.qvac, and removing
+// the feature does not remove the bytes - leaving them would silently keep that
+// space for a feature the app no longer has. Deleted directly rather than through
+// the SDK, because the whole point is that nothing imports @qvac any more. The
+// AsyncStorage flags go too, so a stale "model ready" cannot outlive the model.
+// Runs once, guarded by a flag; harmless on a device that never enabled it.
+const AI_PURGED_KEY = 'pearlist:aiPurged'
+async function purgeRemovedAiModel () {
+  try {
+    if ((await AsyncStorage.getItem(AI_PURGED_KEY)) === '1') return
+    await FileSystem.deleteAsync(FileSystem.documentDirectory + '.qvac', { idempotent: true }).catch(() => {})
+    await AsyncStorage.multiRemove(['qvac:consent', 'qvac:modelReady']).catch(() => {})
+    await AsyncStorage.setItem(AI_PURGED_KEY, '1')
+  } catch {}
+}
 
 // Diagnostic: tee the worklet's pairing trace to Documents/pair-trace.log so we
 // can pull it off an iOS device (worklet console.warn does not reach a remote
@@ -271,6 +283,7 @@ export default function Shell () {
         if (!cancelled) setHtml(await loadUiHtml(scene))
         return
       }
+      purgeRemovedAiModel() // reclaim the old model's ~0.8 GB, once
       // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
       // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
       requestLocalNetworkPermission()
@@ -411,72 +424,10 @@ export default function Shell () {
           canBackRef.current = !!args?.canBack
           return reply(id, { ok: true })
         }
-        case 'shell:aiStatus': {
-          return reply(id, await getAiStatus())
-        }
-        case 'shell:aiConsent': {
-          // Turning on downloads the model in the background; progress + the
-          // eventual 'ready' arrive via ai:status events (the UI re-runs the AI
-          // pass when it sees ready). Returns the current status immediately.
-          return reply(id, await setAiConsent(!!args?.enabled))
-        }
-        case 'shell:aiRemoveModel': {
-          return reply(id, await removeAiModel())
-        }
-        case 'shell:aiCategorize': {
-          // Hybrid AI fallback: the worklet's keyword pass already ran and left
-          // these items as 'Other'. Classify each with the on-device LLM (lazy
-          // model load + download on first use) and persist any real aisle via
-          // the worklet, then tell the UI to reload. Reply immediately so the UI
-          // is not blocked on the (slow) model; the recategorization streams in.
-          const { groupId, listId, items: batch } = args || {}
-          reply(id, { ok: true, queued: Array.isArray(batch) ? batch.length : 0 })
-          ;(async () => {
-            for (const it of (Array.isArray(batch) ? batch : [])) {
-              const aisle = await classifyAisleAI(String(it?.text || ''))
-              if (aisle && aisle !== 'Other') {
-                await callRaw('ai:setCategory', { groupId, listId, itemId: it.itemId, category: aisle }).catch(() => {})
-              }
-              // Report each item as it finishes (found an aisle or not) so the UI
-              // clears its "Sorting…" state and the item settles into place one at
-              // a time, instead of flashing in "Other" then jumping.
-              emitEvent('ai:recategorized', { listId, done: [it.itemId] })
-            }
-          })().catch(() => {})
-          return
-        }
-        case 'shell:aiExpand': {
-          // Recipe/meal -> grocery items. Blocking (the UI shows a spinner and a
-          // review list); returns [] if not consented or generation fails. Loads
-          // the model into memory first if idle.
-          const items = await expandToItems(String(args?.description || ''))
-          return reply(id, { ok: true, items })
-        }
-        case 'shell:aiLoad': {
-          // Explicit "load into memory" (from the sorter prompt). Progress streams
-          // via ai:status; reply with the final status.
-          const s = await loadModelNow()
-          return reply(id, { ok: true, status: s })
-        }
-        case 'shell:aiUnload': {
-          // Drop the model from memory (keep on disk) to free RAM.
-          const s = await unloadFromMemory()
-          return reply(id, { ok: true, status: s })
-        }
-        case 'shell:deviceCaps': {
-          // For the low-end-hardware warning before enabling the ~0.8GB AI model.
-          // Device.totalMemory is bytes (null if unknown -> don't flag). Thresholds
-          // are conservative: a 1B-param model wants a few GB of RAM to run, and
-          // the download+extract needs headroom on disk.
-          const totalMemMB = Math.round((Device.totalMemory || 0) / 1e6)
-          let freeStorageMB = 0
-          try { freeStorageMB = Math.round((await FileSystem.getFreeDiskStorageAsync()) / 1e6) } catch {}
-          // ~4600 MB warns 4GB-class devices (they report ~3.8-3.9GB) while 6GB+
-          // (report ~5.5GB+) pass. It's a warning, not a hard block.
-          const lowMem = totalMemMB > 0 && totalMemMB < 4600
-          const lowStorage = freeStorageMB > 0 && freeStorageMB < 1500
-          return reply(id, { ok: true, totalMemMB, freeStorageMB, lowMem, lowStorage, lowEnd: lowMem || lowStorage })
-        }
+        // The on-device AI was removed in 1.0.4 (see DECISIONS). Measured over 1702
+        // calls it placed 37% of the items that reached it correctly, at 4-6.5s each,
+        // for a 0.8 GB download and 2 GB resident - so unknown items now simply rest
+        // in Other, where the keyword pass leaves them. Nothing here imports @qvac.
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')
           else if (args?.style === 'light') setStatusBarStyle('light-content')

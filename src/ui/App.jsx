@@ -596,23 +596,6 @@ function clearOverrides () { try { localStorage.removeItem(OVERRIDES_KEY) } catc
 let _askConfirm = null
 function askConfirm (opts) { return _askConfirm ? _askConfirm(opts) : Promise.resolve(true) }
 
-// Before enabling the ~0.8GB on-device AI, warn on low-end hardware (little RAM
-// or free storage) so the user knows it may be slow or fail. Returns true to
-// proceed. On any detection failure we don't block (assume capable).
-async function aiEnableConfirmed () {
-  let caps
-  try { caps = await call('shell:deviceCaps', {}) } catch { return true }
-  if (!caps || !caps.lowEnd) return true
-  const parts = []
-  if (caps.lowMem) parts.push(`only ~${(caps.totalMemMB / 1000).toFixed(1)} GB of RAM`)
-  if (caps.lowStorage) parts.push(`~${(caps.freeStorageMB / 1000).toFixed(1)} GB of free storage`)
-  return askConfirm({
-    title: 'Enable AI on this device?',
-    message: `This device has ${parts.join(' and ')}. The on-device AI is a ~0.8 GB download and needs a few GB of memory to run, so it may be slow or fail here. The fast name-matcher sorts most groceries without it.`,
-    confirmLabel: 'Enable anyway',
-  })
-}
-
 // Single themed confirm dialog for the whole app (see askConfirm). Rendered once.
 function ConfirmHost () {
   const [state, setState] = useState(null)
@@ -874,34 +857,20 @@ function CollapsibleRows ({ collapsed, children }) {
   )
 }
 
-const SORTING = '__sorting__'
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, sortingActive, aiDone, flashId, builtins = aisles.AISLES, fallbackLabel = aisles.FALLBACK }) {
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, flashId, builtins = aisles.AISLES, fallbackLabel = aisles.FALLBACK }) {
   const buckets = new Map()
   for (const it of items) {
-    let key = aisles.bucketOf(it.category)
-    // A yet-to-be-classified 'Other' item shows under a transient "Sorting…"
-    // group (with a spinner) instead of flashing in Other and then jumping. A
-    // user-pinned item (catBy) is a deliberate choice, never "sorting".
-    if (key === aisles.FALLBACK && sortingActive && aiDone && !aiDone.has(it.id) && it.catBy !== 'user') key = SORTING
+    // Keyword classification is synchronous, so an item's aisle is known the
+    // moment it is added. Nothing is ever mid-flight, which is why there is no
+    // longer a transient "Sorting…" group here.
+    const key = aisles.bucketOf(it.category)
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(it)
   }
-  const ordered = orderAisles([...buckets.keys()].filter((k) => k !== SORTING), aisleOrder, builtins)
-  const sections = [...(buckets.has(SORTING) ? [SORTING] : []), ...ordered].map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
+  const sections = orderAisles([...buckets.keys()], aisleOrder, builtins).map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
   return (
     <>
       {sections.map(({ aisle, items: rows }) => {
-        if (aisle === SORTING) {
-          return (
-            <div key={SORTING}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, background: c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px` }}>
-                <span style={{ width: 12, height: 12, borderRadius: '50%', border: `2px solid ${c.text.muted}`, borderTopColor: c.primary, display: 'inline-block', animation: 'pearlist-spin 0.7s linear infinite' }} />
-                <span style={{ flex: 1, fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.secondary }}>Sorting…</span>
-              </div>
-              {rows.map((it) => <div key={it.id} data-item-id={it.id} style={{ position: 'relative', opacity: 0.6 }}>{renderRow(it)}<ItemFlash on={flashId === it.id} /></div>)}
-            </div>
-          )
-        }
         const isCollapsed = !!collapsed?.has(aisle)
         const open = rows.filter((it) => !it.checked).length
         const aisleTarget = dragOver?.aisle === aisle && dragOver?.kind === 'item'
@@ -940,66 +909,6 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
     </>
   )
 }
-
-// Consent prompt shown atop a grocery list when the keyword sorter left items
-// under "Other" and the user has not yet opted into the on-device AI. Explains
-// the one-time download + on-device privacy before anything is fetched. Once
-// enabled, it shows download progress instead.
-function AiConsentBanner ({ status, otherCount, onEnable, onLoad, onDismiss }) {
-  if (!status) return null
-  const gb = (status.model.sizeMB / 1024).toFixed(1)
-  const wrap = { margin: `${sp.md}px ${sp.base}px`, padding: sp.base, background: c.surface.elevated, border: `1px solid ${c.border}`, borderRadius: r.lg }
-  if (status.consent) {
-    // Downloaded but not loaded this session: ask before spending memory/seconds
-    // to load it (never silently). Only when there is something to sort.
-    if (status.state === 'idle' && otherCount) {
-      return (
-        <div style={wrap}>
-          <div style={{ color: c.text.primary, fontSize: 15, fontWeight: 400, marginBottom: 4 }}>Sort {otherCount} item{otherCount > 1 ? 's' : ''} by aisle?</div>
-          <p style={{ color: c.text.secondary, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: `0 0 ${sp.md}px` }}>
-            The on-device AI is downloaded but not loaded. Loading it into memory takes a few seconds and uses some RAM.
-          </p>
-          <div style={{ display: 'flex', gap: sp.sm }}>
-            <button onClick={onLoad} style={{ flex: 1, padding: '10px 14px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Load AI</button>
-            <button onClick={onDismiss} style={{ padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Not now</button>
-          </div>
-        </div>
-      )
-    }
-    if (status.state === 'downloading' || status.state === 'loading') {
-      const loading = status.state === 'loading'
-      // Bar from MB (smooth) rather than the coarse percentage; full + pulsing
-      // while the model loads into memory.
-      const frac = loading ? 1 : (status.totalMB ? Math.min(1, (status.downloadedMB || 0) / status.totalMB) : (status.pct || 0) / 100)
-      return (
-        <div style={wrap}>
-          <span style={{ color: c.text.primary, fontSize: 14, fontWeight: 400 }}>{loading ? 'Loading AI model into memory…' : `Downloading AI sorter… ${status.downloadedMB || 0} / ${status.totalMB || Math.round(status.model.sizeMB)} MB`}</span>
-          <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: sp.sm, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${Math.round(frac * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: loading ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
-          </div>
-        </div>
-      )
-    }
-    return null
-  }
-  if (!otherCount) return null
-  return (
-    <div style={wrap}>
-      <div style={{ color: c.text.primary, fontSize: 15, fontWeight: 400, marginBottom: 4 }}>Sort {otherCount} item{otherCount > 1 ? 's' : ''} with on-device AI?</div>
-      <p style={{ color: c.text.secondary, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: `0 0 ${sp.md}px` }}>
-        PearList couldn't place {otherCount > 1 ? 'these' : 'this'} by name. A small AI model can. It's a one-time ~{gb}GB download and runs entirely on your phone - nothing is ever sent anywhere.
-      </p>
-      <div style={{ display: 'flex', gap: sp.sm }}>
-        <button onClick={onEnable} style={{ flex: 1, padding: '10px 14px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Download & enable</button>
-        <button onClick={onDismiss} style={{ padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Not now</button>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Screens
-// ---------------------------------------------------------------------------
 
 function Onboarding ({ onStart, onJoin }) {
   return (
@@ -1072,12 +981,11 @@ function NameSetup ({ profile, onDone }) {
 // since they already have a space.
 // Bump TOUR_KEY when the steps change materially so returning users see the new
 // ones.
-const TOUR_KEY = 'pearlist:tourSeen:v2'
+const TOUR_KEY = 'pearlist:tourSeen:v3' // v3: dropped the on-device AI step
 const TOUR_STEPS = [
   { Icon: ListBullets, title: 'Lists live in a space', body: 'A space is a private place shared with your household. Every list in it, from Shopping to Chores to To-do, is shared with the people you invite.' },
   { Icon: CheckCircle, title: 'Tap a list to fill it', body: 'Open a list to add items, check them off, set quantities and assign an item to someone. Add a new list with the field at the bottom.' },
   { Icon: ShoppingCart, title: 'Shopping sorts itself', body: 'Items on a Shopping list land in supermarket aisles on their own. Drag one onto another aisle to re-file it and PearList remembers. Other lists can have sections you name yourself.' },
-  { Icon: Sparkle, title: 'Optional on-device AI', body: 'Turn on Local AI in Settings to sort the trickier items and to turn a meal or a recipe into a shopping list. It runs entirely on your phone, so nothing about your lists ever leaves the device.' },
   { Icon: BellRinging, title: 'Know when things get done', body: 'PearList alerts you when someone assigns you an item, joins your space or checks items off a list you created. Every list has its own alert setting in its options menu.' },
   { Icon: ShareNetwork, title: 'Invite your people', body: 'Tap the share icon to invite others. Everyone syncs peer-to-peer, with no account and no server.' },
 ]
@@ -1474,17 +1382,6 @@ export default function App () {
   }, [openList?.kind, gid, openListId, items, loadItems])
 
   // On-device AI status (consent + model download state), from the RN shell.
-  // Drives the Settings row and the in-list consent prompt; live-updated via the
-  // ai:status event (download progress, ready).
-  const [aiStatus, setAiStatus] = useState(null)
-  const [aiPromptDismissed, setAiPromptDismissed] = useState(false)
-  useEffect(() => {
-    call('shell:aiStatus', {}).then(setAiStatus).catch(() => {})
-    return on('ai:status', setAiStatus)
-  }, [])
-  useEffect(() => { setAiPromptDismissed(false) }, [openListId])
-  const enableAi = useCallback(() => { aiEnableConfirmed().then((ok) => { if (ok) call('shell:aiConsent', { enabled: true }).then(setAiStatus).catch(() => {}) }) }, [])
-
   // Device-local grocery view prefs (collapsed aisles + custom aisle/item order),
   // per list, persisted to localStorage. Tapping a header toggles collapse;
   // long-press drag reorders (see useAisleDrag).
@@ -1590,32 +1487,10 @@ export default function App () {
     if (next.changed) patchAisleView({ collapsed: next.collapsed, auto: next.auto })
   }, [autoCollapse, grouped, openListId, items, aisleView.collapsed, aisleView.auto, aisleView.forList, patchAisleView])
 
-  // Step 2 (hybrid AI fallback): items the keyword pass left as 'Other' (a word
-  // it doesn't know) get sent to the on-device LLM in the RN shell - but ONLY
-  // once the user has opted in and the model is downloaded. Until then the
-  // consent prompt (below) handles it. Re-runs when the model becomes ready.
-  const aiActive = !!(aiStatus?.consent && aiStatus?.state === 'ready') // loaded in memory (sorter runs)
-  const aiAvailable = !!(aiStatus?.consent && ['idle', 'loading', 'ready'].includes(aiStatus?.state)) // downloaded (usable; loads on demand)
-  const aiSentRef = useRef(new Set())
-  // Items the AI has finished with (found an aisle or not). An 'Other' item that
-  // is NOT yet done shows as "Sorting…" while the model is active, so it never
-  // visibly sits in "Other" and then jumps.
-  const [aiDone, setAiDone] = useState(new Set())
-  useEffect(() => { aiSentRef.current = new Set(); setAiDone(new Set()) }, [openListId])
-  useEffect(() => {
-    if (openList?.kind !== 'grocery' || !gid || !openListId || !aiActive) return
-    const others = items.filter((i) => i.category === 'Other' && i.catBy !== 'user' && !aiSentRef.current.has(i.id))
-    if (!others.length) return
-    others.forEach((i) => aiSentRef.current.add(i.id))
-    call('shell:aiCategorize', { groupId: gid, listId: openListId, items: others.map((i) => ({ itemId: i.id, text: i.text })) }).catch(() => {})
-  }, [openList?.kind, gid, openListId, items, aiActive])
-  useEffect(() => {
-    return on('ai:recategorized', (d) => {
-      if (d?.listId !== openListId) return
-      if (d?.done?.length) setAiDone((prev) => { const n = new Set(prev); d.done.forEach((x) => n.add(x)); return n })
-      if (gid) loadItems(gid, openListId)
-    })
-  }, [openListId, gid, loadItems])
+  // There is no AI fallback any more (removed 2026-07-26): an item the keyword
+  // pass cannot place simply rests in Other. Measured over 1702 calls, the model
+  // placed 37% of those correctly at 4-6.5s each, so Other is both faster and more
+  // honest. Correcting an item by hand still teaches this device (rememberOverride).
 
   async function createSpace (name) {
     const { groupId } = await call('group:create', { name })
@@ -1919,12 +1794,6 @@ export default function App () {
             <NoteEditor rows={items} onSave={saveNote} />
           ) : (
           <>
-          {/* Outside the scroll area so the consent prompt / download+loading
-              progress stays pinned below the header and is visible no matter how
-              far the list is scrolled (it used to scroll away with the items). */}
-          {openList?.kind === 'grocery' && !aiPromptDismissed
-            ? <AiConsentBanner status={aiStatus} otherCount={items.filter((i) => i.category === 'Other').length} onEnable={enableAi} onLoad={() => call('shell:aiLoad', {}).then(setAiStatus).catch(() => {})} onDismiss={() => setAiPromptDismissed(true)} />
-            : null}
           <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {items.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>Nothing here yet. Add the first thing below.</div>
@@ -1935,7 +1804,7 @@ export default function App () {
                   </SwipeRow>
                 )
                 return grouped
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} sortingActive={isGroceryList && aiActive} aiDone={aiDone} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
                   : items.map((it) => (
                     <div key={it.id} data-item-id={it.id} style={{ position: 'relative' }}>
                       {renderRow(it)}
@@ -1950,12 +1819,6 @@ export default function App () {
               120, toasts/banners 130). The composer must beat headers + lifted rows
               but stay under every overlay, so overlays live in the 100+ band. */}
           <div style={{ position: 'sticky', bottom: 0, zIndex: 60, background: c.surface.base }}>
-            {isGroceryList && aiAvailable ? (
-              // Sparkles lit (accent) when the model is loaded in memory, dim when
-              // idle (downloaded, not loaded yet) - a subtle "is it loaded?" cue.
-              <button onClick={() => setSheet('recipe')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, width: '100%', padding: `${sp.sm}px 0`, background: 'none', border: 'none', color: aiActive ? c.primary : c.text.muted, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}><Sparkle size={16} weight='fill' />Add from a recipe<Sparkle size={16} weight='fill' /></button>
-            ) : null}
-            {suggestions.length ? <SuggestionBar items={suggestions} onPick={(t) => addItemText(t)} /> : null}
             <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
           </div>
           </>
@@ -2036,9 +1899,6 @@ export default function App () {
       <QtySheet open={!!sheet && sheet.type === 'qty'}
         onCommit={async (qty) => { const t = sheet?.text; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); const ov = overrideFor(t); if (itemId && ov) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: ov, by: 'user' }).catch(() => {}); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
       />
-      <RecipeSheet open={sheet === 'recipe'} onClose={() => setSheet(null)}
-        onGenerate={(description) => call('shell:aiExpand', { description }).then((r) => r?.items || []).catch(() => [])}
-        onAdd={async (picks) => { for (const t of picks) await call('item:add', { groupId: gid, listId: openListId, text: t }).catch(() => {}); await loadItems(gid, openListId); setSheet(null) }} />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
     </div>
@@ -2549,30 +2409,6 @@ function ListCompleteSheet ({ open, listName, onDelete, onKeep, onClose }) {
 }
 
 
-// One-line description of the on-device AI model state for the Settings row.
-function aiSubtitle (ai) {
-  if (!ai) return 'Sorts unusual grocery items into aisles, on your device.'
-  const gb = (ai.model.sizeMB / 1024).toFixed(1)
-  if (ai.state === 'downloading') return `Downloading model… ${ai.downloadedMB || 0} / ${ai.totalMB || Math.round(ai.model.sizeMB)} MB`
-  if (ai.state === 'loading') return 'Loading model into memory…'
-  if (ai.state === 'ready') return `Ready · ${ai.model.name} (~${gb} GB stored on device)`
-  if (ai.state === 'idle') return `On · loads into memory when first used this session (~${gb} GB on device)`
-  if (ai.state === 'error') return 'Download failed - toggle off then on to retry.'
-  return `Off. Sorts items the name-matcher can't place. One-time ~${gb} GB download, runs on-device.`
-}
-
-// One plain line under the "Connect Anywhere" row saying whether the relay has
-// actually been needed. The counters reset when the app restarts, and they only
-// climb on the phone that ACCEPTED a relayed connection, so "none so far" on one
-// device is not proof that neither device relayed. See relay:stats.
-function relaySummary (s, on) {
-  if (!on) return 'Off. Your phones will sync only when they can reach each other directly.'
-  const { successes = 0, attempts = 0 } = s.relaying || {}
-  if (successes > 0) return `Used for ${successes} connection${successes > 1 ? 's' : ''} since PearList started.`
-  if (attempts > 0) return `Tried ${attempts} time${attempts > 1 ? 's' : ''} since PearList started, without completing.`
-  return 'On. Not needed so far, every connection has been direct.'
-}
-
 function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -2611,12 +2447,6 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     const t = setInterval(poll, 5000)
     return () => { live = false; clearInterval(t) }
   }, [])
-  const [ai, setAi] = useState(null)
-  useEffect(() => { call('shell:aiStatus', {}).then(setAi).catch(() => {}) }, [])
-  useEffect(() => on('ai:status', setAi), [])
-  async function toggleAi (v) { if (v && !(await aiEnableConfirmed())) return; try { setAi(await call('shell:aiConsent', { enabled: v })) } catch {} }
-  const loadAi = () => call('shell:aiLoad', {}).then((r) => { if (r?.status) setAi(r.status) }).catch(() => {})
-  const unloadAi = () => call('shell:aiUnload', {}).then((r) => { if (r?.status) setAi(r.status) }).catch(() => {})
   const [learned, setLearned] = useState(0)
   useEffect(() => { setLearned(overrideCount()) }, [])
   async function clearLearned () {
@@ -2632,8 +2462,6 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   const ABOUT = {
     Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
     'Background Sync': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
-    'Local AI': "Powers the on-device AI features: sorting grocery items into aisles, and turning a meal or recipe into a shopping list (\"Add from a recipe\"). A fast built-in name matcher still places common items instantly; the AI handles the rest and runs entirely on your phone - nothing about your lists ever leaves the device. One-time ~0.8 GB download; turn it off to delete the model and reclaim the space (the name matcher keeps working). Powered by QVAC, Tether's local AI SDK.",
-    'Loaded in memory': "Keeping the model in memory lets it sort and generate instantly, but uses some RAM. Turn this off to free the memory now - the model stays downloaded and reloads (a few seconds) the next time AI is used. It also loads on its own the first time you use AI each session.",
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
@@ -2721,21 +2549,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
         <Setting first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
         {bgSyncSupported ? <Setting title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
       </Group>
-      <Group title='On-device intelligence'>
-        <Setting first title='Local AI' about={ABOUT['Local AI']} aboutLink={{ label: 'QVAC documentation', url: 'https://docs.qvac.tether.io/' }}
-          control={<Toggle on={!!ai?.consent} onChange={toggleAi} />}
-          extra={ai && ai.consent && (ai.state === 'downloading' || ai.state === 'loading') ? (
-            <>
-              <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
-              <div style={{ height: 4, borderRadius: 2, background: c.surface.input, marginTop: 6, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${ai.state === 'loading' ? 100 : Math.round((ai.totalMB ? Math.min(1, (ai.downloadedMB || 0) / ai.totalMB) : (ai.pct || 0) / 100) * 100)}%`, background: c.primary, transition: 'width 300ms ease', animation: ai.state === 'loading' ? 'pearlist-pulse 1.2s ease-in-out infinite' : 'none' }} />
-              </div>
-            </>
-          ) : ai && ai.consent && ai.state === 'error' ? (
-            <span style={{ color: c.error, fontSize: 12, lineHeight: 1.35 }}>{aiSubtitle(ai)}</span>
-          ) : null} />
-        <Setting title='Loaded in memory' about={ABOUT['Loaded in memory']}
-          control={<Toggle on={ai?.state === 'ready'} disabled={!ai?.consent || ai?.state === 'downloading' || ai?.state === 'loading'} onChange={(v) => v ? loadAi() : unloadAi()} />} />
+      <Group title='Aisles'>
         <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
@@ -2968,59 +2782,6 @@ function QtySheet ({ open, onCommit }) {
 // Recipe/meal -> grocery items (on-device AI). Type what you're making, generate
 // a suggested list, then review (deselect/keep) before adding. onGenerate calls
 // the shell's QVAC expansion; onAdd bulk-adds the picked items to the list.
-function RecipeSheet ({ open, onClose, onGenerate, onAdd }) {
-  const [desc, setDesc] = useState('')
-  const [items, setItems] = useState(null) // null = not generated yet
-  const [picked, setPicked] = useState(new Set())
-  const [busy, setBusy] = useState(false)
-  useEffect(() => { if (open) { setDesc(''); setItems(null); setPicked(new Set()); setBusy(false) } }, [open])
-  const generate = async () => {
-    const d = desc.trim(); if (!d || busy) return
-    setBusy(true); setItems(null)
-    const got = await onGenerate(d)
-    setItems(got); setPicked(new Set(got)); setBusy(false)
-  }
-  const toggle = (it) => setPicked((p) => { const n = new Set(p); n.has(it) ? n.delete(it) : n.add(it); return n })
-  const add = async () => {
-    const picks = items.filter((it) => picked.has(it)); if (!picks.length || busy) return
-    setBusy(true); await onAdd(picks)
-  }
-  return (
-    <BottomSheet open={open} onClose={onClose} title='Add from a recipe'>
-      <div style={{ display: 'flex', gap: sp.sm, marginBottom: sp.md }}>
-        <input value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') generate() }} placeholder="What are you making? (e.g. tacos)" autoFocus maxLength={80}
-          style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, fontFamily: FONT, outline: 'none' }} />
-        <button onClick={generate} disabled={busy || !desc.trim()} style={{ padding: '0 16px', borderRadius: r.md, border: 'none', background: (busy || !desc.trim()) ? c.surface.input : c.primary, color: (busy || !desc.trim()) ? c.text.muted : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: (busy || !desc.trim()) ? 'default' : 'pointer', flexShrink: 0 }}>{busy && items === null ? 'Generating' : 'Generate'}</button>
-      </div>
-      {busy && items === null ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, color: c.text.muted, fontSize: 13, margin: `${sp.lg}px 0` }}>
-          <Sparkle size={16} weight='fill' color={c.primary} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite' }} />
-          <span>Thinking up ingredients</span>
-          <Sparkle size={16} weight='fill' color={c.primary} style={{ animation: 'pearlist-pulse 1.2s ease-in-out infinite 0.6s' }} />
-        </div>
-      ) : null}
-      {items && items.length === 0 ? <p style={{ color: c.text.muted, fontSize: 14, textAlign: 'center', margin: `${sp.base}px 0` }}>Couldn't come up with a list. Try rephrasing (e.g. "chicken tacos").</p> : null}
-      {items && items.length > 0 ? (
-        <>
-          <p style={{ color: c.text.muted, fontSize: 12, margin: `0 0 ${sp.sm}px` }}>Tap to keep or drop, then add.</p>
-          <div style={{ maxHeight: '42dvh', overflowY: 'auto', marginBottom: sp.md }}>
-            {items.map((it) => {
-              const on = picked.has(it)
-              return (
-                <button key={it} onClick={() => toggle(it)} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.sm}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', textAlign: 'left' }}>
-                  <span style={{ width: 22, height: 22, flexShrink: 0, borderRadius: r.sm, border: `2px solid ${on ? c.primary : c.text.muted}`, background: on ? c.primary : 'transparent', color: c.text.onPrimary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{on ? <Check size={14} weight='bold' /> : null}</span>
-                  <span style={{ flex: 1, color: on ? c.text.primary : c.text.muted, fontSize: 16, fontWeight: 300, textDecoration: on ? 'none' : 'line-through' }}>{it}</span>
-                </button>
-              )
-            })}
-          </div>
-          <Button onClick={add} disabled={busy || !picked.size}>{busy ? 'Adding…' : `Add ${picked.size} item${picked.size === 1 ? '' : 's'}`}</Button>
-        </>
-      ) : null}
-    </BottomSheet>
-  )
-}
-
 function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
