@@ -138,14 +138,36 @@ test('brand + the actual product resolves without the model', () => {
   }
 })
 
-test('the brand ALONE is what actually reaches the model', () => {
-  // The same products with the noun stripped. These are the model's real workload,
-  // and it gets roughly half of them wrong (see src/aisleFewshot.js), so anything
-  // moved OUT of this list is a straight win: instant instead of seconds, and
-  // right instead of a coin flip.
-  for (const brand of ['Sargento', 'Modelo', 'Barefoot', 'Folgers', 'Progresso', 'Kikkoman', 'RXBAR']) {
-    assert.equal(classifyAisle(brand), FALLBACK, `${brand} alone falls through to the model today`)
+test('the brand ALONE now resolves too, instead of going to the model', () => {
+  // These seven were measured wrong by the on-device model in EVERY prompt variant
+  // on BOTH hosts (2026-07-26): Barefoot wine filed under Baking, Folgers under
+  // Household, an RXBAR under Produce. Four seconds each to get them wrong. They
+  // are keywords now, so the model is never asked.
+  const cases = [
+    ['Sargento', 'Dairy & Eggs'],
+    ['Modelo', 'Alcohol'],
+    ['Barefoot', 'Alcohol'],
+    ['Folgers', 'Beverages'],
+    ['Progresso', 'Pantry'],
+    ['Kikkoman', 'Condiments'],
+    ['RXBAR', 'Snacks'],
+    ['Stouffers', 'Frozen'],
+    ['Applegate', 'Meat & Seafood'],
+  ]
+  for (const [brand, expected] of cases) {
+    assert.equal(classifyAisle(brand), expected, `${brand} should resolve without the model`)
   }
+})
+
+test('a brand never outranks the product noun next to it', () => {
+  // The reason BRANDS is a separate, lower-priority table. A brand can sell across
+  // aisles, so when both are present the noun is the one that knows what was bought.
+  assert.equal(classifyAisle('Mrs Meyers hand soap'), 'Personal Care')  // brand says Household
+  assert.equal(classifyAisle('Mrs Meyers dish soap'), 'Household')
+  assert.equal(classifyAisle('Mrs Meyers'), 'Household')                // brand alone decides
+  assert.equal(classifyAisle('Dole pineapple juice'), 'Beverages')      // brand says Produce
+  assert.equal(classifyAisle('Dole'), 'Produce')
+  assert.equal(classifyAisle('Seventh Generation diapers'), 'Personal Care') // brand says Household
 })
 
 test('unknown or empty items fall back to Other, never null', () => {
@@ -153,6 +175,20 @@ test('unknown or empty items fall back to Other, never null', () => {
   assert.equal(classifyAisle(''), FALLBACK)
   assert.equal(classifyAisle(null), FALLBACK)
   assert.equal(classifyAisle(undefined), FALLBACK)
+})
+
+test("possessive brands match, apostrophe or not", () => {
+  // The tokenizer used to split on the apostrophe, so "King's Hawaiian" became
+  // "king s hawaiian" and could never match a keyword. Several entries in the
+  // tables were dead on arrival for exactly this reason - "lay's", "campbell's",
+  // "hellmann's", "reese's", "totino's", "ben & jerry's" - and only worked at all
+  // because someone had also written the apostrophe-free spelling next to them.
+  assert.equal(classifyAisle("King's Hawaiian"), 'Bakery')
+  assert.equal(classifyAisle('Kings Hawaiian'), 'Bakery')
+  assert.equal(classifyAisle("Lay's"), 'Snacks')
+  assert.equal(classifyAisle("Campbell's soup"), 'Pantry')
+  assert.equal(classifyAisle("Ben & Jerry's"), 'Frozen')
+  assert.equal(classifyAisle("Hellmann's mayo"), 'Condiments')
 })
 
 test('does not match a substring across word boundaries', () => {

@@ -116,22 +116,65 @@ const RULES = [
     'old spice', 'hand sanitizer', 'cotton balls', 'nail polish', 'shower gel']],
 ]
 
+// BRAND names, checked only when no product noun matched.
+//
+// Precedence matters and it is not a detail: "Mrs Meyers hand soap" must file by
+// HAND SOAP, not by Mrs Meyers, because the noun is what the person is buying and
+// the brand may sell across several aisles. Ranking brands equal with nouns broke
+// exactly that case the moment these were added, since a two-word brand ties a
+// two-word noun and the earlier aisle in the table wins on a coin toss of ordering.
+//
+// So: nouns first, brands as the fallback. A brand only decides when the item is
+// nothing but a brand, which is precisely the case that used to fall through to the
+// on-device model - seconds of work for an answer that was right about half the
+// time. Every brand here is one the model no longer has to guess at.
+//
+// Deliberately ABSENT: brands that span aisles (Dove is soap and chocolate, Arm &
+// Hammer is baking soda, detergent and cat litter) and brands that are everyday
+// words (all, gain, secret, always, axe, method, life, native, honest). A false
+// match is worse than a miss, because a miss just goes to the model.
+const BRANDS = [
+  ['Frozen', ['stouffers', 'ore-ida', 'ore ida', 'birds eye', 'marie callenders', 'healthy choice', 'lean cuisine', 'amys', 'red baron', 'tombstone', 'screamin sicilian', 'breyers', 'blue bell', 'halo top', 'magnum', 'drumstick', 'edys', 'dreyers']],
+  ['Produce', ['dole', 'driscolls', 'driscoll', 'cuties', 'halos', 'earthbound', 'fresh express', 'taylor farms']],
+  ['Dairy & Eggs', ['sargento', 'kerrygold', 'cabot', 'land o lakes', 'lucerne', 'horizon', 'organic valley', 'daisy', 'breakstone', 'egglands', 'egglands best', 'vital farms', 'happy egg', 'borden', 'laughing cow', 'boursin', 'galbani', 'polly-o', 'fage', 'siggis', 'noosa', 'activia', 'dannon', 'silk', 'oatly', 'almond breeze', 'califia', 'coffee mate', 'international delight']],
+  ['Meat & Seafood', ['butterball', 'applegate', 'bar s', 'eckrich', 'nathans', 'foster farms', 'smithfield', 'land o frost', 'buddig', 'gortons', 'mrs pauls']],
+  ['Bakery', ['kings hawaiian', 'sara lee', 'natures own', 'arnold', 'oroweat', 'daves killer bread', 'thomas english muffins', 'martins', 'wonder bread', 'entenmanns', 'bimbo', 'udis', 'canyon bakehouse']],
+  ['Beverages', ['folgers', 'maxwell house', 'dunkin', 'starbucks', 'cafe bustelo', 'community coffee', 'spindrift', 'topo chico', 'poland spring', 'dasani', 'aquafina', 'essentia', 'smartwater', 'bai', 'celsius', 'liquid iv', 'body armor', 'bodyarmor', 'vitaminwater', 'lipton', 'tazo', 'bigelow', 'twinings', 'celestial seasonings', 'swiss miss', 'ocean spray', 'welchs', 'simply orange', 'naked juice', 'v8', 'arizona', 'crystal light', 'kool aid']],
+  ['Alcohol', ['modelo', 'barefoot', 'yuengling', 'corona', 'budweiser', 'bud light', 'coors', 'miller lite', 'michelob', 'heineken', 'stella artois', 'guinness', 'blue moon', 'sam adams', 'sierra nevada', 'lagunitas', 'josh cellars', 'kim crawford', 'yellow tail', 'apothic', 'meiomi', 'la marca', 'titos', 'jack daniels', 'jim beam', 'makers mark', 'jameson', 'bacardi', 'captain morgan', 'smirnoff', 'absolut', 'grey goose', 'hennessy', 'patron', 'jose cuervo', 'truly', 'high noon']],
+  ['Snacks', ['rxbar', 'clif', 'quest bar', 'nature valley', 'nutri grain', 'fig newtons', 'chex mix', 'gardettos', 'takis', 'popcorners', 'smartfood', 'skinny pop', 'utz', 'herrs', 'snyders', 'rold gold', 'combos', 'planters', 'blue diamond', 'wonderful pistachios', 'haribo', 'sour patch', 'starburst', 'm&ms', 'milky way', 'three musketeers', 'almond joy', 'york peppermint', 'junior mints', 'altoids', 'little debbie', 'hostess']],
+  ['Pantry', ['progresso', 'swanson', 'knorr', 'better than bouillon', 'goya', 'rotel', 'hunts', 'contadina', 'muir glen', 'cento', 'barilla', 'ronzoni', 'de cecco', 'banza', 'annies', 'uncle bens', 'bens original', 'minute rice', 'near east', 'rice a roni', 'zatarains', 'idahoan', 'top ramen', 'cup noodles', 'spaghettios', 'dinty moore', 'manwich', 'bushs', 'van camps', 'old el paso', 'ortega', 'college inn', 'pacific foods', 'skippy', 'jif', 'peter pan', 'smuckers', 'kelloggs', 'general mills', 'honey bunches', 'special k', 'chex', 'grape nuts', 'kix', 'trix', 'cocoa puffs', 'cinnamon toast crunch', 'mccormick']],
+  ['Baking', ['krusteaz', 'duncan hines', 'betty crocker', 'pillsbury', 'king arthur', 'gold medal', 'bobs red mill', 'toll house', 'domino sugar', 'imperial sugar', 'argo', 'clabber girl', 'rumford', 'fleischmanns', 'red star yeast', 'wilton']],
+  ['Condiments', ['kikkoman', 'cholula', 'tapatio', 'valentina', 'franks red hot', 'dukes', 'kewpie', 'best foods', 'frenchs', 'grey poupon', 'guldens', 'sweet baby rays', 'kc masterpiece', 'stubbs', 'primal kitchen', 'sir kensingtons', 'newmans own', 'kens', 'hidden valley', 'wish bone', 'marzetti', 'litehouse', 'mt olive', 'vlasic', 'claussen', 'mezzetta']],
+  ['Household', ['seventh generation', 'mrs meyers', 'simple green', 'pine sol', 'murphy oil', 'scrubbing bubbles', 'easy off', 'drano', 'liquid plumr', 'resolve', 'shout', 'oxiclean', 'downy', 'bounce', 'snuggle', 'purex', 'viva', 'sparkle', 'marcal', 'saran', 'reynolds']],
+  ['Pet', ['fresh step', 'kong', 'worlds best', 'dr elseys', 'science diet', 'royal canin', 'taste of the wild', 'nutro', 'beneful', 'cesar', 'dentastix', 'nylabone', 'chuckit', 'frontline', 'seresto']],
+  ['Personal Care', ['neutrogena', 'claritin', 'zyrtec', 'allegra', 'benadryl', 'mucinex', 'robitussin', 'delsym', 'sudafed', 'afrin', 'flonase', 'prilosec', 'pepcid', 'imodium', 'dramamine', 'midol', 'excedrin', 'bayer', 'suave', 'nivea', 'vaseline', 'eucerin', 'lubriderm', 'jergens', 'gold bond', 'dial', 'irish spring', 'safeguard', 'softsoap', 'degree', 'speed stick', 'right guard', 'schick', 'venus razor', 'harrys', 'scope', 'poise', 'stayfree', 'playtex']],
+]
+
 // Pre-split each rule's phrases into word arrays once, so classify is a cheap
 // scan. Multi-word phrases ("ice cream", "peanut butter") match as a substring
 // on word boundaries; single words match a whole token.
+// Apostrophes are DROPPED, not turned into a space, so "King's Hawaiian" becomes
+// "kings hawaiian" and matches the way anyone would write the keyword. Splitting on
+// them instead ("king s hawaiian") is why several entries in these tables could
+// never fire: "lay's", "campbell's", "hellmann's", "reese's", "totino's" and
+// "ben & jerry's" were all dead the day they were written, saved only by their
+// apostrophe-free twins sitting next to them.
 function tokenize (text) {
-  return String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean)
+  return String(text || '').toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean)
 }
 
-// Offline keyword classifier: returns a known aisle, or FALLBACK ('Other') if
-// nothing matches. Never returns null (every item gets a bucket), so the
-// categorize pass always terminates. Pure + synchronous by design.
-function classifyAisle (text) {
-  const t = ' ' + tokenize(text).join(' ') + ' '
-  if (t.trim() === '') return FALLBACK
+// Both tables are normalized ONCE through the same tokenizer as the input, so a
+// phrase can be written the natural way and still match. Done at module load: the
+// classifier runs per item on every list render.
+const normalize = (phrase) => tokenize(phrase).join(' ')
+const normalized = (table) => table.map(([aisle, phrases]) => [aisle, phrases.map(normalize).filter(Boolean)])
+
+// Best match within one table: longest phrase wins (most specific), ties fall to
+// the earlier aisle. Returns FALLBACK when nothing matched.
+function bestIn (table, t) {
   let best = FALLBACK
   let bestLen = 0
-  for (const [aisle, phrases] of RULES) {
+  for (const [aisle, phrases] of table) {
     for (const p of phrases) {
       // whole-word / whole-phrase match, padded so "pear" != "spear"
       if (!t.includes(' ' + p + ' ')) continue
@@ -140,6 +183,24 @@ function classifyAisle (text) {
     }
   }
   return best
+}
+
+// Offline keyword classifier: returns a known aisle, or FALLBACK ('Other') if
+// nothing matches. Never returns null (every item gets a bucket), so the
+// categorize pass always terminates. Pure + synchronous by design.
+//
+// NOUNS FIRST, BRANDS SECOND. "Mrs Meyers hand soap" files by hand soap, not by
+// Mrs Meyers: the noun is what the person is buying, and a brand may sell across
+// several aisles. A brand only decides when the item is nothing but a brand -
+// which is exactly the case that used to fall through to the on-device model.
+const NOUN_RULES = normalized(RULES)
+const BRAND_RULES = normalized(BRANDS)
+
+function classifyAisle (text) {
+  const t = ' ' + tokenize(text).join(' ') + ' '
+  if (t.trim() === '') return FALLBACK
+  const byNoun = bestIn(NOUN_RULES, t)
+  return byNoun === FALLBACK ? bestIn(BRAND_RULES, t) : byNoun
 }
 
 // Stable sort index for grouping (unknown -> last).
