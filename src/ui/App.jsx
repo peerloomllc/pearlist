@@ -2409,6 +2409,18 @@ function ListCompleteSheet ({ open, listName, onDelete, onKeep, onClose }) {
 }
 
 
+// One plain line under the "Connect Anywhere" row saying whether the relay has
+// actually been needed. The counters reset when the app restarts, and they only
+// climb on the phone that ACCEPTED a relayed connection, so "none so far" on one
+// device is not proof that neither device relayed. See relay:stats.
+function relaySummary (s, on) {
+  if (!on) return 'Off. Your phones will sync only when they can reach each other directly.'
+  const { successes = 0, attempts = 0 } = s.relaying || {}
+  if (successes > 0) return `Used for ${successes} connection${successes > 1 ? 's' : ''} since PearList started.`
+  if (attempts > 0) return `Tried ${attempts} time${attempts > 1 ? 's' : ''} since PearList started, without completing.`
+  return 'On. Not needed so far, every connection has been direct.'
+}
+
 function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
