@@ -38,6 +38,62 @@ test('multi-word phrases match on word boundaries', () => {
   assert.equal(classifyAisle('paper towels'), 'Household')
 })
 
+// Ties are broken by WORD COUNT and then by table order, and Personal Care is
+// last, so a one-word match in an earlier aisle used to swallow whole categories
+// of everyday item: "potato chips" filed as Produce, "apple juice" as Produce,
+// "chicken broth" as Meat & Seafood, "shaving cream" as Dairy & Eggs, "bar soap"
+// as Snacks (via "bar"). 21 of 58 probed everyday items came back wrong.
+//
+// The fix is naming the two-word phrase, which outranks any single word without
+// reordering the table (reordering would change every other tie at once). These
+// are pinned as a table because the failure mode is silent - a misfiled item just
+// shows up in an odd aisle and looks like the classifier being dim.
+test('two-word phrases beat the single word they contain', () => {
+  const cases = [
+    // the word that used to win is in brackets
+    ['potato chips', 'Snacks'],        // [potato] -> Produce
+    ['tortilla chips', 'Snacks'],      // [tortilla] -> Bakery
+    ['kettle chips', 'Snacks'],
+    ['apple juice', 'Beverages'],      // [apple] -> Produce
+    ['orange juice', 'Beverages'],     // [orange] -> Produce
+    ['root beer', 'Beverages'],        // [beer] -> Alcohol
+    ['chicken broth', 'Pantry'],       // [chicken] -> Meat & Seafood
+    ['beef stock', 'Pantry'],          // [beef] -> Meat & Seafood
+    ['wine vinegar', 'Pantry'],        // [wine] -> Alcohol
+    ['egg noodles', 'Pantry'],         // [egg] -> Dairy & Eggs
+    ['bar soap', 'Personal Care'],     // [bar] -> Snacks
+    ['hand soap', 'Personal Care'],    // [soap] -> Household
+    ['body wash', 'Personal Care'],
+    ['shaving cream', 'Personal Care'],// [cream] -> Dairy & Eggs
+    ['baby oil', 'Personal Care'],     // [oil] -> Pantry
+    ['old spice', 'Personal Care'],    // [spice] -> Pantry
+    ['bath salts', 'Personal Care'],   // [salt] -> Pantry
+    ['ghirardelli chips', 'Baking'],   // [chips] -> Snacks
+  ]
+  for (const [item, expected] of cases) {
+    assert.equal(classifyAisle(item), expected, `${item} should be ${expected}`)
+  }
+})
+
+test('the single-word behaviour those phrases sit on top of is unchanged', () => {
+  // The pairs above must not have cost us the plain words.
+  const cases = [
+    ['apple', 'Produce'], ['potato', 'Produce'], ['beer', 'Alcohol'], ['wine', 'Alcohol'],
+    ['chicken', 'Meat & Seafood'], ['beef', 'Meat & Seafood'], ['cream', 'Dairy & Eggs'],
+    ['eggs', 'Dairy & Eggs'], ['salt', 'Pantry'], ['oil', 'Pantry'], ['chips', 'Snacks'],
+    ['dish soap', 'Household'], ['tortillas', 'Bakery'], ['chocolate chips', 'Baking'],
+  ]
+  for (const [item, expected] of cases) {
+    assert.equal(classifyAisle(item), expected, `${item} should still be ${expected}`)
+  }
+})
+
+test('brand + category together still resolve (real shopping-list wording)', () => {
+  assert.equal(classifyAisle('Dove bar soap'), 'Personal Care')
+  assert.equal(classifyAisle('Lays potato chips'), 'Snacks')
+  assert.equal(classifyAisle('Swanson chicken broth'), 'Pantry')
+})
+
 test('unknown or empty items fall back to Other, never null', () => {
   assert.equal(classifyAisle('flux capacitor'), FALLBACK)
   assert.equal(classifyAisle(''), FALLBACK)
