@@ -214,6 +214,18 @@ async function readScreenshotSceneFile (): Promise<number | null> {
   } catch { return null }
 }
 
+// Aisle-prompt harness (app/bench.ts): runs only when a driver script drops a
+// Documents/bench-config JSON file in, which nothing in the app ever does. Same
+// file-not-deep-link delivery as the screenshot scene above, and for the same
+// reason. Returns the parsed config, or null in normal use.
+async function readBenchConfigFile (): Promise<any | null> {
+  try {
+    const txt = await FileSystem.readAsStringAsync(FileSystem.documentDirectory + 'bench-config')
+    const cfg = JSON.parse(txt)
+    return cfg && typeof cfg === 'object' ? cfg : null
+  } catch { return null }
+}
+
 // --- UI html ---------------------------------------------------------------
 function buildHtml (jsBundle: string, screenshotScene?: number | null) {
   const platform = JSON.stringify(Platform.OS)
@@ -269,6 +281,15 @@ export default function Shell () {
       const scene = (await readScreenshotSceneFile()) ?? parseScreenshotScene(initialUrl)
       if (scene != null) {
         if (!cancelled) setHtml(await loadUiHtml(scene))
+        return
+      }
+      // Prompt harness: measure and print, no UI, no worklet, no permission
+      // prompts to steal focus mid-run. Only ever reached when a driver script
+      // wrote the config file (see scripts/ios-aisle-bench.sh).
+      const benchCfg = await readBenchConfigFile()
+      if (benchCfg) {
+        const { runAisleBench } = await import('./bench')
+        runAisleBench(benchCfg).catch((e) => console.log('[BENCH] ' + JSON.stringify({ type: 'error', error: e?.message ?? String(e) })))
         return
       }
       // Nudge iOS to show the Local Network prompt so same-WiFi peers connect

@@ -21,6 +21,9 @@ release_notes.md
 TODO.md
 DONE.md
 
+# Harness output (device measurements; the numbers that matter go in DONE.md)
+metadata/bench/
+
 # Local env / release
 scripts/.env
 .env

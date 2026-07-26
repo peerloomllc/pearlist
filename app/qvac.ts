@@ -166,6 +166,32 @@ export async function removeAiModel (): Promise<AiStatus> {
   return status()
 }
 
+// The few-shot AND the prompt builder live in src/aisleFewshot.js, so the shipped
+// prompt, the trimmed variants the harness grades (app/bench.ts) and the test that
+// guards the shipped wording are all one definition. FULL is the shipped 11
+// examples: teaching the JSON shape + brand->product mapping is what a 1B model
+// badly needs for lesser-known brands (SunChips -> Snacks, etc).
+const { FULL: AISLE_FEWSHOT, VARIANTS: AISLE_VARIANTS, history: aisleHistory } = require('../src/aisleFewshot.js')
+
+// One classification call. Returns the aisle (or null if unusable) plus whatever
+// timing/token counts the SDK reported, which is what the harness measures. The
+// shipped path ignores `meta` entirely.
+async function runAisleCompletion (text: string, fewshot: Array<[string, string]>): Promise<{ aisle: string | null, meta: any }> {
+  const modelId = await ensureReady()
+  const run = completion({
+    modelId,
+    history: aisleHistory(text, fewshot),
+    stream: false,
+    responseFormat: { type: 'json_schema', json_schema: { name: 'aisle', schema: AISLE_SCHEMA, strict: true } },
+  })
+  const final: any = await run.final
+  const raw = (final.contentText || '').trim()
+  let aisle: string
+  try { aisle = String(JSON.parse(raw).aisle) } catch { aisle = raw }
+  const { contentText, ...meta } = final
+  return { aisle: AISLES.includes(aisle) ? aisle : null, meta }
+}
+
 // Classify one item -> a KNOWN aisle or null. No consent = no download, no work.
 export async function classifyAisleAI (item: string): Promise<string | null> {
   await init()
@@ -173,38 +199,26 @@ export async function classifyAisleAI (item: string): Promise<string | null> {
   const text = String(item || '').trim()
   if (!text) return null
   try {
-    const modelId = await ensureReady()
-    const run = completion({
-      modelId,
-      history: [
-        { role: 'system', content: 'You assign a grocery item to the single best supermarket aisle. Items are often BRAND NAMES - map the brand to the product it sells (e.g. a chip brand -> Snacks). Reply with JSON only.' },
-        // Few-shot: teaches the JSON shape + brand->product mapping, which a 1B
-        // model badly needs for lesser-known brands (SunChips -> Snacks, etc).
-        { role: 'user', content: 'Item: "SunChips"' }, { role: 'assistant', content: '{"aisle":"Snacks"}' },
-        { role: 'user', content: 'Item: "La Croix"' }, { role: 'assistant', content: '{"aisle":"Beverages"}' },
-        { role: 'user', content: 'Item: "Tide Pods"' }, { role: 'assistant', content: '{"aisle":"Household"}' },
-        { role: 'user', content: 'Item: "Chobani"' }, { role: 'assistant', content: '{"aisle":"Dairy & Eggs"}' },
-        { role: 'user', content: 'Item: "Advil"' }, { role: 'assistant', content: '{"aisle":"Personal Care"}' },
-        { role: 'user', content: 'Item: "Eggo waffles"' }, { role: 'assistant', content: '{"aisle":"Frozen"}' },
-        { role: 'user', content: 'Item: "vanilla extract"' }, { role: 'assistant', content: '{"aisle":"Baking"}' },
-        { role: 'user', content: 'Item: "sriracha"' }, { role: 'assistant', content: '{"aisle":"Condiments"}' },
-        { role: 'user', content: 'Item: "Cabernet Sauvignon"' }, { role: 'assistant', content: '{"aisle":"Alcohol"}' },
-        // Pet food is neither for people (Meat/Pantry) nor cleaning - keep cat/dog
-        // food etc. in the Pet aisle so it never lands in a human-food aisle.
-        { role: 'user', content: 'Item: "cat food"' }, { role: 'assistant', content: '{"aisle":"Pet"}' },
-        { role: 'user', content: 'Item: "dog food"' }, { role: 'assistant', content: '{"aisle":"Pet"}' },
-        { role: 'user', content: `Item: "${text}"` },
-      ],
-      stream: false,
-      responseFormat: { type: 'json_schema', json_schema: { name: 'aisle', schema: AISLE_SCHEMA, strict: true } },
-    })
-    const final = await run.final
-    const raw = (final.contentText || '').trim()
-    let aisle: string
-    try { aisle = String(JSON.parse(raw).aisle) } catch { aisle = raw }
-    return AISLES.includes(aisle) ? aisle : null
+    return (await runAisleCompletion(text, AISLE_FEWSHOT)).aisle
   } catch {
     return null
+  }
+}
+
+// Harness entry point (app/bench.ts): classify with a NAMED prompt variant and
+// hand back the SDK's own timings. Never called by the app itself. Unknown variant
+// names throw rather than silently falling back to the shipped prompt, so a typo in
+// a bench config cannot be mistaken for a result.
+export async function classifyAisleVariant (item: string, variant: string): Promise<{ aisle: string | null, meta: any, ms: number }> {
+  await init()
+  const fewshot = AISLE_VARIANTS[variant]
+  if (!fewshot) throw new Error(`unknown few-shot variant: ${variant}`)
+  const started = Date.now()
+  try {
+    const { aisle, meta } = await runAisleCompletion(String(item || '').trim(), fewshot)
+    return { aisle, meta, ms: Date.now() - started }
+  } catch (e: any) {
+    return { aisle: null, meta: { error: e?.message ?? String(e) }, ms: Date.now() - started }
   }
 }
 
