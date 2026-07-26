@@ -2226,6 +2226,10 @@ else
     --exclude='.git' --exclude='node_modules' --exclude='android' \
     --exclude='ios/Pods/' --exclude='ios/build/' --exclude='ios/PearList.xcworkspace/' \
     "$REPO_ROOT/" "${MAC_MINI}:${MAC_MINI_REPO_PATH}/"
+  # node_modules is excluded above, but ONE file in it is a prebuild output, not an
+  # npm one: @qvac/sdk's mobile worker bundle. Without it the Mac builds an app
+  # whose on-device AI cannot start, and the build still succeeds. See the script.
+  "$REPO_ROOT/scripts/sync-qvac-worker.sh" "$MAC_MINI" "$MAC_MINI_REPO_PATH" /opt/homebrew/bin/rsync
   echo "    Sync complete."
   echo ""
 
