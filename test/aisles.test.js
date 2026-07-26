@@ -38,11 +38,167 @@ test('multi-word phrases match on word boundaries', () => {
   assert.equal(classifyAisle('paper towels'), 'Household')
 })
 
+// Ties are broken by WORD COUNT and then by table order, and Personal Care is
+// last, so a one-word match in an earlier aisle used to swallow whole categories
+// of everyday item: "potato chips" filed as Produce, "apple juice" as Produce,
+// "chicken broth" as Meat & Seafood, "shaving cream" as Dairy & Eggs, "bar soap"
+// as Snacks (via "bar"). 21 of 58 probed everyday items came back wrong.
+//
+// The fix is naming the two-word phrase, which outranks any single word without
+// reordering the table (reordering would change every other tie at once). These
+// are pinned as a table because the failure mode is silent - a misfiled item just
+// shows up in an odd aisle and looks like the classifier being dim.
+test('two-word phrases beat the single word they contain', () => {
+  const cases = [
+    // the word that used to win is in brackets
+    ['potato chips', 'Snacks'],        // [potato] -> Produce
+    ['tortilla chips', 'Snacks'],      // [tortilla] -> Bakery
+    ['kettle chips', 'Snacks'],
+    ['apple juice', 'Beverages'],      // [apple] -> Produce
+    ['orange juice', 'Beverages'],     // [orange] -> Produce
+    ['root beer', 'Beverages'],        // [beer] -> Alcohol
+    ['chicken broth', 'Pantry'],       // [chicken] -> Meat & Seafood
+    ['beef stock', 'Pantry'],          // [beef] -> Meat & Seafood
+    ['wine vinegar', 'Pantry'],        // [wine] -> Alcohol
+    ['egg noodles', 'Pantry'],         // [egg] -> Dairy & Eggs
+    ['bar soap', 'Personal Care'],     // [bar] -> Snacks
+    ['hand soap', 'Personal Care'],    // [soap] -> Household
+    ['body wash', 'Personal Care'],
+    ['shaving cream', 'Personal Care'],// [cream] -> Dairy & Eggs
+    ['baby oil', 'Personal Care'],     // [oil] -> Pantry
+    ['old spice', 'Personal Care'],    // [spice] -> Pantry
+    ['bath salts', 'Personal Care'],   // [salt] -> Pantry
+    ['ghirardelli chips', 'Baking'],   // [chips] -> Snacks
+  ]
+  for (const [item, expected] of cases) {
+    assert.equal(classifyAisle(item), expected, `${item} should be ${expected}`)
+  }
+})
+
+test('the single-word behaviour those phrases sit on top of is unchanged', () => {
+  // The pairs above must not have cost us the plain words.
+  const cases = [
+    ['apple', 'Produce'], ['potato', 'Produce'], ['beer', 'Alcohol'], ['wine', 'Alcohol'],
+    ['chicken', 'Meat & Seafood'], ['beef', 'Meat & Seafood'], ['cream', 'Dairy & Eggs'],
+    ['eggs', 'Dairy & Eggs'], ['salt', 'Pantry'], ['oil', 'Pantry'], ['chips', 'Snacks'],
+    ['dish soap', 'Household'], ['tortillas', 'Bakery'], ['chocolate chips', 'Baking'],
+  ]
+  for (const [item, expected] of cases) {
+    assert.equal(classifyAisle(item), expected, `${item} should still be ${expected}`)
+  }
+})
+
+test('brand + category together still resolve (real shopping-list wording)', () => {
+  assert.equal(classifyAisle('Dove bar soap'), 'Personal Care')
+  assert.equal(classifyAisle('Lays potato chips'), 'Snacks')
+  assert.equal(classifyAisle('Swanson chicken broth'), 'Pantry')
+})
+
+// THE PATH REAL USERS WALK. The on-device model only ever sees items the keyword
+// pass leaves as 'Other', and the model is right about half the time on those. But
+// people write "Kikkoman soy sauce", not "Kikkoman" - and with the noun present the
+// keyword pass places it instantly, correctly, and the model is never asked.
+//
+// Measured while grading the model (2026-07-26): of 26 brand items written the way
+// someone actually writes a list, 23 are placed here and only 3 reach the model.
+// That is the whole argument for spending effort on this list rather than on the
+// prompt, so it is pinned: a regression here silently pushes work onto a 4-second
+// coin flip.
+test('cleaning brands are not drinks or snacks', () => {
+  // Found while building the model's test set: "Scotch-Brite" matched 'scotch' and
+  // filed under Alcohol, "Bar Keepers Friend" matched 'bar' and filed under Snacks.
+  // Same class as the misfires above - one everyday word inside a brand name.
+  assert.equal(classifyAisle('Scotch-Brite'), 'Household')
+  assert.equal(classifyAisle('Bar Keepers Friend'), 'Household')
+  assert.equal(classifyAisle('scotch'), 'Alcohol')      // the word itself is untouched
+  assert.equal(classifyAisle('granola bar'), 'Snacks')
+})
+
+test('brand + the actual product resolves without the model', () => {
+  const cases = [
+    ['Sargento cheese', 'Dairy & Eggs'],
+    ['Kerrygold butter', 'Dairy & Eggs'],
+    ['Modelo beer', 'Alcohol'],
+    ['Barefoot wine', 'Alcohol'],
+    ['Folgers coffee', 'Beverages'],
+    ['Spindrift sparkling water', 'Beverages'],
+    ['Neutrogena face wash', 'Personal Care'],
+    // Hand soap is Personal Care; DISH soap is Household. Mrs Meyers makes both,
+    // which is exactly why the noun decides it and the brand cannot.
+    ['Mrs Meyers hand soap', 'Personal Care'],
+    ['Mrs Meyers dish soap', 'Household'],
+    ['Seventh Generation detergent', 'Household'],
+    ['Barilla pasta', 'Pantry'],
+    ['Progresso soup', 'Pantry'],
+    ['Duncan Hines cake mix', 'Baking'],
+    ['Stouffers frozen lasagna', 'Frozen'],
+    ['Ore-Ida frozen fries', 'Frozen'],
+    ['Kings Hawaiian rolls', 'Bakery'],
+    ['Sara Lee bread', 'Bakery'],
+    ['Butterball turkey', 'Meat & Seafood'],
+    ['Applegate deli ham', 'Meat & Seafood'],
+    ['Cholula hot sauce', 'Condiments'],
+    ['Kikkoman soy sauce', 'Condiments'],
+    ['RXBAR protein bar', 'Snacks'],
+    ['Clif bar', 'Snacks'],
+    ['Fresh Step cat litter', 'Pet'],
+  ]
+  for (const [item, expected] of cases) {
+    assert.equal(classifyAisle(item), expected, `${item} should be ${expected} without asking the model`)
+  }
+})
+
+test('the brand ALONE now resolves too, instead of going to the model', () => {
+  // These seven were measured wrong by the on-device model in EVERY prompt variant
+  // on BOTH hosts (2026-07-26): Barefoot wine filed under Baking, Folgers under
+  // Household, an RXBAR under Produce. Four seconds each to get them wrong. They
+  // are keywords now, so the model is never asked.
+  const cases = [
+    ['Sargento', 'Dairy & Eggs'],
+    ['Modelo', 'Alcohol'],
+    ['Barefoot', 'Alcohol'],
+    ['Folgers', 'Beverages'],
+    ['Progresso', 'Pantry'],
+    ['Kikkoman', 'Condiments'],
+    ['RXBAR', 'Snacks'],
+    ['Stouffers', 'Frozen'],
+    ['Applegate', 'Meat & Seafood'],
+  ]
+  for (const [brand, expected] of cases) {
+    assert.equal(classifyAisle(brand), expected, `${brand} should resolve without the model`)
+  }
+})
+
+test('a brand never outranks the product noun next to it', () => {
+  // The reason BRANDS is a separate, lower-priority table. A brand can sell across
+  // aisles, so when both are present the noun is the one that knows what was bought.
+  assert.equal(classifyAisle('Mrs Meyers hand soap'), 'Personal Care')  // brand says Household
+  assert.equal(classifyAisle('Mrs Meyers dish soap'), 'Household')
+  assert.equal(classifyAisle('Mrs Meyers'), 'Household')                // brand alone decides
+  assert.equal(classifyAisle('Dole pineapple juice'), 'Beverages')      // brand says Produce
+  assert.equal(classifyAisle('Dole'), 'Produce')
+  assert.equal(classifyAisle('Seventh Generation diapers'), 'Personal Care') // brand says Household
+})
+
 test('unknown or empty items fall back to Other, never null', () => {
   assert.equal(classifyAisle('flux capacitor'), FALLBACK)
   assert.equal(classifyAisle(''), FALLBACK)
   assert.equal(classifyAisle(null), FALLBACK)
   assert.equal(classifyAisle(undefined), FALLBACK)
+})
+
+test("possessive brands match, apostrophe or not", () => {
+  // The tokenizer used to split on the apostrophe, so "King's Hawaiian" became
+  // "king s hawaiian" and could never match a keyword. Several entries in the
+  // tables were dead on arrival for exactly this reason - "lay's", "campbell's",
+  // "hellmann's", "reese's", "totino's", "ben & jerry's" - and only worked at all
+  // because someone had also written the apostrophe-free spelling next to them.
+  assert.equal(classifyAisle("King's Hawaiian"), 'Bakery')
+  assert.equal(classifyAisle('Kings Hawaiian'), 'Bakery')
+  assert.equal(classifyAisle("Lay's"), 'Snacks')
+  assert.equal(classifyAisle("Campbell's soup"), 'Pantry')
+  assert.equal(classifyAisle("Ben & Jerry's"), 'Frozen')
+  assert.equal(classifyAisle("Hellmann's mayo"), 'Condiments')
 })
 
 test('does not match a substring across word boundaries', () => {
