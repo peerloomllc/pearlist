@@ -412,3 +412,61 @@ test('digest is null when nothing is open, so the caller cancels instead of nagg
 test('digest survives a nameless list rather than quoting an empty string', () => {
   assert.equal(digestText([{ name: '   ', kind: 'chore', open: 1 }]).body, '"One of your lists" still has open items')
 })
+
+// --- per-item reminders (P2 of 2026-07-27-reminder-notifications.md) --------
+
+const { reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS } = require('../src/listWire')
+
+const KID = 'k'.repeat(64)
+const PARENT = 'p'.repeat(64)
+const OTHER_M = 'o'.repeat(64)
+
+test('reminder target: item assignee wins, then list assignee, then list creator', () => {
+  const list = { assignee: OTHER_M, createdBy: PARENT }
+  assert.equal(reminderTargetOf({ assignee: KID }, list), KID, 'the item assignee owns this job')
+  assert.equal(reminderTargetOf({}, list), OTHER_M, 'unassigned item falls back to the list')
+  assert.equal(reminderTargetOf({}, { createdBy: PARENT }), PARENT, 'then to whoever made the list')
+  assert.equal(reminderTargetOf({ assignee: null }, { createdBy: PARENT }), PARENT, 'an explicit null is not an assignee')
+})
+
+test('reminder target: null when nothing resolves, so nothing is scheduled on a guess', () => {
+  assert.equal(reminderTargetOf(null, { createdBy: PARENT }), null)
+  assert.equal(reminderTargetOf({}, null), null, 'the list is gone')
+  assert.equal(reminderTargetOf({}, { deleted: true, createdBy: PARENT }), null, 'a tombstoned list rings nobody')
+  assert.equal(reminderTargetOf({ deleted: true, assignee: KID }, { createdBy: PARENT }), null)
+  assert.equal(reminderTargetOf({}, {}), null, 'no assignee and no creator')
+})
+
+test('exactly ONE member is the target, so exactly one phone rings', () => {
+  const list = { assignee: OTHER_M, createdBy: PARENT }
+  const item = { assignee: KID, remindAt: 2000 }
+  const rings = [KID, PARENT, OTHER_M].filter((who) => isReminderPending(item, list, who, 1000))
+  assert.deepEqual(rings, [KID], 'the parent and the list owner stay silent')
+})
+
+test('a reminder is pending only when it is future, unchecked, alive and mine', () => {
+  const list = { createdBy: PARENT }
+  const base = { assignee: KID, remindAt: 2000 }
+  assert.equal(isReminderPending(base, list, KID, 1000), true)
+  assert.equal(isReminderPending(base, list, KID, 2000), false, 'exactly due is not still pending')
+  assert.equal(isReminderPending(base, list, KID, 3000), false, 'already past')
+  assert.equal(isReminderPending({ ...base, checked: true }, list, KID, 1000), false,
+    'finishing early is how you cancel a reminder; it must not still fire')
+  assert.equal(isReminderPending({ ...base, deleted: true }, list, KID, 1000), false)
+  assert.equal(isReminderPending({ assignee: KID }, list, KID, 1000), false, 'no remindAt, nothing to fire')
+  assert.equal(isReminderPending({ ...base, remindAt: NaN }, list, KID, 1000), false)
+  assert.equal(isReminderPending({ ...base, remindAt: '2000' }, list, KID, 1000), false, 'a string is not a timestamp')
+  assert.equal(isReminderPending(base, list, null, 1000), false, 'no identity yet, schedule nothing')
+})
+
+test('a far-future remindAt is fine: the FUTURE_TS guard covers updatedAt only', () => {
+  const yearOut = Date.now() + 365 * 24 * 60 * 60 * 1000
+  const r = signValue({ pubkey: PUB, updatedAt: Date.now(), text: 'mot', remindAt: yearOut }, KP.secretKey)
+  assert.equal(rowApplyDecision(itemKey('L', 'I'), r, null), 'accept')
+  assert.equal(isReminderPending({ ...r, assignee: PUB }, { createdBy: PUB }, PUB, Date.now()), true)
+})
+
+test('the scheduling cap leaves room under the iOS 64-notification limit', () => {
+  assert.ok(MAX_SCHEDULED_REMINDERS > 0 && MAX_SCHEDULED_REMINDERS < 64,
+    'iOS silently drops past 64 pending local notifications, so stay well under with room for the daily digest')
+})

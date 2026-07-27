@@ -348,4 +348,52 @@ function digestText (rows) {
   return { title: 'Still on your lists', body, groupId: top.groupId || null, listId: top.listId || null }
 }
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText }
+// --- per-item reminders ----------------------------------------------------
+// P2 of proposals/2026-07-27-reminder-notifications.md. `remindAt` is an epoch
+// ms on the item row, additive and optional: rowApplyDecision validates only
+// pubkey/updatedAt/sig/namespace and every local write path is a
+// read-modify-write through signRow with no field allowlist, so an OLD build
+// editing the item preserves it rather than dropping it. Its FUTURE_TS guard
+// covers updatedAt only, so a remindAt a year out is accepted normally.
+//
+// Named remindAt and NOT dueAt on purpose: it is a reminder, not a deadline, and
+// nothing later should read it as one. No sorting, no overdue styling, no
+// list-level rollup.
+
+// WHO FIRES IT. Exactly one member by construction, so exactly one phone rings.
+// A parent setting a reminder on a kid's chore reaches the kid and nobody else.
+// Without this every member's device would buzz for every reminder, which is the
+// fastest way to get an app muted.
+//
+// Resolution order, first hit wins:
+//   1. item.assignee  - whoever owns this specific job
+//   2. list.assignee  - whoever the whole list belongs to
+//   3. list.createdBy - whoever set the list up, as the backstop
+// Returns null when nothing resolves (e.g. the list is gone), and the caller
+// then schedules nothing rather than guessing.
+function reminderTargetOf (item, list) {
+  if (!item || item.deleted === true) return null
+  if (typeof item.assignee === 'string' && item.assignee) return item.assignee
+  if (!list || list.deleted === true) return null
+  if (typeof list.assignee === 'string' && list.assignee) return list.assignee
+  if (typeof list.createdBy === 'string' && list.createdBy) return list.createdBy
+  return null
+}
+
+// Is this row one that SHOULD have a notification pending right now, for me?
+// Pure and time-injected so the boundary cases are testable without waiting.
+// A checked item never rings: finishing something early is the normal way to
+// cancel a reminder, and it must not still fire.
+function isReminderPending (item, list, selfKey, now) {
+  if (!item || item.deleted === true || item.checked === true) return false
+  if (typeof item.remindAt !== 'number' || !Number.isFinite(item.remindAt)) return false
+  if (item.remindAt <= now) return false // already past; the OS has fired it or it was missed
+  return !!selfKey && reminderTargetOf(item, list) === selfKey
+}
+
+// iOS keeps at most 64 pending local notifications per app and SILENTLY drops the
+// rest, so the reconciler schedules only the soonest few and refills as they
+// fire. 32 leaves generous headroom, plus a slot for the daily digest.
+const MAX_SCHEDULED_REMINDERS = 32
+
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS }

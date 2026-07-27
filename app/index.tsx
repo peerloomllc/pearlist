@@ -69,11 +69,12 @@ async function ensureNotifPermission () {
       name: 'Completed items', importance: Notifications.AndroidImportance.DEFAULT,
       description: 'When someone completes an item on a list you oversee',
     })
-    // Its own channel so a daily nudge can be muted without muting the alerts
-    // that follow something a person actually did.
+    // Its own channel so reminders can be muted without muting the alerts that
+    // follow something a person actually did. Carries both the daily nudge and
+    // per-item reminders: they are the same kind of interruption to a user.
     await Notifications.setNotificationChannelAsync('reminder', {
-      name: 'Daily reminder', importance: Notifications.AndroidImportance.DEFAULT,
-      description: 'A once-a-day nudge about lists with open items',
+      name: 'Reminders', importance: Notifications.AndroidImportance.DEFAULT,
+      description: 'The daily nudge, and reminders you set on individual items',
     })
   }
   const s = await Notifications.getPermissionsAsync()
@@ -163,10 +164,103 @@ async function refreshDailyReminder () {
         data: { groupId: digest.groupId, listId: digest.listId }, // tap -> open the top list
         ...(Platform.OS === 'android' ? { channelId: 'reminder' } : {}),
       },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: pref.hour, minute: pref.minute },
+      // channelId belongs on the TRIGGER for a scheduled notification. Android
+      // ignores the one in `content` here and drops it on expo's fallback
+      // channel instead, which silently breaks "mute reminders on their own".
+      // Caught on the Pixel: the first one that fired landed on
+      // expo_notifications_fallback_notification_channel.
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: pref.hour, minute: pref.minute, channelId: 'reminder' },
     })
   } catch {}
 }
+
+// --- per-item reminders (P2 of the reminders proposal) ----------------------
+//
+// A RECONCILER, not a maybeNotify branch. maybeNotify deliberately ignores
+// anything outside a 60s freshness window so catch-up sync does not replay
+// history as alerts, and a reminder set last week is exactly the row it skips.
+//
+// So instead: ask the worklet what SHOULD be scheduled for this device, diff it
+// against what the OS actually holds, and apply the delta. Idempotent, so calling
+// it too often is free. Identifiers are the item key, so a cancel is exact and
+// never guesses which pending notification belonged to which item.
+const REMINDER_PREFIX = 'item:' // an identifier we own; anything else is left alone
+
+async function refreshItemReminders () {
+  try {
+    if (!_workletStarted) return
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(() => null)
+    if (!scheduled) return
+    const have = new Map<string, any>()
+    for (const n of scheduled) {
+      if (typeof n.identifier === 'string' && n.identifier.startsWith(REMINDER_PREFIX)) have.set(n.identifier, n)
+    }
+
+    // Notifications off entirely: drop every item reminder we own and stop. Done
+    // before the worklet read so turning them off takes effect even if it is slow.
+    if (!_notifEnabled) {
+      for (const id of have.keys()) await Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+      return
+    }
+
+    const TIMED_OUT = Symbol('timeout')
+    const wm: any = await Promise.race([
+      callRaw('reminder:pending', {}),
+      new Promise((res) => setTimeout(() => res(TIMED_OUT), 5000)),
+    ])
+    // Could not read: leave what is scheduled alone rather than cancelling
+    // everything on a slow worklet.
+    if (wm === TIMED_OUT || !wm?.result) return
+    const want: any[] = Array.isArray(wm.result.reminders) ? wm.result.reminders : []
+    const dropped = Number(wm.result.dropped) || 0
+    // Never silent about a cap: iOS drops past 64 pending notifications, so say
+    // what was left out rather than letting it look like everything is scheduled.
+    if (dropped > 0) console.warn(`[reminders] ${dropped} reminder(s) beyond the ${want.length}-slot cap are NOT scheduled`)
+
+    const wantIds = new Set(want.map((r) => r.key))
+    for (const id of have.keys()) {
+      if (!wantIds.has(id)) await Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+    }
+    for (const r of want) {
+      // Re-schedule when the time moved; the identifier makes that a replace.
+      const existing = have.get(r.key)
+      const existingAt = existing?.trigger?.value ?? existing?.trigger?.timestamp ?? null
+      if (existing && typeof existingAt === 'number' && Math.abs(existingAt - r.remindAt) < 1000) continue
+      await Notifications.scheduleNotificationAsync({
+        identifier: r.key,
+        content: {
+          title: 'Reminder',
+          body: `"${r.text}" on ${r.listName}`,
+          data: { groupId: r.groupId, listId: r.listId }, // tap -> open the list
+          ...(Platform.OS === 'android' ? { channelId: 'reminder' } : {}),
+        },
+        // channelId on the TRIGGER, not just the content - see refreshDailyReminder.
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.remindAt, channelId: 'reminder' },
+      }).catch(() => {})
+    }
+  } catch {}
+}
+
+// Both reminder surfaces refresh together: they share the same triggers, the same
+// permission gate and the same "the counts just changed" moments.
+function refreshReminders () {
+  refreshDailyReminder()
+  refreshItemReminders()
+}
+
+// Debounced, because a single Save fires several worklet writes in a row
+// (item:edit, item:assign, item:setReminder) and each one would otherwise kick a
+// full reconcile. Without this trigger a reminder set while the app stays
+// foregrounded is not handed to the OS until the next background/foreground,
+// so one set for ten minutes' time would simply never arrive.
+let _remindersRefreshTimer: any = null
+function scheduleRemindersRefresh (delay = 1200) {
+  if (_remindersRefreshTimer) clearTimeout(_remindersRefreshTimer)
+  _remindersRefreshTimer = setTimeout(() => { _remindersRefreshTimer = null; refreshReminders() }, delay)
+}
+// Methods that can change what should be scheduled: a reminder, an assignee (who
+// rings), a check/delete (cancel), or a list's kind (the digest's counts).
+const REMINDER_DIRTYING = /^(item|list|note):/
 
 // How long the app must have been backgrounded before a resume terminates the
 // WebView's render process (GrapheneOS/Vanadium freeze recovery; see the AppState
@@ -379,7 +473,7 @@ export default function Shell () {
       // Now that the worklet can answer list:openSummary, re-derive the daily
       // reminder from the current open counts. Its body was frozen whenever it
       // was last scheduled, so a launch is the cheapest moment to refresh it.
-      refreshDailyReminder()
+      refreshReminders()
       if (!cancelled) setHtml(await loadUiHtml())
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
     return () => { cancelled = true }
@@ -396,9 +490,14 @@ export default function Shell () {
   // recovery effect below.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' || state === 'background') refreshDailyReminder()
+      if (state === 'active' || state === 'background') refreshReminders()
     })
-    return () => sub.remove()
+    // A reminder someone ELSE sets on my chore arrives as a synced row, and there
+    // is no applied-change event to hang off, so a slow poll is what makes it land
+    // while the app is open. One worklet read and a diff, so cheap enough to leave
+    // running; everything else is event-driven.
+    const t = setInterval(refreshItemReminders, 120000)
+    return () => { sub.remove(); clearInterval(t) }
   }, [])
 
   // Android hardware back / gesture: if the WebView reported an open overlay
@@ -515,7 +614,7 @@ export default function Shell () {
           await AsyncStorage.setItem(NOTIF_KEY, _notifEnabled ? '1' : '0')
           // The master toggle gates the daily reminder too, so turning it off must
           // cancel a scheduled one rather than leave it to fire from the OS.
-          refreshDailyReminder()
+          refreshReminders()
           return reply(id, { enabled: _notifEnabled, permissionDenied: enabled && !granted })
         }
         case 'shell:reminder:get': {
@@ -557,6 +656,9 @@ export default function Shell () {
         default: {
           // Everything else goes to the worklet.
           const wm = await callRaw(method, args)
+          // A write that can change what should be scheduled: reconcile shortly
+          // after, so a reminder set without ever leaving the app still lands.
+          if (typeof method === 'string' && REMINDER_DIRTYING.test(method) && !(wm && wm.error != null)) scheduleRemindersRefresh()
           if (wm && wm.error != null) return replyError(id, wm.error)
           return reply(id, wm ? wm.result : null)
         }

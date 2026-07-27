@@ -1887,6 +1887,15 @@ export default function App () {
         onSave={async (patch) => {
           await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url })
           await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee })
+          // Only write when it actually changed: item:setReminder rejects a past
+          // time, and re-sending an untouched old reminder would fail the save for
+          // no reason. Non-fatal either way - a rejected reminder must not lose
+          // the text and assignee edits that already landed above.
+          const prevRemind = typeof sheet.item.remindAt === 'number' ? sheet.item.remindAt : null
+          if ((patch.remindAt ?? null) !== prevRemind) {
+            try { await call('item:setReminder', { groupId: gid, listId: openListId, itemId: sheet.item.id, remindAt: patch.remindAt ?? null }) }
+            catch (e) { alert('Could not set that reminder: ' + (e?.message || e)) }
+          }
           if (patch.catTouched) {
             const cat = patch.category || ''
             await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: cat, by: 'user' }).catch(() => {})
@@ -2844,6 +2853,27 @@ function QtySheet ({ open, onCommit }) {
 // Edit one item: its text, quantity, note, link, assignee and aisle/section.
 // `noun` labels the grouping field for the list kind ('aisle' for groceries,
 // 'section' otherwise); onSave commits, onDelete removes.
+// <input type='datetime-local'> speaks local wall-clock text; the row stores an
+// absolute epoch. Converting at the edge keeps a reminder set by someone in
+// another timezone firing at the same INSTANT everywhere, which is what a
+// household wants, rather than a floating local time nobody asked for.
+function toLocalInput (ms) {
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+function fromLocalInput (s) {
+  const t = new Date(String(s)).getTime()
+  return Number.isFinite(t) ? t : null
+}
+function reminderLabel (ms) {
+  const d = new Date(ms)
+  const today = new Date()
+  const sameDay = d.toDateString() === today.toDateString()
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
+}
+
 function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
@@ -2854,7 +2884,8 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
   const [catTouched, setCatTouched] = useState(false)
   const [picking, setPicking] = useState(false)
   const [pickingAisle, setPickingAisle] = useState(false)
-  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false) } }, [open, item])
+  const [remindAt, setRemindAt] = useState(null)
+  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null) } }, [open, item])
   if (!item) return null
   const isGrocery = kind === 'grocery'
   const nounLabel = noun.charAt(0).toUpperCase() + noun.slice(1) // "Aisle" / "Section"
@@ -2888,6 +2919,21 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               <CaretRight size={16} color={c.text.muted} weight='regular' />
             </span>
           </button>
+          {/* One reminder, one instant. Deliberately no repeat and no snooze: that
+              is a chore scheduler, which the proposal keeps out of scope. Whoever
+              the item is assigned to is who gets it (falling back to the list's
+              assignee, then its creator), so exactly one phone rings. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+            <span style={{ color: c.text.secondary, fontSize: 14, flexShrink: 0 }}>Remind</span>
+            <input type='datetime-local' aria-label='Reminder time'
+              value={remindAt ? toLocalInput(remindAt) : ''}
+              onChange={(e) => setRemindAt(e.target.value ? fromLocalInput(e.target.value) : null)}
+              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: remindAt ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
+            {remindAt ? <button onClick={() => setRemindAt(null)} aria-label='Clear reminder' style={{ width: 46, flexShrink: 0, height: 42, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.error, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} weight='bold' /></button> : null}
+          </div>
+          {remindAt && remindAt <= Date.now()
+            ? <span style={{ color: c.error, fontSize: 12, marginTop: -6 }}>That time has already passed, so nothing would fire. Pick a later one.</span>
+            : null}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder='Notes (optional)' rows={2} maxLength={2000}
             style={{ width: '100%', padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none', resize: 'vertical', minHeight: 44 }} />
           <div style={{ display: 'flex', gap: sp.sm }}>
@@ -2895,7 +2941,7 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
             {url.trim() ? <button onClick={() => openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim())} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
           </div>
-          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched })}>Save</Button>
+          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched, remindAt })}>Save</Button>
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>
