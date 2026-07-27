@@ -2856,6 +2856,11 @@ function QtySheet ({ open, onCommit }) {
 // Edit one item: its text, quantity, note, link, assignee and aisle/section.
 // `noun` labels the grouping field for the list kind ('aisle' for groceries,
 // 'section' otherwise); onSave commits, onDelete removes.
+// Both label columns in the item sheet share this width, so "Remind" and
+// "Repeats" - different lengths - still line their input boxes up on the same
+// left edge.
+const FIELD_LABEL_W = 74
+
 // <input type='datetime-local'> speaks local wall-clock text; the row stores an
 // absolute epoch. Converting at the edge keeps a reminder set by someone in
 // another timezone firing at the same INSTANT everywhere, which is what a
@@ -2923,11 +2928,25 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               <CaretRight size={16} color={c.text.muted} weight='regular' />
             </span>
           </button>
+          {/* One reminder, one instant. No snooze: whoever the item is assigned to
+              is who gets it (falling back to the list's assignee, then its
+              creator), so exactly one phone rings. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+            <span style={{ color: c.text.secondary, fontSize: 14, width: FIELD_LABEL_W, flexShrink: 0 }}>Remind</span>
+            <input type='datetime-local' aria-label='Reminder time'
+              value={remindAt ? toLocalInput(remindAt) : ''}
+              onChange={(e) => setRemindAt(e.target.value ? fromLocalInput(e.target.value) : null)}
+              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: remindAt ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
+            {remindAt ? <button onClick={() => setRemindAt(null)} aria-label='Clear reminder' style={{ width: 46, flexShrink: 0, height: 42, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.error, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash size={18} weight='regular' /></button> : null}
+          </div>
+          {remindAt && remindAt <= Date.now()
+            ? <span style={{ color: c.error, fontSize: 12, marginTop: -6 }}>That time has already passed, so nothing would fire. Pick a later one.</span>
+            : null}
           {/* A chore that comes back. Nothing resets it on a timer: checking it off
               records WHEN, and whether it is open now is worked out from that at
               read time (proposals/2026-07-27-recurring-chores.md). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
-            <span style={{ color: c.text.secondary, fontSize: 14, flexShrink: 0 }}>Repeats</span>
+            <span style={{ color: c.text.secondary, fontSize: 14, width: FIELD_LABEL_W, flexShrink: 0 }}>Repeats</span>
             <select value={repeat} onChange={(e) => setRepeat(e.target.value)} aria-label='Repeats'
               style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: repeat ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }}>
               <option value=''>Never</option>
@@ -2939,20 +2958,6 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
           {/* Only worth saying when it is closed: an open chore is due NOW. */}
           {repeat && repeat === item.repeat && item.checked && item.nextDueAt
             ? <span style={{ color: c.text.muted, fontSize: 12, marginTop: -6 }}>Done for now. Back on {new Date(item.nextDueAt).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}.</span>
-            : null}
-          {/* One reminder, one instant. No snooze: whoever the item is assigned to
-              is who gets it (falling back to the list's assignee, then its
-              creator), so exactly one phone rings. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
-            <span style={{ color: c.text.secondary, fontSize: 14, flexShrink: 0 }}>Remind</span>
-            <input type='datetime-local' aria-label='Reminder time'
-              value={remindAt ? toLocalInput(remindAt) : ''}
-              onChange={(e) => setRemindAt(e.target.value ? fromLocalInput(e.target.value) : null)}
-              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: remindAt ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
-            {remindAt ? <button onClick={() => setRemindAt(null)} aria-label='Clear reminder' style={{ width: 46, flexShrink: 0, height: 42, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.error, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} weight='bold' /></button> : null}
-          </div>
-          {remindAt && remindAt <= Date.now()
-            ? <span style={{ color: c.error, fontSize: 12, marginTop: -6 }}>That time has already passed, so nothing would fire. Pick a later one.</span>
             : null}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder='Notes (optional)' rows={2} maxLength={2000}
             style={{ width: '100%', padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none', resize: 'vertical', minHeight: 44 }} />
