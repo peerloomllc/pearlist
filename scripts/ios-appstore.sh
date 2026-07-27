@@ -117,6 +117,15 @@ security set-key-partition-list \
 # PATH for xcodebuild invocations so the system rsync is found instead.
 XCODE_PATH=$(printf '%s' "$PATH" | sed 's|/opt/homebrew/bin:||g; s|:/opt/homebrew/bin||g')
 
+# ── Stale Bare addons ───────────────────────────────────────────────────────
+# MUST run before pod install: react-native-bare-kit's podspec vendors
+# ios/addons/*.xcframework by GLOB, so pod install is what bakes whatever is in
+# that directory into the workspace. It is a cache inside node_modules that only
+# grows - prebuild writes to it, npm install does not clean it, and every rsync to
+# this Mac excludes node_modules - so a removed dependency keeps shipping its
+# frameworks. Silent both ways: the archive succeeds and the app runs.
+"$REPO_ROOT/scripts/prune-stale-bare-addons.sh" "$REPO_ROOT"
+
 # ── Pods ────────────────────────────────────────────────────────────────────
 # Resync Pods to the current Podfile. The release rsync copies the repo over and
 # can leave the CocoaPods sandbox out of sync with Podfile.lock, which fails the

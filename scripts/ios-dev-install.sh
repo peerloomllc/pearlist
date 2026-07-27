@@ -121,6 +121,19 @@ if [ "${SKIP_SYNC:-0}" != "1" ]; then
   ssh "$MAC_MINI" "bash -lc 'cd $MAC_REPO_PATH && npm install'" | tail -3
 fi
 
+# ── 1c. Prune stale Bare addons on the Mac ──────────────────────────────────
+# react-native-bare-kit's podspec vendors ios/addons/*.xcframework BY GLOB, and
+# that directory is a cache inside node_modules that only ever grows: prebuild
+# writes into it, npm install does not clean it, and the rsync above excludes
+# node_modules entirely. A dependency removed from package.json therefore keeps
+# shipping its frameworks. Runs AFTER npm install, which may reinstall the package
+# and is the only other thing that touches that directory. See the script header
+# for the 40 MB of QVAC that shipped in an IPA after the dependency was gone.
+if [ "${SKIP_SYNC:-0}" != "1" ]; then
+  step "prune stale Bare addons on $MAC_MINI"
+  ssh "$MAC_MINI" "bash -lc 'cd $MAC_REPO_PATH && ./scripts/prune-stale-bare-addons.sh'"
+fi
+
 # ── 2. Pod install on Mac mini ──────────────────────────────────────────────
 # UTF-8 env vars are required: bash -lc returns ASCII-8BIT by default on
 # this Mac, and CocoaPods' UnicodeNormalize crashes without UTF-8.
