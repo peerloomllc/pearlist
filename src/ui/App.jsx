@@ -2441,6 +2441,23 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   async function toggleBgSync (v) {
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
+  // Daily reminder: a once-a-day nudge about lists with open items. Off by
+  // default. The time is stored as hour + minute and edited through a native
+  // <input type='time'>, which is the one picker guaranteed to be present in the
+  // WebView on both platforms.
+  const [reminder, setReminder] = useState({ enabled: false, hour: 18, minute: 0 })
+  useEffect(() => { call('shell:reminder:get', {}).then((r) => { if (r) setReminder({ enabled: !!r.enabled, hour: r.hour ?? 18, minute: r.minute ?? 0 }) }).catch(() => {}) }, [])
+  async function saveReminder (next) {
+    setReminder(next) // optimistic: the toggle should not lag the tap
+    try {
+      const r = await call('shell:reminder:set', next)
+      if (r) setReminder({ enabled: !!r.enabled, hour: r.hour ?? next.hour, minute: r.minute ?? next.minute })
+      if (next.enabled && r && r.notificationsEnabled === false) {
+        alert('Turn on notifications for PearList in your device Settings to get the daily reminder.')
+      }
+    } catch { setReminder((p) => ({ ...p, enabled: false })) }
+  }
+  const reminderTime = `${String(reminder.hour).padStart(2, '0')}:${String(reminder.minute).padStart(2, '0')}`
   // "Connect Anywhere" - the off-LAN relay backstop. Default on, so an unanswered
   // read shows on rather than flickering off and back.
   const [relayOn, setRelayOn] = useState(true)
@@ -2477,18 +2494,25 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
+    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. Free-text notes are never counted. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
   }
-  const Setting = ({ title, about, aboutLink, control, extra, first }) => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
+  // alignTop pins the control to the TITLE's line instead of centring it over the
+  // whole row. Use it when `extra` is an interactive control of its own (the
+  // reminder's time picker): centred, the toggle floats between the two lines and
+  // reads as if it belongs to the picker rather than to the setting.
+  const Setting = ({ title, about, aboutLink, control, extra, first, alignTop }) => (
+    <div style={{ display: 'flex', alignItems: alignTop ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
       <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 4 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, minHeight: 28 }}>
           <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{title}</span>
           {about ? <button onClick={() => setInfo({ title, body: about, link: aboutLink })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
         </span>
         {extra}
       </span>
-      {control}
+      {/* Matches the title line's minHeight so the control centres against the
+          title, not against the top edge of the row. */}
+      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, ...(alignTop ? { minHeight: 28 } : {}) }}>{control}</span>
     </div>
   )
   const Group = ({ title, children }) => (
@@ -2559,6 +2583,19 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       </Group>
       <Group title='Notifications'>
         <Setting first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        <Setting title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
+          extra={reminder.enabled
+            // No "Every day at" label: the title already says daily, so the time
+            // on its own is unambiguous (Tim's call).
+            ? <input type='time' value={reminderTime} aria-label='Daily reminder time'
+                onChange={(e) => {
+                  const [h, m] = String(e.target.value || '').split(':')
+                  if (h === undefined || m === undefined) return
+                  saveReminder({ ...reminder, hour: Number(h), minute: Number(m) })
+                }}
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '4px 8px', fontSize: 13, outline: 'none' }} />
+            : null}
+          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
         {bgSyncSupported ? <Setting title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
       </Group>
       <Group title='Aisles'>

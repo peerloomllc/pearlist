@@ -69,6 +69,12 @@ async function ensureNotifPermission () {
       name: 'Completed items', importance: Notifications.AndroidImportance.DEFAULT,
       description: 'When someone completes an item on a list you oversee',
     })
+    // Its own channel so a daily nudge can be muted without muting the alerts
+    // that follow something a person actually did.
+    await Notifications.setNotificationChannelAsync('reminder', {
+      name: 'Daily reminder', importance: Notifications.AndroidImportance.DEFAULT,
+      description: 'A once-a-day nudge about lists with open items',
+    })
   }
   const s = await Notifications.getPermissionsAsync()
   if (s.status !== 'granted') await Notifications.requestPermissionsAsync()
@@ -86,6 +92,80 @@ function fireNotify (channelId: string, title: string, body: string, data?: any)
     content: { title, body, data: data || {}, ...(Platform.OS === 'android' ? { channelId } : {}) },
     trigger: null, // deliver now
   }).catch(() => {})
+}
+
+// --- daily reminder (P1 of proposals/2026-07-27-reminder-notifications.md) ---
+//
+// Unlike every other notification here, this one is TIME-triggered: it is handed
+// to the OS in advance and the OS delivers it whether or not our process exists.
+// That is why it works on iOS, where the peer-driven notifications cannot (see
+// DECISIONS 2026-07-07). Nothing crosses the wire, nothing wakes the worklet.
+//
+// Device-local like the notification and bg-sync toggles. NOT synced: syncing it
+// would mean one member's 07:00 nudge waking the whole household.
+const REMINDER_KEY = 'pearlist:dailyReminder'
+const REMINDER_ID = 'pearlist:daily' // stable, so re-scheduling replaces rather than stacks
+type ReminderPref = { enabled: boolean, hour: number, minute: number }
+// OFF by default, deliberately NOT following the 2026-07-07 "notifications ON by
+// default" reversal. Those fire because a person just did something; an
+// unsolicited daily buzz nobody asked for is the classic uninstall trigger.
+const REMINDER_DEFAULT: ReminderPref = { enabled: false, hour: 18, minute: 0 }
+
+function clampHour (n: any) { return Math.min(23, Math.max(0, Math.trunc(Number(n)) || 0)) }
+function clampMinute (n: any) { return Math.min(59, Math.max(0, Math.trunc(Number(n)) || 0)) }
+
+async function loadReminderPref (): Promise<ReminderPref> {
+  try {
+    const raw = await AsyncStorage.getItem(REMINDER_KEY)
+    if (!raw) return REMINDER_DEFAULT
+    const p = JSON.parse(raw)
+    return { enabled: !!p?.enabled, hour: clampHour(p?.hour), minute: clampMinute(p?.minute) }
+  } catch { return REMINDER_DEFAULT }
+}
+
+// Re-derive the scheduled reminder from the current open counts. Idempotent, so
+// calling it too often is free - which is what lets every trigger below just call
+// it without reasoning about ordering.
+//
+// The bail-outs deliberately differ. "It should not exist" CANCELS; "I cannot
+// tell right now" LEAVES WHAT IS SCHEDULED ALONE. Cancelling on a failed read
+// would silently drop the reminder for the day.
+async function refreshDailyReminder () {
+  try {
+    const pref = await loadReminderPref()
+    if (!pref.enabled || !_notifEnabled) {
+      await Notifications.cancelScheduledNotificationAsync(REMINDER_ID).catch(() => {})
+      return
+    }
+    if (!_workletStarted) return // too early to know the counts
+    // callRaw never rejects and never times out, so a wedged worklet would hang
+    // here forever - and shell:reminder:set awaits this before replying, which
+    // would freeze the Settings toggle. Bound it and keep the existing schedule.
+    const TIMED_OUT = Symbol('timeout')
+    const wm: any = await Promise.race([
+      callRaw('list:openSummary', {}),
+      new Promise((res) => setTimeout(() => res(TIMED_OUT), 5000)),
+    ])
+    if (wm === TIMED_OUT) return
+    const digest = wm?.result?.digest
+    // A null digest means nothing is open. Cancel rather than schedule a daily
+    // "you have nothing to do", which is pure noise. The next launch, foreground
+    // or backgrounding puts it back as soon as something is open again.
+    if (!digest?.body) {
+      await Notifications.cancelScheduledNotificationAsync(REMINDER_ID).catch(() => {})
+      return
+    }
+    // Same identifier, so this REPLACES rather than stacking a second daily.
+    await Notifications.scheduleNotificationAsync({
+      identifier: REMINDER_ID,
+      content: {
+        title: digest.title, body: digest.body,
+        data: { groupId: digest.groupId, listId: digest.listId }, // tap -> open the top list
+        ...(Platform.OS === 'android' ? { channelId: 'reminder' } : {}),
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: pref.hour, minute: pref.minute },
+    })
+  } catch {}
 }
 
 // How long the app must have been backgrounded before a resume terminates the
@@ -296,9 +376,29 @@ export default function Shell () {
       // notification permission first (the service needs a visible notification).
       bgSyncEnabled().then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) })
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
+      // Now that the worklet can answer list:openSummary, re-derive the daily
+      // reminder from the current open counts. Its body was frozen whenever it
+      // was last scheduled, so a launch is the cheapest moment to refresh it.
+      refreshDailyReminder()
       if (!cancelled) setHtml(await loadUiHtml())
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
     return () => { cancelled = true }
+  }, [])
+
+  // Keep the daily reminder's copy honest. Its body is frozen when it is
+  // scheduled, so refresh it at the two moments the counts are known to be
+  // current: when we come back to the foreground, and when we are about to lose
+  // the ability to update it at all.
+  //
+  // Backgrounding is the important one on iOS. There the app may not run again
+  // before the reminder fires, so whatever we schedule on the way out is what the
+  // user sees. Cross-platform on purpose, unlike the Android-only WebView
+  // recovery effect below.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' || state === 'background') refreshDailyReminder()
+    })
+    return () => sub.remove()
   }, [])
 
   // Android hardware back / gesture: if the WebView reported an open overlay
@@ -413,7 +513,28 @@ export default function Shell () {
           const granted = enabled ? (await Notifications.getPermissionsAsync()).status === 'granted' : false
           _notifEnabled = enabled && granted
           await AsyncStorage.setItem(NOTIF_KEY, _notifEnabled ? '1' : '0')
+          // The master toggle gates the daily reminder too, so turning it off must
+          // cancel a scheduled one rather than leave it to fire from the OS.
+          refreshDailyReminder()
           return reply(id, { enabled: _notifEnabled, permissionDenied: enabled && !granted })
+        }
+        case 'shell:reminder:get': {
+          return reply(id, await loadReminderPref())
+        }
+        case 'shell:reminder:set': {
+          const pref: ReminderPref = {
+            enabled: !!args?.enabled, hour: clampHour(args?.hour), minute: clampMinute(args?.minute),
+          }
+          // Make sure the 'reminder' Android channel exists before anything is
+          // scheduled onto it. Only when notifications are actually on: prompting
+          // the OS for a permission we would not use is noise, and the reply below
+          // already tells the UI why nothing was scheduled.
+          if (pref.enabled && _notifEnabled) await ensureNotifPermission()
+          await AsyncStorage.setItem(REMINDER_KEY, JSON.stringify(pref))
+          await refreshDailyReminder()
+          // Report what actually happened: enabled but not notifEnabled means the
+          // OS permission was declined, and the UI says so rather than lying.
+          return reply(id, { ...pref, notificationsEnabled: _notifEnabled })
         }
         case 'shell:theme:set': {
           const t = args?.theme

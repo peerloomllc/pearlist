@@ -333,3 +333,74 @@ test('capability gate: every member must advertise, except the eviction target',
     'the eviction target is excluded from the gate')
   assert.equal(allMembersSupportRevoke([]), false, 'no members -> nothing to arm')
 })
+
+// --- daily reminder digest (P1 of 2026-07-27-reminder-notifications.md) -----
+
+const { isDigestCountable, sortDigestLists, digestText } = require('../src/listWire')
+
+test('digest counts checklist kinds and NEVER note lists', () => {
+  assert.equal(isDigestCountable({ kind: 'chore' }), true)
+  assert.equal(isDigestCountable({ kind: 'todo' }), true)
+  assert.equal(isDigestCountable({ kind: 'grocery' }), true)
+  assert.equal(isDigestCountable({}), true, 'a list with no kind is a generic checklist')
+  // A note stores one row per LINE and those rows are never checked, so counting
+  // them would report a two-paragraph note as a pile of open tasks.
+  assert.equal(isDigestCountable({ kind: 'note' }), false)
+  assert.equal(isDigestCountable({ kind: 'chore', deleted: true }), false)
+  assert.equal(isDigestCountable(null), false)
+})
+
+test('digest order: chores first, then todo, grocery, generic; ties by count then name', () => {
+  const order = sortDigestLists([
+    { name: 'Shopping', kind: 'grocery', open: 9 },
+    { name: 'Bits', kind: 'list', open: 1 },
+    { name: 'Jobs', kind: 'chore', open: 1 },
+    { name: 'Errands', kind: 'todo', open: 4 },
+  ]).map((l) => l.name)
+  assert.deepEqual(order, ['Jobs', 'Errands', 'Shopping', 'Bits'])
+
+  const tie = sortDigestLists([
+    { name: 'Beta', kind: 'chore', open: 2 },
+    { name: 'Alpha', kind: 'chore', open: 2 },
+    { name: 'Busy', kind: 'chore', open: 7 },
+  ]).map((l) => l.name)
+  assert.deepEqual(tie, ['Busy', 'Alpha', 'Beta'], 'more open first, then alphabetical')
+})
+
+test('digest sorting does not mutate its input', () => {
+  const rows = [{ name: 'B', kind: 'list', open: 1 }, { name: 'A', kind: 'chore', open: 1 }]
+  sortDigestLists(rows)
+  assert.equal(rows[0].name, 'B', 'caller-owned array untouched')
+})
+
+test('digest text names the top list and counts the REST, never a hard total', () => {
+  const one = digestText([{ name: 'Jobs', kind: 'chore', open: 3, groupId: 'g1', listId: 'l1' }])
+  assert.equal(one.body, '"Jobs" still has open items')
+  assert.equal(one.groupId, 'g1')
+  assert.equal(one.listId, 'l1', 'tap deep-links to the top list')
+  assert.ok(!/\b3\b/.test(one.body), 'no hard count: the body is frozen at schedule time and goes stale')
+
+  const two = digestText([
+    { name: 'Shopping', kind: 'grocery', open: 2 },
+    { name: 'Jobs', kind: 'chore', open: 1 },
+  ])
+  assert.equal(two.body, '"Jobs" and 1 other list still have open items', 'chore outranks grocery')
+
+  const three = digestText([
+    { name: 'Jobs', kind: 'chore', open: 1 },
+    { name: 'Shopping', kind: 'grocery', open: 1 },
+    { name: 'Bits', kind: 'list', open: 1 },
+  ])
+  assert.equal(three.body, '"Jobs" and 2 other lists still have open items')
+})
+
+test('digest is null when nothing is open, so the caller cancels instead of nagging', () => {
+  assert.equal(digestText([]), null)
+  assert.equal(digestText(null), null)
+  assert.equal(digestText([{ name: 'Jobs', kind: 'chore', open: 0 }]), null,
+    'a list with everything checked off must not schedule a "nothing to do" nudge')
+})
+
+test('digest survives a nameless list rather than quoting an empty string', () => {
+  assert.equal(digestText([{ name: '   ', kind: 'chore', open: 1 }]).body, '"One of your lists" still has open items')
+})

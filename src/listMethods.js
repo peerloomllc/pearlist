@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const relay = require('./relay')
@@ -702,6 +702,44 @@ const methods = {
       if (value && !value.deleted) out.push(value)
     }
     return out
+  },
+
+  // What is still open, across EVERY joined space. Read-only, appends nothing.
+  //
+  // Feeds the daily reminder (P1 of proposals/2026-07-27-reminder-notifications.md):
+  // the shell calls this, gets ready-made copy back in `digest` and schedules it,
+  // so the wording lives here where it is unit-tested instead of in the shell
+  // where it is not. `digest` is null when nothing is open, which the shell reads
+  // as "cancel", never as "schedule an empty nudge".
+  //
+  // Spans spaces on purpose: the reminder is one notification for the whole
+  // phone, not one per household.
+  'list:openSummary': async (_args, ctx) => {
+    const lists = []
+    let total = 0
+    for (const [groupId, base] of ctx.bases) {
+      // One bad base must not silently zero the whole digest, so failures are
+      // per-space and the rest still counts.
+      try {
+        await base.update()
+        const rows = []
+        for await (const { value } of base.view.createReadStream(LIST_RANGE)) {
+          if (isDigestCountable(value)) rows.push(value)
+        }
+        for (const list of rows) {
+          let open = 0
+          for await (const { value: it } of base.view.createReadStream(itemRange(list.id))) {
+            if (it && !it.deleted && !it.checked) open++
+          }
+          if (open > 0) {
+            lists.push({ groupId, listId: list.id, name: String(list.name || ''), kind: list.kind || 'list', open })
+            total += open
+          }
+        }
+      } catch { continue }
+    }
+    const sorted = sortDigestLists(lists)
+    return { total, lists: sorted, digest: digestText(sorted) }
   },
 
   // --- items --------------------------------------------------------------

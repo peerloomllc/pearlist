@@ -283,4 +283,60 @@ function isMemberVisible (row, spaceMeta) {
   return !isEvicted(spaceMeta, row.pubkey)
 }
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke }
+// --- daily reminder digest ------------------------------------------------
+// P1 of proposals/2026-07-27-reminder-notifications.md. Pure so the whole thing
+// is unit-tested rather than eyeballed on a phone, and so the shell stays dumb:
+// it schedules whatever digestText returns.
+//
+// This is a TIME-triggered notification. The OS is handed it in advance and
+// delivers it with our process dead, which is why it is NOT blocked by the
+// 2026-07-07 background-while-killed WON'T-FIX - that covers notifications
+// triggered by a PEER'S change arriving, which needs us alive to apply it.
+
+// Note lists are excluded, and that is not cosmetic. A note stores one item row
+// per LINE (proposals/2026-07-20-note-lists.md) and those rows are never
+// checked, so counting them would report a two-paragraph note as ~20 open tasks
+// and make the digest useless.
+function isDigestCountable (list) {
+  if (!list || list.deleted === true) return false
+  return (list.kind || 'list') !== 'note'
+}
+
+// Chores and to-dos are what a nudge is FOR, groceries next, generic last. Ties
+// break on the open count then the name, so the order is deterministic: the
+// "top list" naming the body must not wobble between runs or the copy reads as
+// random.
+const DIGEST_KIND_RANK = { chore: 0, todo: 1, grocery: 2, list: 3 }
+function digestRank (kind) {
+  const r = DIGEST_KIND_RANK[kind]
+  return typeof r === 'number' ? r : DIGEST_KIND_RANK.list
+}
+function sortDigestLists (rows) {
+  return (rows || []).slice().sort((a, b) =>
+    digestRank(a.kind) - digestRank(b.kind) ||
+    (b.open || 0) - (a.open || 0) ||
+    String(a.name || '').localeCompare(String(b.name || '')))
+}
+
+// The digest copy. Returns null when nothing is open, and the caller CANCELS
+// rather than scheduling: a daily "you have nothing to do" is pure noise.
+//
+// Deliberately carries no hard total ("7 items left"). The body is frozen when
+// the notification is scheduled and on iOS the app may not have run since, so a
+// hard count reads as a bug the moment it is stale. Naming the top list and
+// counting the REST degrades honestly.
+function digestText (rows) {
+  const lists = sortDigestLists((rows || []).filter((r) => r && (r.open || 0) > 0))
+  if (!lists.length) return null
+  const top = lists[0]
+  const name = String(top.name || '').trim() || 'One of your lists'
+  const others = lists.length - 1
+  const body = others === 0
+    ? `"${name}" still has open items`
+    : `"${name}" and ${others} other list${others === 1 ? '' : 's'} still have open items`
+  // groupId + listId so a tap deep-links to the top list, same shape every other
+  // notification uses.
+  return { title: 'Still on your lists', body, groupId: top.groupId || null, listId: top.listId || null }
+}
+
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText }

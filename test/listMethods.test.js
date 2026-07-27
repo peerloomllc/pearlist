@@ -700,3 +700,53 @@ test('a deleted item is not carried into the template', async () => {
   assert.deepEqual(items.map((i) => i.text), ['milk'])
   await engine.close()
 })
+
+test('list:openSummary counts open items across spaces, excluding notes and checked rows', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const a = (await call('group:create', { name: 'Home' })).groupId
+  const b = (await call('group:create', { name: 'Cabin' })).groupId
+
+  const chores = (await call('list:create', { groupId: a, name: 'Jobs', kind: 'chore' })).listId
+  const shop = (await call('list:create', { groupId: a, name: 'Shopping', kind: 'grocery' })).listId
+  const wifi = (await call('list:create', { groupId: a, name: 'Wifi', kind: 'note' })).listId
+  const other = (await call('list:create', { groupId: b, name: 'Cabin jobs', kind: 'todo' })).listId
+
+  await call('item:add', { groupId: a, listId: chores, text: 'bins' })
+  const done = (await call('item:add', { groupId: a, listId: chores, text: 'dishes' })).itemId
+  await call('item:toggle', { groupId: a, listId: chores, itemId: done, checked: true })
+  const gone = (await call('item:add', { groupId: a, listId: chores, text: 'typo' })).itemId
+  await call('item:delete', { groupId: a, listId: chores, itemId: gone })
+  await call('item:add', { groupId: a, listId: shop, text: 'milk' })
+  await call('item:add', { groupId: b, listId: other, text: 'firewood' })
+  // A note's lines are item rows that are never checked. If they counted, this
+  // four-line note alone would swamp the digest.
+  await call('note:save', { groupId: a, listId: wifi, baseline: [], lines: ['a', 'b', 'c', 'd'] })
+
+  const s = await call('list:openSummary', {})
+  assert.equal(s.total, 3, 'bins + milk + firewood; checked, deleted and note rows excluded')
+  assert.equal(s.lists.length, 3)
+  assert.equal(s.lists.some((l) => l.listId === wifi), false, 'the note list is absent entirely')
+  assert.deepEqual(s.lists.map((l) => l.name), ['Jobs', 'Cabin jobs', 'Shopping'], 'chore, todo, then grocery')
+  assert.equal(s.lists[0].groupId, a, 'each row says which space it came from')
+  assert.equal(s.digest.body, '"Jobs" and 2 other lists still have open items')
+  assert.equal(s.digest.listId, chores, 'a tap opens the top list')
+  await engine.close()
+})
+
+test('list:openSummary returns a null digest once everything is checked off', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
+
+  assert.equal((await call('list:openSummary', {})).total, 1)
+  await call('item:toggle', { groupId, listId, itemId, checked: true })
+
+  const s = await call('list:openSummary', {})
+  assert.equal(s.total, 0)
+  assert.deepEqual(s.lists, [])
+  assert.equal(s.digest, null, 'nothing open -> the shell cancels rather than nagging')
+  await engine.close()
+})
