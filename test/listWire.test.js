@@ -338,11 +338,15 @@ test('capability gate: every member must advertise, except the eviction target',
 
 const { isDigestCountable, sortDigestLists, digestText } = require('../src/listWire')
 
-test('digest counts checklist kinds and NEVER note lists', () => {
+test('digest counts ONLY chore and todo lists', () => {
   assert.equal(isDigestCountable({ kind: 'chore' }), true)
   assert.equal(isDigestCountable({ kind: 'todo' }), true)
-  assert.equal(isDigestCountable({ kind: 'grocery' }), true)
-  assert.equal(isDigestCountable({}), true, 'a list with no kind is a generic checklist')
+  // A shopping list is carried to a shop when you happen to go, not work that is
+  // overdue, so a daily "you still have milk on the list" is noise (Tim, after
+  // the first real digest named one).
+  assert.equal(isDigestCountable({ kind: 'grocery' }), false)
+  assert.equal(isDigestCountable({}), false, 'an untyped list is not assumed to be work')
+  assert.equal(isDigestCountable({ kind: 'list' }), false)
   // A note stores one row per LINE and those rows are never checked, so counting
   // them would report a two-paragraph note as a pile of open tasks.
   assert.equal(isDigestCountable({ kind: 'note' }), false)
@@ -350,14 +354,12 @@ test('digest counts checklist kinds and NEVER note lists', () => {
   assert.equal(isDigestCountable(null), false)
 })
 
-test('digest order: chores first, then todo, grocery, generic; ties by count then name', () => {
+test('digest order: chores before to-dos; ties by count then name', () => {
   const order = sortDigestLists([
-    { name: 'Shopping', kind: 'grocery', open: 9 },
-    { name: 'Bits', kind: 'list', open: 1 },
-    { name: 'Jobs', kind: 'chore', open: 1 },
     { name: 'Errands', kind: 'todo', open: 4 },
+    { name: 'Jobs', kind: 'chore', open: 1 },
   ]).map((l) => l.name)
-  assert.deepEqual(order, ['Jobs', 'Errands', 'Shopping', 'Bits'])
+  assert.deepEqual(order, ['Jobs', 'Errands'])
 
   const tie = sortDigestLists([
     { name: 'Beta', kind: 'chore', open: 2 },
@@ -368,7 +370,7 @@ test('digest order: chores first, then todo, grocery, generic; ties by count the
 })
 
 test('digest sorting does not mutate its input', () => {
-  const rows = [{ name: 'B', kind: 'list', open: 1 }, { name: 'A', kind: 'chore', open: 1 }]
+  const rows = [{ name: 'B', kind: 'todo', open: 1 }, { name: 'A', kind: 'chore', open: 1 }]
   sortDigestLists(rows)
   assert.equal(rows[0].name, 'B', 'caller-owned array untouched')
 })
@@ -381,15 +383,15 @@ test('digest text names the top list and counts the REST, never a hard total', (
   assert.ok(!/\b3\b/.test(one.body), 'no hard count: the body is frozen at schedule time and goes stale')
 
   const two = digestText([
-    { name: 'Shopping', kind: 'grocery', open: 2 },
+    { name: 'Errands', kind: 'todo', open: 2 },
     { name: 'Jobs', kind: 'chore', open: 1 },
   ])
-  assert.equal(two.body, '"Jobs" and 1 other list still have open items', 'chore outranks grocery')
+  assert.equal(two.body, '"Jobs" and 1 other list still have open items', 'chore outranks todo')
 
   const three = digestText([
     { name: 'Jobs', kind: 'chore', open: 1 },
-    { name: 'Shopping', kind: 'grocery', open: 1 },
-    { name: 'Bits', kind: 'list', open: 1 },
+    { name: 'Errands', kind: 'todo', open: 1 },
+    { name: 'Repairs', kind: 'todo', open: 1 },
   ])
   assert.equal(three.body, '"Jobs" and 2 other lists still have open items')
 })

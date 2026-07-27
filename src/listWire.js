@@ -293,23 +293,29 @@ function isMemberVisible (row, spaceMeta) {
 // 2026-07-07 background-while-killed WON'T-FIX - that covers notifications
 // triggered by a PEER'S change arriving, which needs us alive to apply it.
 
-// Note lists are excluded, and that is not cosmetic. A note stores one item row
-// per LINE (proposals/2026-07-20-note-lists.md) and those rows are never
-// checked, so counting them would report a two-paragraph note as ~20 open tasks
-// and make the digest useless.
+// ONLY to-do and chore lists count (Tim's call, 2026-07-27, after seeing the
+// first real digest name a shopping list). A daily "you still have milk on the
+// list" is not a useful nudge: a shopping list is a thing you carry to a shop
+// when you happen to go, not work that is overdue. Chores and to-dos ARE work
+// that goes stale, which is the whole reason to nag about them.
+//
+// Excluding notes is a separate and harder requirement: a note stores one item
+// row per LINE (proposals/2026-07-20-note-lists.md) and those rows are never
+// checked, so counting them would report a two-paragraph note as ~20 open tasks.
+// It falls out of the allowlist below, and the test for it stays either way.
+const DIGEST_KINDS = ['chore', 'todo']
 function isDigestCountable (list) {
   if (!list || list.deleted === true) return false
-  return (list.kind || 'list') !== 'note'
+  return DIGEST_KINDS.includes(list.kind)
 }
 
-// Chores and to-dos are what a nudge is FOR, groceries next, generic last. Ties
-// break on the open count then the name, so the order is deterministic: the
-// "top list" naming the body must not wobble between runs or the copy reads as
-// random.
-const DIGEST_KIND_RANK = { chore: 0, todo: 1, grocery: 2, list: 3 }
+// Chores lead, then to-dos. Ties break on the open count then the name, so the
+// order is deterministic: the "top list" naming the body must not wobble between
+// runs or the copy reads as random.
+const DIGEST_KIND_RANK = { chore: 0, todo: 1 }
 function digestRank (kind) {
   const r = DIGEST_KIND_RANK[kind]
-  return typeof r === 'number' ? r : DIGEST_KIND_RANK.list
+  return typeof r === 'number' ? r : 99
 }
 function sortDigestLists (rows) {
   return (rows || []).slice().sort((a, b) =>

@@ -2421,6 +2421,44 @@ function relaySummary (s, on) {
   return 'On. Not needed so far, every connection has been direct.'
 }
 
+// MODULE SCOPE ON PURPOSE. These were defined inside ProfileView, which gave them
+// a new component identity on every render - so React unmounted and rebuilt the
+// entire settings subtree each time, destroying and recreating every DOM node in
+// it. Harmless for text and toggles, fatal for a control that owns native UI: the
+// reminder's <input type='time'> had its element replaced out from under the open
+// Android time picker, which dismissed the picker before a time could be chosen.
+// ProfileView re-renders every 5s (the relay:stats poll), so the picker never
+// survived longer than that.
+//
+// alignTop pins the control to the TITLE's line instead of centring it over the
+// whole row. Use it when `extra` is an interactive control of its own (the
+// reminder's time picker): centred, the toggle floats between the two lines and
+// reads as if it belongs to the picker rather than to the setting.
+function Setting ({ title, about, aboutLink, control, extra, first, alignTop, onAbout }) {
+  return (
+    <div style={{ display: 'flex', alignItems: alignTop ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
+      <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 4 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, minHeight: 28 }}>
+          <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{title}</span>
+          {about ? <button onClick={() => onAbout?.({ title, body: about, link: aboutLink })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
+        </span>
+        {extra}
+      </span>
+      {/* Matches the title line's minHeight so the control centres against the
+          title, not against the top edge of the row. */}
+      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, ...(alignTop ? { minHeight: 28 } : {}) }}>{control}</span>
+    </div>
+  )
+}
+function Group ({ title, children }) {
+  return (
+    <div style={{ marginBottom: sp.lg }}>
+      <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `0 ${sp.xs}px ${sp.xs}px` }}>{title}</div>
+      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>{children}</div>
+    </div>
+  )
+}
+
 function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -2494,34 +2532,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
-    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. Free-text notes are never counted. It is set per device and nobody else in your space is reminded by yours.",
+    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about your to-do and chore lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
   }
-  // alignTop pins the control to the TITLE's line instead of centring it over the
-  // whole row. Use it when `extra` is an interactive control of its own (the
-  // reminder's time picker): centred, the toggle floats between the two lines and
-  // reads as if it belongs to the picker rather than to the setting.
-  const Setting = ({ title, about, aboutLink, control, extra, first, alignTop }) => (
-    <div style={{ display: 'flex', alignItems: alignTop ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
-      <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 4 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, minHeight: 28 }}>
-          <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{title}</span>
-          {about ? <button onClick={() => setInfo({ title, body: about, link: aboutLink })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
-        </span>
-        {extra}
-      </span>
-      {/* Matches the title line's minHeight so the control centres against the
-          title, not against the top edge of the row. */}
-      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, ...(alignTop ? { minHeight: 28 } : {}) }}>{control}</span>
-    </div>
-  )
-  const Group = ({ title, children }) => (
-    <div style={{ marginBottom: sp.lg }}>
-      <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `0 ${sp.xs}px ${sp.xs}px` }}>{title}</div>
-      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>{children}</div>
-    </div>
-  )
-
   async function commitAvatar (value) {
     setBusy(true)
     try { await call('profile:set', { displayName: profile?.displayName || name.trim() || 'Me', avatar: value }); onSaved?.() }
@@ -2573,17 +2586,17 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
       </Group>
       <Group title='Lists'>
-        <Setting first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
+        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
           control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
       </Group>
       <Group title='Connection'>
-        <Setting first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
+        <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
           extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
           control={<Toggle on={relayOn} onChange={toggleRelay} />} />
       </Group>
       <Group title='Notifications'>
-        <Setting first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
-        <Setting title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
+        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
           extra={reminder.enabled
             // No "Every day at" label: the title already says daily, so the time
             // on its own is unambiguous (Tim's call).
@@ -2596,15 +2609,15 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
                 style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '4px 8px', fontSize: 13, outline: 'none' }} />
             : null}
           control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
-        {bgSyncSupported ? <Setting title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
       </Group>
       <Group title='Aisles'>
-        <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
+        <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
       </Group>
       <Group title='Help'>
-        <Setting first title='Replay the tour' about={ABOUT['Replay the tour']}
+        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
           control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
       </Group>
       <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>

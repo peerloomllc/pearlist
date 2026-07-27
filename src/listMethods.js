@@ -704,7 +704,9 @@ const methods = {
     return out
   },
 
-  // What is still open, across EVERY joined space. Read-only, appends nothing.
+  // What is still open on the TO-DO and CHORE lists, across every joined space.
+  // Read-only, appends nothing. Shopping lists, notes and untyped lists never
+  // count - see isDigestCountable for why.
   //
   // Feeds the daily reminder (P1 of proposals/2026-07-27-reminder-notifications.md):
   // the shell calls this, gets ready-made copy back in `digest` and schedules it,
