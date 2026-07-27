@@ -1586,11 +1586,28 @@ _bump_paths=(
   metadata/ios/en-US/release_notes.txt
   "metadata/ios/version/${APP_VERSION}"
 )
+# Existence is not enough: a path can exist and still be un-addable. PearList
+# gitignores /ios/ (expo prebuild regenerates it), so once a prebuild has run on
+# the release box, $XCODE_PROJECT exists, passes -e, and `git add` then EXITS 1
+# on the ignored path - which under `set -e` kills the release between the build
+# and the tag. Skip what git will refuse rather than force it in: the iOS
+# marketing version lives in a generated directory and is not ours to track.
 _bump_existing=()
-for _p in "${_bump_paths[@]}"; do [ -e "$_p" ] && _bump_existing+=("$_p"); done
+_bump_skipped=()
+for _p in "${_bump_paths[@]}"; do
+  [ -e "$_p" ] || continue
+  if git check-ignore -q -- "$_p"; then
+    _bump_skipped+=("$_p")
+    continue
+  fi
+  _bump_existing+=("$_p")
+done
 if [ ${#_bump_existing[@]} -gt 0 ] \
    && [ -n "$(git status --porcelain -- "${_bump_existing[@]}")" ]; then
   echo "==> Committing version bumps for $APP_VERSION..."
+  if [ ${#_bump_skipped[@]} -gt 0 ]; then
+    echo "    Not tracked, left uncommitted: ${_bump_skipped[*]}"
+  fi
   git add -- "${_bump_existing[@]}"
   git commit -q -m "chore(release): $APP_VERSION" \
     && echo "    Committed $(git diff --name-only HEAD~1 HEAD | wc -l) file(s)" \
