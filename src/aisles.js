@@ -1,19 +1,18 @@
 // PearList grocery-aisle taxonomy + the offline classifier.
 //
-// This is the SEAM for on-device AI (the QVAC spike, 2026-07-11). Today
 // `classifyAisle` is a pure keyword lookup: deterministic, dependency-free,
-// unit-testable, and cheap enough to run on the lowest-end device. When the
-// QVAC llamacpp addon is proven to load on-device, the model plugs in at
-// `classifyItem` in listMethods.js and this keyword pass stays as the offline
-// fallback (low-capability devices, or a word the model has not seen). See
-// pearlist DECISIONS.md 2026-07-11.
+// unit-testable, instant, and cheap enough to run on the lowest-end device. It
+// is the WHOLE classifier - an on-device language model backed it up between
+// 2026-07-11 and 2026-07-26 and was removed for measuring worse than this pass
+// alone (see DECISIONS.md 2026-07-26). `classifyItem` in listMethods.js remains
+// the seam if a smarter classifier ever earns its place.
 //
 // Design notes:
 //   - `category` is an ADDITIVE, optional field on an item row. Old peers accept
 //     and ignore it; a row without it just renders ungrouped. No merge change.
 //   - Categorization is written as a normal signed op (see listMethods
-//     ai:categorize), so ONE capable device categorizes and every peer receives
-//     the result. A phone that cannot run the model never has to.
+//     ai:categorize), so ONE device categorizes and every peer receives the
+//     result rather than each recomputing it.
 //   - Aisle names are the display labels themselves (human-readable), so the UI
 //     needs no separate label map, only this order.
 

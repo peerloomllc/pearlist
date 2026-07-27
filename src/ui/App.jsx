@@ -2791,9 +2791,9 @@ function QtySheet ({ open, onCommit }) {
   )
 }
 
-// Recipe/meal -> grocery items (on-device AI). Type what you're making, generate
-// a suggested list, then review (deselect/keep) before adding. onGenerate calls
-// the shell's QVAC expansion; onAdd bulk-adds the picked items to the list.
+// Edit one item: its text, quantity, note, link, assignee and aisle/section.
+// `noun` labels the grouping field for the list kind ('aisle' for groceries,
+// 'section' otherwise); onSave commits, onDelete removes.
 function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)

@@ -146,10 +146,9 @@ const mockMethods = {
     const it = mockGroup(groupId).items.get(itemId)
     it.category = aisles.classifyAisle(it.text); return { category: it.category }
   },
-  // Browser preview has no RN shell / QVAC. Simulate the status/consent surface
-  // so Settings + the consent prompt are reviewable; consent flips to "ready"
-  // instantly (no real download) and the AI categorize pass is a no-op.
-  // Preview stub for recipe -> items (real generation is the RN shell / QVAC).
+  // A user drag, or clearing the aisle to pull an item back out to Other. The
+  // browser preview has no RN shell, so there are no Learned Aisles overrides
+  // here; `by: 'user'` is the only caller.
   'ai:setCategory': async ({ groupId, itemId, category, by }) => {
     const it = mockGroup(groupId).items.get(itemId)
     if (it && by === 'user' && (category == null || category === '')) { delete it.category; delete it.catBy; return { category: null } }

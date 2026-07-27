@@ -2,6 +2,46 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-26 - The on-device model is REMOVED, keyword-only aisles stand alone
+Tier: T2. No proposal: this retires a shipped feature rather than adding one, and the
+measurements below were the deciding artifact. Reverses the follow-through promised in
+the 2026-07-11 entry below. PRs #98 (features) and this one (the dependency).
+Context: PearList shipped a QVAC-hosted small language model as the fallback for
+grocery items the keyword pass could not place, plus a recipe -> items expander. A day
+of benchmarking on both platforms (metadata/bench/) measured what it actually bought:
+  37%  of the items that reached it placed correctly (1702 calls, two hosts), with 36
+       of 70 wrong in EVERY prompt variant tried
+  4.0s per item at best, 6.5s as shipped - per item, so a batch is a minute of spinner
+  0.8GB downloaded, ~2GB resident: unusable on a 3GB iPhone, and the TCL killed other
+       apps to fit it
+  0    users could have benefited on iOS since 1.0.2 anyway - it could not start there
+       at all (PR #94) and nobody noticed for five weeks, which is its own verdict on
+       how much the feature was carrying
+Meanwhile the keyword pass places 23 of 26 realistically-written items instantly, and
+gained 346 brand names the same day (PR #95).
+Choice: remove it outright rather than keep it behind the off-by-default toggle. A
+coin-flip that costs four seconds and 0.8GB is worse than the thing it was protecting
+against, which is an item resting in "Other" until you drag it - one gesture, and
+Learned Aisles then remembers it. Keeping it "just in case" would preserve the
+download, the RAM ceiling, the ~half of the binary its native backends occupied and a
+second classifier path to reason about, in exchange for a fallback we would not
+recommend anyone enable.
+KEPT: `classifyItem` in listMethods.js stays as the seam, and `ai:categorize` /
+`ai:categorizeList` / `ai:setCategory` keep their names and wire shape. The methods are
+load-bearing for user drags and Learned Aisles overrides, and renaming them off "ai:"
+would be a wire change (T3) bought with nothing but tidiness. Also KEPT: Learned
+Aisles itself, which is device-local text -> aisle memory read by the KEYWORD
+classifier and never needed the model.
+Bytes, not just code: removing a feature does not remove what it downloaded, so launch
+does a one-time purge of Documents/.qvac and the AsyncStorage flags, via
+expo-file-system rather than the SDK - the whole point is that nothing imports @qvac.
+Consequences: no QVAC dependency, no llamacpp/ggml native libs, no expo config plugin,
+no generated worker bundle to hand-sync to the Mac before an archive (the hard gate in
+ios-appstore.sh and scripts/sync-qvac-worker.sh both go), and no Metro resolver shim
+for langdetect (PR #82's 2MB trim is moot). The bench data stays in metadata/bench/ so
+this is not re-proposed from intuition. If a classifier ever earns its place again, the
+seam is where it plugs in - and the bar is now measured, not assumed.
+
 ## 2026-07-23 - The off-LAN backstop is a relay POLICY, not a relay MECHANISM
 Tier: T2. Proposal: 2026-07-23-blind-relay-adoption (the T3 design and the node are
 PearTune's, ../peartune/proposals/2026-07-23-blind-relay.md).
