@@ -20,13 +20,37 @@ DEVICE_UDID="${DEVICE_UDID:-E1A6316D-C6A9-510B-9D3E-CD3D85C6DDF5}"
 BUNDLE_ID="${BUNDLE_ID:-com.pearlist}"
 DEST="${DEST:-/tmp/pearlist-pair-trace.log}"
 
+# The staging path on the Mac is DELETED FIRST, and the copy's exit status is
+# checked, because this script previously did neither and that is a trap: it
+# copied to a FIXED path, swallowed the copy's error through `| tail -3`, then
+# `cat`-ed whatever was there. A failed pull therefore reprinted the PREVIOUS
+# run's trace and looked exactly like a successful one.
+#
+# That is not hypothetical. On 2026-07-26 it produced a byte-identical trace -
+# same millisecond timings - for a build that had just been installed onto a
+# freshly wiped device, and was briefly read as proof that build was healthy. A
+# stale success is worse than a clean failure, because you act on it.
+#
+# NOTE ON EMPTY RESULTS: no trace is written until a group mounts or a pairing
+# event fires. src/bare.js buffers marks and only emits once `_engine` exists,
+# and `mark('worklet:loaded')` runs BEFORE that assignment - so a freshly
+# installed, not-yet-paired app legitimately has no pair-trace.log. Absence is
+# NOT evidence that the worklet failed to start.
 ssh "$MAC_MINI" "bash -lc '
+  rm -f /tmp/pearlist-pair-trace.log
   xcrun devicectl device copy from \
     --device $DEVICE_UDID \
     --domain-type appDataContainer \
     --domain-identifier $BUNDLE_ID \
     --source Documents/pair-trace.log \
-    --destination /tmp/pearlist-pair-trace.log 2>&1 | tail -3
+    --destination /tmp/pearlist-pair-trace.log >/tmp/pearlist-pull.err 2>&1
+  if [ ! -s /tmp/pearlist-pair-trace.log ]; then
+    echo \"pull-pair-trace: NO TRACE on the device (see below).\" >&2
+    echo \"  Either the app has not mounted a group or paired since install, or it\" >&2
+    echo \"  never started. Absence alone does not tell you which.\" >&2
+    tail -5 /tmp/pearlist-pull.err >&2
+    exit 3
+  fi
   cat /tmp/pearlist-pair-trace.log
 '" | tee "$DEST"
 
