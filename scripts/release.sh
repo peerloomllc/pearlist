@@ -1562,6 +1562,60 @@ if $PUBLISH_LINUX   && [ -n "${APPIMAGE_NAME:-}" ]; then _RELEASE_SUMMARY="$_REL
 _confirm "$_RELEASE_SUMMARY ready to publish?"
 
 # ---------------------------------------------------------------------------
+# 5b. Generate the iOS version metadata BEFORE the bump commit
+#
+# metadata/ios/version/$APP_VERSION is a generated dir: version/default/*.json
+# with `whatsNew` replaced by release_notes.md. It used to be written ~850
+# lines below, inside the App Store step, which is AFTER §6 - so §6's `-e`
+# guard never saw it and the dir was never committed. Evidence:
+# metadata/ios/version/1.0.3/ was still untracked after 1.0.3 shipped, which is
+# how a hand-written whatsNew came to be treated as durable.
+#
+# Generating here means §6 commits it and the tag carries the notes the release
+# actually shipped with. The App Store step still calls this a second time,
+# because it is the only place that can seed version/default/ by bootstrap-
+# pulling it from App Store Connect. The function is idempotent: the same
+# default/ plus the same release_notes.md regenerates identical files, so the
+# second call is a no-op against the committed tree.
+# ---------------------------------------------------------------------------
+_gen_ios_version_metadata() {
+  local _metadata_dir="$REPO_ROOT/metadata/ios"
+  local _default_dir="$_metadata_dir/version/default"
+  local _version_dir="$_metadata_dir/version/${APP_VERSION}"
+  local _f _whats_new=""
+
+  # No canonical source to generate from. The App Store step bootstraps one by
+  # pulling from ASC; from here there is nothing to do.
+  compgen -G "$_default_dir/*.json" > /dev/null || return 1
+
+  if [ -f "$REPO_ROOT/release_notes.md" ]; then
+    _whats_new=$(cat "$REPO_ROOT/release_notes.md")
+  fi
+
+  mkdir -p "$_version_dir"
+  for _f in "$_default_dir"/*.json; do
+    python3 -c "
+import json, sys, re
+with open('$_f') as fh:
+    data = json.load(fh)
+# Strip emojis — App Store rejects non-ASCII symbols in whatsNew
+notes = sys.stdin.read().strip()
+data['whatsNew'] = re.sub(r'[^\x00-\x7F\u00C0-\u024F\u2014\u2019\u2018\u201C\u201D]+\s*', '', notes)
+with open('${_version_dir}/$(basename "$_f")', 'w') as out:
+    json.dump(data, out)
+" <<< "$_whats_new"
+    echo "    Created ${_version_dir}/$(basename "$_f")"
+  done
+}
+
+if $PUBLISH_APP_STORE; then
+  echo ""
+  echo "==> Generating iOS version metadata for $APP_VERSION..."
+  _gen_ios_version_metadata \
+    || echo "    Skipped - no metadata/ios/version/default/*.json yet (the App Store step will seed it)."
+fi
+
+# ---------------------------------------------------------------------------
 # 6. Commit the version bumps this run made, BEFORE tagging
 #
 # Step 0 rewrites app.json and the Xcode project, but nothing ever committed
@@ -1584,8 +1638,12 @@ _bump_paths=(
   "$XCODE_PROJECT"
   desktop/package.json
   metadata/ios/en-US/release_notes.txt
+  metadata/ios/version/default
   "metadata/ios/version/${APP_VERSION}"
 )
+# version/default is the SOURCE the versioned dir is generated from (§5b). It
+# was untracked too, so committing only the generated output would have left a
+# fresh clone unable to regenerate it.
 # Existence is not enough: a path can exist and still be un-addable. PearList
 # gitignores /ios/ (expo prebuild regenerates it), so once a prebuild has run on
 # the release box, $XCODE_PROJECT exists, passes -e, and `git add` then EXITS 1
@@ -2302,7 +2360,6 @@ else
     echo ""
     echo "==> Applying App Store metadata from metadata/ios/..."
 
-    VERSION_DIR="$METADATA_DIR/version/${APP_VERSION}"
     DEFAULT_DIR="$METADATA_DIR/version/default"
 
     # Ensure the App Store version record exists (required for pull/apply).
@@ -2467,29 +2524,18 @@ if priors:
 
     # Create versioned metadata with whatsNew from release notes.
     #
-    # Regenerated on EVERY run, not just when $VERSION_DIR is absent: a failed
+    # Regenerated on EVERY run, not just when version/$APP_VERSION is absent: a failed
     # release leaves a version dir behind, and the old "create only if missing"
     # test meant the retry silently shipped the first run's notes even after
     # release_notes.md had been fixed.
+    #
+    # §5b already ran this once, before the version-bump commit, so on the
+    # normal path this call rewrites the same bytes. It stays because the
+    # bootstrap above is the ONLY thing that can seed version/default/ from App
+    # Store Connect, and when it does, §5b had nothing to generate from.
     if [ -n "$DEFAULT_DIR" ] && [ -d "$DEFAULT_DIR" ]; then
-      mkdir -p "$VERSION_DIR"
-      for f in "$DEFAULT_DIR"/*.json; do
-        WHATS_NEW=""
-        if [ -f "$REPO_ROOT/release_notes.md" ]; then
-          WHATS_NEW=$(cat "$REPO_ROOT/release_notes.md")
-        fi
-        python3 -c "
-import json, sys, re
-with open('$f') as fh:
-    data = json.load(fh)
-# Strip emojis — App Store rejects non-ASCII symbols in whatsNew
-notes = sys.stdin.read().strip()
-data['whatsNew'] = re.sub(r'[^\x00-\x7F\u00C0-\u024F\u2014\u2019\u2018\u201C\u201D]+\s*', '', notes)
-with open('${VERSION_DIR}/$(basename "$f")', 'w') as out:
-    json.dump(data, out)
-" <<< "$WHATS_NEW"
-        echo "    Created ${VERSION_DIR}/$(basename "$f")"
-      done
+      _gen_ios_version_metadata \
+        || echo "    WARNING: no ${DEFAULT_DIR}/*.json to generate whatsNew from."
     fi
 
     if [ -z "$ASC_VERSION_ID" ]; then
