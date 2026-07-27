@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const relay = require('./relay')
@@ -704,6 +704,46 @@ const methods = {
     return out
   },
 
+  // What is still open, across every joined space. Read-only, appends nothing.
+  // Chores, to-dos and untyped lists count; shopping lists and notes never do -
+  // see isDigestCountable for why.
+  //
+  // Feeds the daily reminder (P1 of proposals/2026-07-27-reminder-notifications.md):
+  // the shell calls this, gets ready-made copy back in `digest` and schedules it,
+  // so the wording lives here where it is unit-tested instead of in the shell
+  // where it is not. `digest` is null when nothing is open, which the shell reads
+  // as "cancel", never as "schedule an empty nudge".
+  //
+  // Spans spaces on purpose: the reminder is one notification for the whole
+  // phone, not one per household.
+  'list:openSummary': async (_args, ctx) => {
+    const lists = []
+    let total = 0
+    for (const [groupId, base] of ctx.bases) {
+      // One bad base must not silently zero the whole digest, so failures are
+      // per-space and the rest still counts.
+      try {
+        await base.update()
+        const rows = []
+        for await (const { value } of base.view.createReadStream(LIST_RANGE)) {
+          if (isDigestCountable(value)) rows.push(value)
+        }
+        for (const list of rows) {
+          let open = 0
+          for await (const { value: it } of base.view.createReadStream(itemRange(list.id))) {
+            if (it && !it.deleted && !it.checked) open++
+          }
+          if (open > 0) {
+            lists.push({ groupId, listId: list.id, name: String(list.name || ''), kind: list.kind || 'list', open })
+            total += open
+          }
+        }
+      } catch { continue }
+    }
+    const sorted = sortDigestLists(lists)
+    return { total, lists: sorted, digest: digestText(sorted) }
+  },
+
   // --- items --------------------------------------------------------------
   'item:add': async ({ groupId, listId, text, qty, ord }, ctx) => {
     const itemId = newEntityId()
@@ -804,6 +844,62 @@ const methods = {
     if (!existing || existing.deleted) throw new Error('item not found')
     await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, assignee: assignee ? String(assignee) : null })
     return { ok: true }
+  },
+
+  // Set or clear a reminder on one item (P2 of the reminders proposal). A signed
+  // read-modify-write exactly like item:assign, so the whole row survives and old
+  // builds keep the field. `remindAt` is epoch ms; null / undefined clears it.
+  //
+  // Refuses a time in the past. Scheduling one would be a silent no-op (the OS
+  // fires nothing) and it would then sit on the row looking set forever, which is
+  // worse than an error the UI can show.
+  'item:setReminder': async ({ groupId, listId, itemId, remindAt }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, itemKey(listId, itemId))
+    if (!existing || existing.deleted) throw new Error('item not found')
+    let next = null
+    if (remindAt !== null && remindAt !== undefined) {
+      const t = Number(remindAt)
+      if (!Number.isFinite(t)) throw new Error('remindAt must be a timestamp')
+      if (t <= Date.now()) throw new Error('that time has already passed')
+      next = Math.trunc(t)
+    }
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, remindAt: next })
+    return { remindAt: next }
+  },
+
+  // Every reminder THIS device should have scheduled, across every joined space.
+  // Read-only. The shell reconciles the OS's pending set against this, so the
+  // decision of who rings lives here (pure + unit-tested) and not in the shell.
+  //
+  // Capped at MAX_SCHEDULED_REMINDERS because iOS silently drops past 64 pending
+  // local notifications. `dropped` is returned rather than swallowed: a cap that
+  // hides what it discarded reads as "everything is scheduled" when it is not.
+  'reminder:pending': async (_args, ctx) => {
+    const selfKey = pubkeyHex(ctx)
+    const now = Date.now()
+    const out = []
+    for (const [groupId, base] of ctx.bases) {
+      try {
+        await base.update()
+        const lists = new Map()
+        for await (const { value } of base.view.createReadStream(LIST_RANGE)) {
+          if (value && value.id) lists.set(value.id, value)
+        }
+        for (const [listId, list] of lists) {
+          for await (const { value: it } of base.view.createReadStream(itemRange(listId))) {
+            if (!isReminderPending(it, list, selfKey, now)) continue
+            out.push({
+              key: itemKey(listId, it.id), groupId, listId, itemId: it.id,
+              text: String(it.text || 'an item'), listName: String(list.name || 'a list'),
+              kind: list.kind || 'list', remindAt: it.remindAt,
+            })
+          }
+        }
+      } catch { continue }
+    }
+    out.sort((a, b) => a.remindAt - b.remindAt) // soonest first, so the cap keeps the urgent ones
+    return { reminders: out.slice(0, MAX_SCHEDULED_REMINDERS), dropped: Math.max(0, out.length - MAX_SCHEDULED_REMINDERS) }
   },
 
   'item:delete': async ({ groupId, listId, itemId }, ctx) => {

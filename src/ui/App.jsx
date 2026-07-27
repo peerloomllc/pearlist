@@ -1887,6 +1887,15 @@ export default function App () {
         onSave={async (patch) => {
           await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url })
           await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee })
+          // Only write when it actually changed: item:setReminder rejects a past
+          // time, and re-sending an untouched old reminder would fail the save for
+          // no reason. Non-fatal either way - a rejected reminder must not lose
+          // the text and assignee edits that already landed above.
+          const prevRemind = typeof sheet.item.remindAt === 'number' ? sheet.item.remindAt : null
+          if ((patch.remindAt ?? null) !== prevRemind) {
+            try { await call('item:setReminder', { groupId: gid, listId: openListId, itemId: sheet.item.id, remindAt: patch.remindAt ?? null }) }
+            catch (e) { alert('Could not set that reminder: ' + (e?.message || e)) }
+          }
           if (patch.catTouched) {
             const cat = patch.category || ''
             await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: cat, by: 'user' }).catch(() => {})
@@ -2421,6 +2430,44 @@ function relaySummary (s, on) {
   return 'On. Not needed so far, every connection has been direct.'
 }
 
+// MODULE SCOPE ON PURPOSE. These were defined inside ProfileView, which gave them
+// a new component identity on every render - so React unmounted and rebuilt the
+// entire settings subtree each time, destroying and recreating every DOM node in
+// it. Harmless for text and toggles, fatal for a control that owns native UI: the
+// reminder's <input type='time'> had its element replaced out from under the open
+// Android time picker, which dismissed the picker before a time could be chosen.
+// ProfileView re-renders every 5s (the relay:stats poll), so the picker never
+// survived longer than that.
+//
+// alignTop pins the control to the TITLE's line instead of centring it over the
+// whole row. Use it when `extra` is an interactive control of its own (the
+// reminder's time picker): centred, the toggle floats between the two lines and
+// reads as if it belongs to the picker rather than to the setting.
+function Setting ({ title, about, aboutLink, control, extra, first, alignTop, onAbout }) {
+  return (
+    <div style={{ display: 'flex', alignItems: alignTop ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
+      <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 4 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, minHeight: 28 }}>
+          <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{title}</span>
+          {about ? <button onClick={() => onAbout?.({ title, body: about, link: aboutLink })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
+        </span>
+        {extra}
+      </span>
+      {/* Matches the title line's minHeight so the control centres against the
+          title, not against the top edge of the row. */}
+      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, ...(alignTop ? { minHeight: 28 } : {}) }}>{control}</span>
+    </div>
+  )
+}
+function Group ({ title, children }) {
+  return (
+    <div style={{ marginBottom: sp.lg }}>
+      <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `0 ${sp.xs}px ${sp.xs}px` }}>{title}</div>
+      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>{children}</div>
+    </div>
+  )
+}
+
 function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -2441,6 +2488,23 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   async function toggleBgSync (v) {
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
+  // Daily reminder: a once-a-day nudge about lists with open items. Off by
+  // default. The time is stored as hour + minute and edited through a native
+  // <input type='time'>, which is the one picker guaranteed to be present in the
+  // WebView on both platforms.
+  const [reminder, setReminder] = useState({ enabled: false, hour: 18, minute: 0 })
+  useEffect(() => { call('shell:reminder:get', {}).then((r) => { if (r) setReminder({ enabled: !!r.enabled, hour: r.hour ?? 18, minute: r.minute ?? 0 }) }).catch(() => {}) }, [])
+  async function saveReminder (next) {
+    setReminder(next) // optimistic: the toggle should not lag the tap
+    try {
+      const r = await call('shell:reminder:set', next)
+      if (r) setReminder({ enabled: !!r.enabled, hour: r.hour ?? next.hour, minute: r.minute ?? next.minute })
+      if (next.enabled && r && r.notificationsEnabled === false) {
+        alert('Turn on notifications for PearList in your device Settings to get the daily reminder.')
+      }
+    } catch { setReminder((p) => ({ ...p, enabled: false })) }
+  }
+  const reminderTime = `${String(reminder.hour).padStart(2, '0')}:${String(reminder.minute).padStart(2, '0')}`
   // "Connect Anywhere" - the off-LAN relay backstop. Default on, so an unanswered
   // read shows on rather than flickering off and back.
   const [relayOn, setRelayOn] = useState(true)
@@ -2477,27 +2541,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
+    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
   }
-  const Setting = ({ title, about, aboutLink, control, extra, first }) => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
-      <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 4 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
-          <span style={{ color: c.text.primary, fontSize: 16, fontWeight: 300 }}>{title}</span>
-          {about ? <button onClick={() => setInfo({ title, body: about, link: aboutLink })} aria-label={`About ${title}`} style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: c.text.muted }}><Info size={16} weight='regular' /></button> : null}
-        </span>
-        {extra}
-      </span>
-      {control}
-    </div>
-  )
-  const Group = ({ title, children }) => (
-    <div style={{ marginBottom: sp.lg }}>
-      <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `0 ${sp.xs}px ${sp.xs}px` }}>{title}</div>
-      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>{children}</div>
-    </div>
-  )
-
   async function commitAvatar (value) {
     setBusy(true)
     try { await call('profile:set', { displayName: profile?.displayName || name.trim() || 'Me', avatar: value }); onSaved?.() }
@@ -2549,25 +2595,38 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
       </Group>
       <Group title='Lists'>
-        <Setting first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
+        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
           control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
       </Group>
       <Group title='Connection'>
-        <Setting first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
+        <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
           extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
           control={<Toggle on={relayOn} onChange={toggleRelay} />} />
       </Group>
       <Group title='Notifications'>
-        <Setting first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
-        {bgSyncSupported ? <Setting title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
+          extra={reminder.enabled
+            // No "Every day at" label: the title already says daily, so the time
+            // on its own is unambiguous (Tim's call).
+            ? <input type='time' value={reminderTime} aria-label='Daily reminder time'
+                onChange={(e) => {
+                  const [h, m] = String(e.target.value || '').split(':')
+                  if (h === undefined || m === undefined) return
+                  saveReminder({ ...reminder, hour: Number(h), minute: Number(m) })
+                }}
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '4px 8px', fontSize: 13, outline: 'none' }} />
+            : null}
+          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
+        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
       </Group>
       <Group title='Aisles'>
-        <Setting title='Learned Aisles' about={ABOUT['Learned Aisles']}
+        <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
       </Group>
       <Group title='Help'>
-        <Setting first title='Replay the tour' about={ABOUT['Replay the tour']}
+        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
           control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
       </Group>
       <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
@@ -2794,6 +2853,27 @@ function QtySheet ({ open, onCommit }) {
 // Edit one item: its text, quantity, note, link, assignee and aisle/section.
 // `noun` labels the grouping field for the list kind ('aisle' for groceries,
 // 'section' otherwise); onSave commits, onDelete removes.
+// <input type='datetime-local'> speaks local wall-clock text; the row stores an
+// absolute epoch. Converting at the edge keeps a reminder set by someone in
+// another timezone firing at the same INSTANT everywhere, which is what a
+// household wants, rather than a floating local time nobody asked for.
+function toLocalInput (ms) {
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+function fromLocalInput (s) {
+  const t = new Date(String(s)).getTime()
+  return Number.isFinite(t) ? t : null
+}
+function reminderLabel (ms) {
+  const d = new Date(ms)
+  const today = new Date()
+  const sameDay = d.toDateString() === today.toDateString()
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
+}
+
 function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
@@ -2804,7 +2884,8 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
   const [catTouched, setCatTouched] = useState(false)
   const [picking, setPicking] = useState(false)
   const [pickingAisle, setPickingAisle] = useState(false)
-  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false) } }, [open, item])
+  const [remindAt, setRemindAt] = useState(null)
+  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null) } }, [open, item])
   if (!item) return null
   const isGrocery = kind === 'grocery'
   const nounLabel = noun.charAt(0).toUpperCase() + noun.slice(1) // "Aisle" / "Section"
@@ -2838,6 +2919,21 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               <CaretRight size={16} color={c.text.muted} weight='regular' />
             </span>
           </button>
+          {/* One reminder, one instant. Deliberately no repeat and no snooze: that
+              is a chore scheduler, which the proposal keeps out of scope. Whoever
+              the item is assigned to is who gets it (falling back to the list's
+              assignee, then its creator), so exactly one phone rings. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+            <span style={{ color: c.text.secondary, fontSize: 14, flexShrink: 0 }}>Remind</span>
+            <input type='datetime-local' aria-label='Reminder time'
+              value={remindAt ? toLocalInput(remindAt) : ''}
+              onChange={(e) => setRemindAt(e.target.value ? fromLocalInput(e.target.value) : null)}
+              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: remindAt ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
+            {remindAt ? <button onClick={() => setRemindAt(null)} aria-label='Clear reminder' style={{ width: 46, flexShrink: 0, height: 42, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.error, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} weight='bold' /></button> : null}
+          </div>
+          {remindAt && remindAt <= Date.now()
+            ? <span style={{ color: c.error, fontSize: 12, marginTop: -6 }}>That time has already passed, so nothing would fire. Pick a later one.</span>
+            : null}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder='Notes (optional)' rows={2} maxLength={2000}
             style={{ width: '100%', padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none', resize: 'vertical', minHeight: 44 }} />
           <div style={{ display: 'flex', gap: sp.sm }}>
@@ -2845,7 +2941,7 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
             {url.trim() ? <button onClick={() => openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim())} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
           </div>
-          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched })}>Save</Button>
+          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched, remindAt })}>Save</Button>
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>

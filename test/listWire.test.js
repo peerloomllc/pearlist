@@ -333,3 +333,140 @@ test('capability gate: every member must advertise, except the eviction target',
     'the eviction target is excluded from the gate')
   assert.equal(allMembersSupportRevoke([]), false, 'no members -> nothing to arm')
 })
+
+// --- daily reminder digest (P1 of 2026-07-27-reminder-notifications.md) -----
+
+const { isDigestCountable, sortDigestLists, digestText } = require('../src/listWire')
+
+test('digest counts chores, to-dos and untyped lists, but NOT groceries or notes', () => {
+  assert.equal(isDigestCountable({ kind: 'chore' }), true)
+  assert.equal(isDigestCountable({ kind: 'todo' }), true)
+  assert.equal(isDigestCountable({ kind: 'list' }), true)
+  assert.equal(isDigestCountable({}), true, 'no kind means untyped, which counts')
+  // A shopping list is carried to a shop when you happen to go, not work that is
+  // overdue, so a daily "you still have milk on the list" is noise (Tim, after
+  // the first real digest named one).
+  assert.equal(isDigestCountable({ kind: 'grocery' }), false)
+  // A note stores one row per LINE and those rows are never checked, so counting
+  // them would report a two-paragraph note as a pile of open tasks.
+  assert.equal(isDigestCountable({ kind: 'note' }), false)
+  assert.equal(isDigestCountable({ kind: 'chore', deleted: true }), false)
+  assert.equal(isDigestCountable(null), false)
+  // Allowlist, not denylist: a kind invented later must opt IN rather than start
+  // nagging by accident.
+  assert.equal(isDigestCountable({ kind: 'someFutureKind' }), false)
+})
+
+test('digest order: chores, then to-dos, then untyped; ties by count then name', () => {
+  const order = sortDigestLists([
+    { name: 'Bits', kind: 'list', open: 9 },
+    { name: 'Errands', kind: 'todo', open: 4 },
+    { name: 'Jobs', kind: 'chore', open: 1 },
+    { name: 'Stuff', open: 2 },
+  ]).map((l) => l.name)
+  assert.deepEqual(order, ['Jobs', 'Errands', 'Bits', 'Stuff'],
+    'a kindless row sorts with the untyped ones, not off the end')
+
+  const tie = sortDigestLists([
+    { name: 'Beta', kind: 'chore', open: 2 },
+    { name: 'Alpha', kind: 'chore', open: 2 },
+    { name: 'Busy', kind: 'chore', open: 7 },
+  ]).map((l) => l.name)
+  assert.deepEqual(tie, ['Busy', 'Alpha', 'Beta'], 'more open first, then alphabetical')
+})
+
+test('digest sorting does not mutate its input', () => {
+  const rows = [{ name: 'B', kind: 'todo', open: 1 }, { name: 'A', kind: 'chore', open: 1 }]
+  sortDigestLists(rows)
+  assert.equal(rows[0].name, 'B', 'caller-owned array untouched')
+})
+
+test('digest text names the top list and counts the REST, never a hard total', () => {
+  const one = digestText([{ name: 'Jobs', kind: 'chore', open: 3, groupId: 'g1', listId: 'l1' }])
+  assert.equal(one.body, '"Jobs" still has open items')
+  assert.equal(one.groupId, 'g1')
+  assert.equal(one.listId, 'l1', 'tap deep-links to the top list')
+  assert.ok(!/\b3\b/.test(one.body), 'no hard count: the body is frozen at schedule time and goes stale')
+
+  const two = digestText([
+    { name: 'Errands', kind: 'todo', open: 2 },
+    { name: 'Jobs', kind: 'chore', open: 1 },
+  ])
+  assert.equal(two.body, '"Jobs" and 1 other list still have open items', 'chore outranks todo')
+
+  const three = digestText([
+    { name: 'Jobs', kind: 'chore', open: 1 },
+    { name: 'Errands', kind: 'todo', open: 1 },
+    { name: 'Repairs', kind: 'todo', open: 1 },
+  ])
+  assert.equal(three.body, '"Jobs" and 2 other lists still have open items')
+})
+
+test('digest is null when nothing is open, so the caller cancels instead of nagging', () => {
+  assert.equal(digestText([]), null)
+  assert.equal(digestText(null), null)
+  assert.equal(digestText([{ name: 'Jobs', kind: 'chore', open: 0 }]), null,
+    'a list with everything checked off must not schedule a "nothing to do" nudge')
+})
+
+test('digest survives a nameless list rather than quoting an empty string', () => {
+  assert.equal(digestText([{ name: '   ', kind: 'chore', open: 1 }]).body, '"One of your lists" still has open items')
+})
+
+// --- per-item reminders (P2 of 2026-07-27-reminder-notifications.md) --------
+
+const { reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS } = require('../src/listWire')
+
+const KID = 'k'.repeat(64)
+const PARENT = 'p'.repeat(64)
+const OTHER_M = 'o'.repeat(64)
+
+test('reminder target: item assignee wins, then list assignee, then list creator', () => {
+  const list = { assignee: OTHER_M, createdBy: PARENT }
+  assert.equal(reminderTargetOf({ assignee: KID }, list), KID, 'the item assignee owns this job')
+  assert.equal(reminderTargetOf({}, list), OTHER_M, 'unassigned item falls back to the list')
+  assert.equal(reminderTargetOf({}, { createdBy: PARENT }), PARENT, 'then to whoever made the list')
+  assert.equal(reminderTargetOf({ assignee: null }, { createdBy: PARENT }), PARENT, 'an explicit null is not an assignee')
+})
+
+test('reminder target: null when nothing resolves, so nothing is scheduled on a guess', () => {
+  assert.equal(reminderTargetOf(null, { createdBy: PARENT }), null)
+  assert.equal(reminderTargetOf({}, null), null, 'the list is gone')
+  assert.equal(reminderTargetOf({}, { deleted: true, createdBy: PARENT }), null, 'a tombstoned list rings nobody')
+  assert.equal(reminderTargetOf({ deleted: true, assignee: KID }, { createdBy: PARENT }), null)
+  assert.equal(reminderTargetOf({}, {}), null, 'no assignee and no creator')
+})
+
+test('exactly ONE member is the target, so exactly one phone rings', () => {
+  const list = { assignee: OTHER_M, createdBy: PARENT }
+  const item = { assignee: KID, remindAt: 2000 }
+  const rings = [KID, PARENT, OTHER_M].filter((who) => isReminderPending(item, list, who, 1000))
+  assert.deepEqual(rings, [KID], 'the parent and the list owner stay silent')
+})
+
+test('a reminder is pending only when it is future, unchecked, alive and mine', () => {
+  const list = { createdBy: PARENT }
+  const base = { assignee: KID, remindAt: 2000 }
+  assert.equal(isReminderPending(base, list, KID, 1000), true)
+  assert.equal(isReminderPending(base, list, KID, 2000), false, 'exactly due is not still pending')
+  assert.equal(isReminderPending(base, list, KID, 3000), false, 'already past')
+  assert.equal(isReminderPending({ ...base, checked: true }, list, KID, 1000), false,
+    'finishing early is how you cancel a reminder; it must not still fire')
+  assert.equal(isReminderPending({ ...base, deleted: true }, list, KID, 1000), false)
+  assert.equal(isReminderPending({ assignee: KID }, list, KID, 1000), false, 'no remindAt, nothing to fire')
+  assert.equal(isReminderPending({ ...base, remindAt: NaN }, list, KID, 1000), false)
+  assert.equal(isReminderPending({ ...base, remindAt: '2000' }, list, KID, 1000), false, 'a string is not a timestamp')
+  assert.equal(isReminderPending(base, list, null, 1000), false, 'no identity yet, schedule nothing')
+})
+
+test('a far-future remindAt is fine: the FUTURE_TS guard covers updatedAt only', () => {
+  const yearOut = Date.now() + 365 * 24 * 60 * 60 * 1000
+  const r = signValue({ pubkey: PUB, updatedAt: Date.now(), text: 'mot', remindAt: yearOut }, KP.secretKey)
+  assert.equal(rowApplyDecision(itemKey('L', 'I'), r, null), 'accept')
+  assert.equal(isReminderPending({ ...r, assignee: PUB }, { createdBy: PUB }, PUB, Date.now()), true)
+})
+
+test('the scheduling cap leaves room under the iOS 64-notification limit', () => {
+  assert.ok(MAX_SCHEDULED_REMINDERS > 0 && MAX_SCHEDULED_REMINDERS < 64,
+    'iOS silently drops past 64 pending local notifications, so stay well under with room for the daily digest')
+})

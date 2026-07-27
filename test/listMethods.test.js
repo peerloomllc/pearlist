@@ -13,6 +13,7 @@ const Corestore = require('corestore')
 const { createGroupEngine } = require('@peerloom/core/engine')
 const { applyListOp } = require('../src/listWire')
 const listMethods = require('../src/listMethods')
+const { MAX_SCHEDULED_REMINDERS } = require('../src/listWire')
 
 const _tmpDirs = []
 function tmpStore () {
@@ -698,5 +699,133 @@ test('a deleted item is not carried into the template', async () => {
   const applied = await call('template:apply', { groupId, id: t.id })
   const items = await call('item:getAll', { groupId, listId: applied.listId })
   assert.deepEqual(items.map((i) => i.text), ['milk'])
+  await engine.close()
+})
+
+test('list:openSummary counts open items across spaces, excluding notes and checked rows', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const a = (await call('group:create', { name: 'Home' })).groupId
+  const b = (await call('group:create', { name: 'Cabin' })).groupId
+
+  const chores = (await call('list:create', { groupId: a, name: 'Jobs', kind: 'chore' })).listId
+  const shop = (await call('list:create', { groupId: a, name: 'Shopping', kind: 'grocery' })).listId
+  const wifi = (await call('list:create', { groupId: a, name: 'Wifi', kind: 'note' })).listId
+  const other = (await call('list:create', { groupId: b, name: 'Cabin jobs', kind: 'todo' })).listId
+  // No kind at all: created by just typing a name, and it still counts.
+  const odds = (await call('list:create', { groupId: a, name: 'Odds' })).listId
+
+  await call('item:add', { groupId: a, listId: chores, text: 'bins' })
+  const done = (await call('item:add', { groupId: a, listId: chores, text: 'dishes' })).itemId
+  await call('item:toggle', { groupId: a, listId: chores, itemId: done, checked: true })
+  const gone = (await call('item:add', { groupId: a, listId: chores, text: 'typo' })).itemId
+  await call('item:delete', { groupId: a, listId: chores, itemId: gone })
+  await call('item:add', { groupId: a, listId: shop, text: 'milk' })
+  await call('item:add', { groupId: b, listId: other, text: 'firewood' })
+  await call('item:add', { groupId: a, listId: odds, text: 'fix the gate' })
+  // A note's lines are item rows that are never checked. If they counted, this
+  // four-line note alone would swamp the digest.
+  await call('note:save', { groupId: a, listId: wifi, baseline: [], lines: ['a', 'b', 'c', 'd'] })
+
+  const s = await call('list:openSummary', {})
+  assert.equal(s.total, 3, 'bins + firewood + odds; milk is on a SHOPPING list, which never counts')
+  assert.equal(s.lists.length, 3)
+  assert.equal(s.lists.some((l) => l.listId === wifi), false, 'the note list is absent entirely')
+  assert.equal(s.lists.some((l) => l.listId === shop), false, 'the grocery list is absent entirely')
+  assert.deepEqual(s.lists.map((l) => l.name), ['Jobs', 'Cabin jobs', 'Odds'], 'chore, todo, then untyped')
+  assert.equal(s.lists[0].groupId, a, 'each row says which space it came from')
+  assert.equal(s.digest.body, '"Jobs" and 2 other lists still have open items')
+  assert.equal(s.digest.listId, chores, 'a tap opens the top list')
+  await engine.close()
+})
+
+test('list:openSummary returns a null digest once everything is checked off', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
+
+  assert.equal((await call('list:openSummary', {})).total, 1)
+  await call('item:toggle', { groupId, listId, itemId, checked: true })
+
+  const s = await call('list:openSummary', {})
+  assert.equal(s.total, 0)
+  assert.deepEqual(s.lists, [])
+  assert.equal(s.digest, null, 'nothing open -> the shell cancels rather than nagging')
+  await engine.close()
+})
+
+test('item:setReminder round-trips, clears, and refuses a time already gone', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
+
+  const when = Date.now() + 60 * 60 * 1000
+  assert.deepEqual(await call('item:setReminder', { groupId, listId, itemId, remindAt: when }), { remindAt: when })
+  let row = (await call('item:getAll', { groupId, listId })).find((r) => r.id === itemId)
+  assert.equal(row.remindAt, when)
+  assert.equal(row.text, 'bins', 'the rest of the row survives the read-modify-write')
+
+  await assert.rejects(
+    () => call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() - 1000 }),
+    /already passed/, 'a past time would silently never fire, so it is refused')
+  await assert.rejects(
+    () => call('item:setReminder', { groupId, listId, itemId, remindAt: 'soon' }), /timestamp/)
+
+  assert.deepEqual(await call('item:setReminder', { groupId, listId, itemId, remindAt: null }), { remindAt: null })
+  row = (await call('item:getAll', { groupId, listId })).find((r) => r.id === itemId)
+  assert.equal(row.remindAt, null, 'cleared')
+  await engine.close()
+})
+
+test('reminder:pending returns only what THIS device should schedule, soonest first', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+
+  const soon = Date.now() + 10 * 60 * 1000
+  const later = Date.now() + 60 * 60 * 1000
+  const a = (await call('item:add', { groupId, listId, text: 'bins' })).itemId
+  const b = (await call('item:add', { groupId, listId, text: 'dishes' })).itemId
+  const c = (await call('item:add', { groupId, listId, text: 'someone elses' })).itemId
+  const d = (await call('item:add', { groupId, listId, text: 'already done' })).itemId
+  await call('item:setReminder', { groupId, listId, itemId: a, remindAt: later })
+  await call('item:setReminder', { groupId, listId, itemId: b, remindAt: soon })
+  await call('item:setReminder', { groupId, listId, itemId: d, remindAt: soon })
+  await call('item:toggle', { groupId, listId, itemId: d, checked: true })
+  // Assigned to a member who is not us: their phone rings, not ours.
+  await call('item:assign', { groupId, listId, itemId: c, assignee: 'f'.repeat(64) })
+  await call('item:setReminder', { groupId, listId, itemId: c, remindAt: soon })
+
+  const { reminders, dropped } = await call('reminder:pending', {})
+  assert.equal(dropped, 0)
+  assert.deepEqual(reminders.map((r) => r.text), ['dishes', 'bins'], 'soonest first, so a cap keeps the urgent ones')
+  assert.equal(reminders.some((r) => r.text === 'someone elses'), false, 'not our reminder to fire')
+  assert.equal(reminders.some((r) => r.text === 'already done'), false, 'checked off, so it must not still fire')
+  assert.equal(reminders[0].key, `item:${listId}:${b}`, 'keyed by the item key so a cancel is exact')
+  assert.equal(reminders[0].listName, 'Jobs')
+  await engine.close()
+})
+
+test('reminder:pending caps what it schedules and SAYS how many it dropped', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+
+  const n = MAX_SCHEDULED_REMINDERS + 5
+  for (let i = 0; i < n; i++) {
+    const { itemId } = await call('item:add', { groupId, listId, text: 'job ' + i })
+    await call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() + (i + 1) * 60000 })
+  }
+
+  const { reminders, dropped } = await call('reminder:pending', {})
+  assert.equal(reminders.length, MAX_SCHEDULED_REMINDERS, 'iOS drops past 64 pending, so stay under')
+  assert.equal(dropped, 5, 'a cap that hides what it discarded reads as "all scheduled" when it is not')
+  assert.equal(reminders[0].text, 'job 0', 'the soonest survive the cap')
   await engine.close()
 })

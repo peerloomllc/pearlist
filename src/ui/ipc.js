@@ -211,6 +211,15 @@ const mockMethods = {
   'shell:navState': async () => ({ ok: true }),
   'shell:notifications:get': async () => ({ enabled: false }),
   'shell:notifications:set': async ({ enabled }) => ({ enabled: !!enabled }),
+  // Daily reminder. Preview-only: remembered in mock state, never scheduled.
+  // Per-item reminders. Preview-only: remembered in mock state, never scheduled.
+  'item:setReminder': async ({ remindAt }) => ({ remindAt: remindAt ?? null }),
+  'reminder:pending': async () => ({ reminders: [], dropped: 0 }),
+  'shell:reminder:get': async () => ({ ...(mock.reminder || { enabled: false, hour: 18, minute: 0 }) }),
+  'shell:reminder:set': async ({ enabled, hour, minute }) => {
+    mock.reminder = { enabled: !!enabled, hour: Number(hour) || 0, minute: Number(minute) || 0 }
+    return { ...mock.reminder, notificationsEnabled: true }
+  },
   'shell:bgsync:get': async () => ({ supported: false, enabled: false }),
   'shell:bgsync:set': async ({ enabled }) => ({ supported: false, enabled: !!enabled }),
   'shell:scanQr': async () => { const code = window.prompt ? window.prompt('Paste an invite code (camera scan on device):') : null; return { code: code || null } },
