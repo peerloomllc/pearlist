@@ -2,6 +2,45 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-27 - Daily reminder: which lists count, and USE_EXACT_ALARM
+Tier: T1 (app-local policy + one Android permission; no wire, pairing or data
+change). PR #105, P1 of proposals/2026-07-27-reminder-notifications.md.
+
+Context: the first real daily digest to fire on a phone named a SHOPPING list,
+and the time picker could not be used at all (a React remount bug, see DONE.md).
+Testing on a device produced both; the green gate produced neither.
+
+Choice 1 - which lists count. Chores, to-dos and untyped lists count. GROCERY
+lists never do (Tim): a shopping list is a thing you carry to a shop when you
+happen to go, not work that is overdue, so a daily "you still have milk on the
+list" is noise. Untyped lists DO count (Tim): an untyped list is usually a
+checklist of things to do, and it is the default kind for a list created by just
+typing a name. Notes never count for a separate and harder reason: a note stores
+one item row per LINE (2026-07-20 note lists) and those rows are never checked,
+so counting them reports a two-paragraph note as ~20 open tasks.
+Implemented as an ALLOWLIST (`DIGEST_KINDS`), not a denylist, so a kind invented
+later has to opt in rather than start nagging by accident.
+
+Choice 2 - exact alarms. `android.permission.USE_EXACT_ALARM` is now declared in
+app.json. Measured before: expo-notifications scheduled the reminder INEXACTLY
+(`dumpsys alarm` showed `window=+2m11s`; one set for 15:05:00 was still pending at
+15:05:43). expo-notifications already calls `setExactAndAllowWhileIdle` whenever
+`alarmManager.canScheduleExactAlarms()` is true, so declaring the permission was
+the whole fix - no code change. Verified after: `window=0
+exactAllowReason=policy_permission`, and the permission is `granted=true` with NO
+user prompt.
+Chosen over SCHEDULE_EXACT_ALARM, which on Android 13+ needs an explicit user
+grant through a Settings screen and would leave the feature silently inexact for
+anyone who never went there. Chosen over accepting the drift because nobody had
+measured how far it slips under Doze overnight, which is precisely when a morning
+reminder sits.
+KNOWN COST: USE_EXACT_ALARM is a Google Play policy-restricted permission,
+intended for apps whose core function is alarms, timers or calendar reminders.
+PearList is a shared-list app WITH reminders, so this is arguable at review rather
+than clearly in bounds. Tim's call, made with that flagged. If Play pushes back,
+the fallback is SCHEDULE_EXACT_ALARM plus a Settings deep link, accepting that
+users who skip it get the old inexact behaviour.
+
 ## 2026-07-26 - A vendored native addon outlives the dependency that brought it
 Tier: T1 (build-script guard; no wire, pairing or data change). PR #99.
 Context: PearList's QVAC dependency was removed, `npm run verify` was green,

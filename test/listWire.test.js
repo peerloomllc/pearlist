@@ -338,28 +338,34 @@ test('capability gate: every member must advertise, except the eviction target',
 
 const { isDigestCountable, sortDigestLists, digestText } = require('../src/listWire')
 
-test('digest counts ONLY chore and todo lists', () => {
+test('digest counts chores, to-dos and untyped lists, but NOT groceries or notes', () => {
   assert.equal(isDigestCountable({ kind: 'chore' }), true)
   assert.equal(isDigestCountable({ kind: 'todo' }), true)
+  assert.equal(isDigestCountable({ kind: 'list' }), true)
+  assert.equal(isDigestCountable({}), true, 'no kind means untyped, which counts')
   // A shopping list is carried to a shop when you happen to go, not work that is
   // overdue, so a daily "you still have milk on the list" is noise (Tim, after
   // the first real digest named one).
   assert.equal(isDigestCountable({ kind: 'grocery' }), false)
-  assert.equal(isDigestCountable({}), false, 'an untyped list is not assumed to be work')
-  assert.equal(isDigestCountable({ kind: 'list' }), false)
   // A note stores one row per LINE and those rows are never checked, so counting
   // them would report a two-paragraph note as a pile of open tasks.
   assert.equal(isDigestCountable({ kind: 'note' }), false)
   assert.equal(isDigestCountable({ kind: 'chore', deleted: true }), false)
   assert.equal(isDigestCountable(null), false)
+  // Allowlist, not denylist: a kind invented later must opt IN rather than start
+  // nagging by accident.
+  assert.equal(isDigestCountable({ kind: 'someFutureKind' }), false)
 })
 
-test('digest order: chores before to-dos; ties by count then name', () => {
+test('digest order: chores, then to-dos, then untyped; ties by count then name', () => {
   const order = sortDigestLists([
+    { name: 'Bits', kind: 'list', open: 9 },
     { name: 'Errands', kind: 'todo', open: 4 },
     { name: 'Jobs', kind: 'chore', open: 1 },
+    { name: 'Stuff', open: 2 },
   ]).map((l) => l.name)
-  assert.deepEqual(order, ['Jobs', 'Errands'])
+  assert.deepEqual(order, ['Jobs', 'Errands', 'Bits', 'Stuff'],
+    'a kindless row sorts with the untyped ones, not off the end')
 
   const tie = sortDigestLists([
     { name: 'Beta', kind: 'chore', open: 2 },

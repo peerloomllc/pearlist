@@ -32,7 +32,8 @@
       },
       "permissions": [
         "CAMERA",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "USE_EXACT_ALARM"
       ],
       "intentFilters": [
         {

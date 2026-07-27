@@ -293,28 +293,31 @@ function isMemberVisible (row, spaceMeta) {
 // 2026-07-07 background-while-killed WON'T-FIX - that covers notifications
 // triggered by a PEER'S change arriving, which needs us alive to apply it.
 
-// ONLY to-do and chore lists count (Tim's call, 2026-07-27, after seeing the
-// first real digest name a shopping list). A daily "you still have milk on the
-// list" is not a useful nudge: a shopping list is a thing you carry to a shop
-// when you happen to go, not work that is overdue. Chores and to-dos ARE work
-// that goes stale, which is the whole reason to nag about them.
+// Chores, to-dos and plain untyped lists count. GROCERY LISTS DO NOT (Tim's call,
+// 2026-07-27, after the first real digest named one): a shopping list is a thing
+// you carry to a shop when you happen to go, not work that is overdue, so a daily
+// "you still have milk on the list" is noise. Chores and to-dos ARE work that
+// goes stale, which is the whole reason to nag about them, and an untyped list is
+// usually a checklist of things to do, so it is treated as one (Tim's call).
 //
 // Excluding notes is a separate and harder requirement: a note stores one item
 // row per LINE (proposals/2026-07-20-note-lists.md) and those rows are never
 // checked, so counting them would report a two-paragraph note as ~20 open tasks.
-// It falls out of the allowlist below, and the test for it stays either way.
-const DIGEST_KINDS = ['chore', 'todo']
+// An allowlist rather than a denylist, so a kind added later has to opt IN and
+// cannot start nagging by accident.
+const DIGEST_KINDS = ['chore', 'todo', 'list']
+function digestKindOf (list) { return list && list.kind ? list.kind : 'list' }
 function isDigestCountable (list) {
   if (!list || list.deleted === true) return false
-  return DIGEST_KINDS.includes(list.kind)
+  return DIGEST_KINDS.includes(digestKindOf(list))
 }
 
-// Chores lead, then to-dos. Ties break on the open count then the name, so the
-// order is deterministic: the "top list" naming the body must not wobble between
-// runs or the copy reads as random.
-const DIGEST_KIND_RANK = { chore: 0, todo: 1 }
+// Chores lead, then to-dos, then untyped. Ties break on the open count then the
+// name, so the order is deterministic: the "top list" naming the body must not
+// wobble between runs or the copy reads as random.
+const DIGEST_KIND_RANK = { chore: 0, todo: 1, list: 2 }
 function digestRank (kind) {
-  const r = DIGEST_KIND_RANK[kind]
+  const r = DIGEST_KIND_RANK[kind || 'list']
   return typeof r === 'number' ? r : 99
 }
 function sortDigestLists (rows) {

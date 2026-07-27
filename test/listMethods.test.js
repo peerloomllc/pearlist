@@ -711,6 +711,8 @@ test('list:openSummary counts open items across spaces, excluding notes and chec
   const shop = (await call('list:create', { groupId: a, name: 'Shopping', kind: 'grocery' })).listId
   const wifi = (await call('list:create', { groupId: a, name: 'Wifi', kind: 'note' })).listId
   const other = (await call('list:create', { groupId: b, name: 'Cabin jobs', kind: 'todo' })).listId
+  // No kind at all: created by just typing a name, and it still counts.
+  const odds = (await call('list:create', { groupId: a, name: 'Odds' })).listId
 
   await call('item:add', { groupId: a, listId: chores, text: 'bins' })
   const done = (await call('item:add', { groupId: a, listId: chores, text: 'dishes' })).itemId
@@ -719,18 +721,19 @@ test('list:openSummary counts open items across spaces, excluding notes and chec
   await call('item:delete', { groupId: a, listId: chores, itemId: gone })
   await call('item:add', { groupId: a, listId: shop, text: 'milk' })
   await call('item:add', { groupId: b, listId: other, text: 'firewood' })
+  await call('item:add', { groupId: a, listId: odds, text: 'fix the gate' })
   // A note's lines are item rows that are never checked. If they counted, this
   // four-line note alone would swamp the digest.
   await call('note:save', { groupId: a, listId: wifi, baseline: [], lines: ['a', 'b', 'c', 'd'] })
 
   const s = await call('list:openSummary', {})
-  assert.equal(s.total, 2, 'bins + firewood only: milk is on a SHOPPING list, which never counts')
-  assert.equal(s.lists.length, 2)
+  assert.equal(s.total, 3, 'bins + firewood + odds; milk is on a SHOPPING list, which never counts')
+  assert.equal(s.lists.length, 3)
   assert.equal(s.lists.some((l) => l.listId === wifi), false, 'the note list is absent entirely')
   assert.equal(s.lists.some((l) => l.listId === shop), false, 'the grocery list is absent entirely')
-  assert.deepEqual(s.lists.map((l) => l.name), ['Jobs', 'Cabin jobs'], 'chore before todo')
+  assert.deepEqual(s.lists.map((l) => l.name), ['Jobs', 'Cabin jobs', 'Odds'], 'chore, todo, then untyped')
   assert.equal(s.lists[0].groupId, a, 'each row says which space it came from')
-  assert.equal(s.digest.body, '"Jobs" and 1 other list still have open items')
+  assert.equal(s.digest.body, '"Jobs" and 2 other lists still have open items')
   assert.equal(s.digest.listId, chores, 'a tap opens the top list')
   await engine.close()
 })
