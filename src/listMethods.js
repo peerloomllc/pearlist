@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const relay = require('./relay')
@@ -718,6 +718,7 @@ const methods = {
   // phone, not one per household.
   'list:openSummary': async (_args, ctx) => {
     const lists = []
+    const now = Date.now()
     let total = 0
     for (const [groupId, base] of ctx.bases) {
       // One bad base must not silently zero the whole digest, so failures are
@@ -731,7 +732,9 @@ const methods = {
         for (const list of rows) {
           let open = 0
           for await (const { value: it } of base.view.createReadStream(itemRange(list.id))) {
-            if (it && !it.deleted && !it.checked) open++
+            // effectiveChecked: a weekly chore already done this week is not open
+            // work and must not inflate the nudge.
+            if (it && !it.deleted && !effectiveChecked(it, now)) open++
           }
           if (open > 0) {
             lists.push({ groupId, listId: list.id, name: String(list.name || ''), kind: list.kind || 'list', open })
@@ -819,8 +822,27 @@ const methods = {
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))
     if (!existing || existing.deleted) throw new Error('item not found')
-    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, checked: !!checked })
+    const patch = { checked: !!checked }
+    // Recurring chores: checking one records WHEN it was done, which is the only
+    // write the whole feature needs - open-ness is derived from it at read time,
+    // so nothing ever writes a reset (proposals/2026-07-27-recurring-chores.md).
+    // Unchecking clears the stamp, which is what "I ticked that by mistake" means.
+    if (normalizeRepeat(existing.repeat)) patch.lastDoneAt = checked ? Date.now() : null
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, ...patch })
     return { ok: true }
+  },
+
+  // Make an item recur, or stop it recurring. Signed read-modify-write like
+  // item:assign. Setting a repeat leaves lastDoneAt alone: an item checked off
+  // BEFORE it was ever recurring has no stamp, so it reads as open immediately,
+  // which is the right default when you are declaring it a chore going forward.
+  'item:setRepeat': async ({ groupId, listId, itemId, repeat }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, itemKey(listId, itemId))
+    if (!existing || existing.deleted) throw new Error('item not found')
+    const next = normalizeRepeat(repeat)
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, repeat: next })
+    return { repeat: next }
   },
 
   'item:edit': async ({ groupId, listId, itemId, text, qty, note, url }, ctx) => {
@@ -910,12 +932,22 @@ const methods = {
     return { ok: true }
   },
 
+  // THE SEAM (proposals/2026-07-27-recurring-chores.md). `checked` returned here
+  // is the EFFECTIVE one: for a recurring chore that means "done in the current
+  // period", not "was ever ticked". Deriving it at this single point is what keeps
+  // the UI, the strike-through and the auto-collapse right without each of them
+  // having to know about recurrence. `nextDueAt` rides along so a closed chore can
+  // say when it comes back.
   'item:getAll': async ({ groupId, listId }, ctx) => {
     const base = viewFor(ctx, groupId)
     await base.update()
+    const now = Date.now()
     const out = []
     for await (const { value } of base.view.createReadStream(itemRange(listId))) {
-      if (value && !value.deleted) out.push(value)
+      if (!value || value.deleted) continue
+      out.push(normalizeRepeat(value.repeat)
+        ? { ...value, checked: effectiveChecked(value, now), nextDueAt: nextDueAt(value, now) }
+        : value)
     }
     return out
   },

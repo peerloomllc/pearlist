@@ -470,3 +470,96 @@ test('the scheduling cap leaves room under the iOS 64-notification limit', () =>
   assert.ok(MAX_SCHEDULED_REMINDERS > 0 && MAX_SCHEDULED_REMINDERS < 64,
     'iOS silently drops past 64 pending local notifications, so stay well under with room for the daily digest')
 })
+
+// --- recurring chores (proposals/2026-07-27-recurring-chores.md) ------------
+
+const { periodStart, isRecurringOpen, effectiveChecked, nextDueAt, normalizeRepeat } = require('../src/listWire')
+
+// Local-time helper, so these read as wall-clock rather than epoch arithmetic.
+const at = (y, m, d, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime()
+
+test('periodStart snaps to the start of the local day, week and month', () => {
+  const wed = at(2026, 7, 29, 15, 30) // Wednesday
+  assert.equal(periodStart('daily', wed), at(2026, 7, 29, 0, 0))
+  assert.equal(periodStart('weekly', wed), at(2026, 7, 26, 0, 0), 'back to Sunday')
+  assert.equal(periodStart('monthly', wed), at(2026, 7, 1, 0, 0))
+  assert.equal(periodStart('nonsense', wed), null)
+  assert.equal(periodStart(null, wed), null)
+})
+
+test('periodStart handles month, year and week-crossing boundaries', () => {
+  // A Friday in January: the week started in the PREVIOUS year.
+  const jan1 = at(2027, 1, 1, 9, 0)
+  assert.equal(periodStart('monthly', jan1), at(2027, 1, 1, 0, 0))
+  assert.equal(periodStart('weekly', jan1), at(2026, 12, 27, 0, 0), 'the week runs back into last year')
+  // Sunday IS the start of its own week, not seven days back.
+  const sun = at(2026, 7, 26, 8, 0)
+  assert.equal(periodStart('weekly', sun), at(2026, 7, 26, 0, 0))
+})
+
+test('periodStart survives a DST change (built from date parts, not ms arithmetic)', () => {
+  // US DST ends 2026-11-01. The week containing the 4th still starts on the 1st,
+  // even though that week is 25 hours longer than 7*24h.
+  const wed = at(2026, 11, 4, 12, 0)
+  assert.equal(periodStart('weekly', wed), at(2026, 11, 1, 0, 0))
+  assert.equal(periodStart('daily', at(2026, 11, 1, 23, 30)), at(2026, 11, 1, 0, 0))
+})
+
+test('a recurring chore is open until it is done IN this period, then open again', () => {
+  const item = { repeat: 'weekly' }
+  const wed = at(2026, 7, 29)
+  assert.equal(isRecurringOpen(item, wed), true, 'never done, so open')
+  assert.equal(isRecurringOpen({ ...item, lastDoneAt: at(2026, 7, 27) }, wed), false, 'done Monday, this week')
+  assert.equal(isRecurringOpen({ ...item, lastDoneAt: at(2026, 7, 24) }, wed), true, 'done LAST week, so back')
+  // Exactly on the boundary counts as this period.
+  const start = periodStart('weekly', wed)
+  assert.equal(isRecurringOpen({ ...item, lastDoneAt: start }, wed), false)
+  assert.equal(isRecurringOpen({ ...item, lastDoneAt: start - 1 }, wed), true, 'one ms before the boundary is last period')
+})
+
+test('raw `checked` is IGNORED for a recurring chore: the stamp is what counts', () => {
+  const wed = at(2026, 7, 29)
+  // Ticked at some point, but not this week -> it is open again regardless.
+  assert.equal(effectiveChecked({ repeat: 'weekly', checked: true, lastDoneAt: at(2026, 7, 20) }, wed), false)
+  // Never ticked but somehow stamped this week -> done.
+  assert.equal(effectiveChecked({ repeat: 'weekly', checked: false, lastDoneAt: at(2026, 7, 27) }, wed), true)
+})
+
+test('effectiveChecked is plain `checked` for everything that does not recur', () => {
+  const now = at(2026, 7, 29)
+  assert.equal(effectiveChecked({ checked: true }, now), true)
+  assert.equal(effectiveChecked({ checked: false }, now), false)
+  assert.equal(effectiveChecked({ checked: true, repeat: 'nonsense' }, now), true, 'an unknown repeat is not recurrence')
+  assert.equal(effectiveChecked({}, now), false)
+  assert.equal(effectiveChecked(null, now), false)
+  assert.equal(isRecurringOpen({ checked: false }, now), false, 'non-recurring is never "recurring open"')
+})
+
+test('a recurring chore done this period does NOT ring its reminder', () => {
+  const wed = at(2026, 7, 29, 9, 0)
+  const list = { createdBy: PUB }
+  const base = { repeat: 'weekly', assignee: PUB, remindAt: at(2026, 7, 29, 18, 0) }
+  assert.equal(isReminderPending(base, list, PUB, wed), true, 'not done this week, so it rings')
+  assert.equal(isReminderPending({ ...base, lastDoneAt: at(2026, 7, 27) }, list, PUB, wed), false, 'already done this week')
+  assert.equal(isReminderPending({ ...base, lastDoneAt: at(2026, 7, 20) }, list, PUB, wed), true, 'done last week, so it is back')
+  // The old rule (raw `checked`) would have silenced this one forever.
+  assert.equal(isReminderPending({ ...base, checked: true, lastDoneAt: at(2026, 7, 20) }, list, PUB, wed), true)
+})
+
+test('nextDueAt says when it comes back', () => {
+  const wed = at(2026, 7, 29, 15, 0)
+  assert.equal(nextDueAt({ repeat: 'daily' }, wed), at(2026, 7, 30, 0, 0))
+  assert.equal(nextDueAt({ repeat: 'weekly' }, wed), at(2026, 8, 2, 0, 0), 'the next Sunday')
+  assert.equal(nextDueAt({ repeat: 'monthly' }, wed), at(2026, 8, 1, 0, 0))
+  assert.equal(nextDueAt({}, wed), null)
+  // Month rollover, including into a new year.
+  assert.equal(nextDueAt({ repeat: 'monthly' }, at(2026, 12, 15)), at(2027, 1, 1, 0, 0))
+})
+
+test('normalizeRepeat is an allowlist, so junk never becomes a schedule', () => {
+  assert.equal(normalizeRepeat('weekly'), 'weekly')
+  assert.equal(normalizeRepeat('WEEKLY'), null)
+  assert.equal(normalizeRepeat('yearly'), null)
+  assert.equal(normalizeRepeat(undefined), null)
+  assert.equal(normalizeRepeat({}), null)
+})

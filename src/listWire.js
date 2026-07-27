@@ -257,8 +257,11 @@ async function maybeNotify (ctx, key, value, existing) {
         try { emit('notify:completed', { ...base, allDone: false, item: String(value.text || 'an item') }) } catch {}
       } else if (mode === 'done') {
         let anyOpen = false
+        // effectiveChecked: without it a list of weekly chores reads as all-done
+        // for the rest of the week and the notification never fires again.
+        const nowMs = Date.now()
         for await (const { value: it } of view.createReadStream(itemRange(listId))) {
-          if (it && !it.deleted && !it.checked) { anyOpen = true; break }
+          if (it && !it.deleted && !effectiveChecked(it, nowMs)) { anyOpen = true; break }
         }
         if (!anyOpen) { try { emit('notify:completed', { ...base, allDone: true }) } catch {} }
       }
@@ -348,6 +351,77 @@ function digestText (rows) {
   return { title: 'Still on your lists', body, groupId: top.groupId || null, listId: top.listId || null }
 }
 
+// --- recurring chores ------------------------------------------------------
+// proposals/2026-07-27-recurring-chores.md. A chore that comes back.
+//
+// OPEN-NESS IS DERIVED, NEVER WRITTEN. The row stores `repeat` and `lastDoneAt`;
+// whether the chore is open right now is computed here, at read time. Nothing
+// resets it on a timer - which matters because there is no server and no leader,
+// so a timed reset would have every awake device racing to write the same op,
+// churning the log once per device per period forever.
+//
+// Checking the chore off is the ONLY write, and it is the write that already
+// happened. Completion is what ADVANCES the cycle rather than something fighting
+// it.
+const REPEAT_KINDS = ['daily', 'weekly', 'monthly']
+function normalizeRepeat (v) { return REPEAT_KINDS.includes(v) ? v : null }
+function repeatOf (item) { return item ? normalizeRepeat(item.repeat) : null }
+
+// Sunday, matching the calendar convention where this is used. One constant, so
+// switching to an ISO Monday week is a one-line change if it is ever wanted.
+const WEEK_STARTS_ON = 0
+
+// Start of the current period, in LOCAL time. Deliberately local and not UTC:
+// "this week" means the user's week. It is the one place recurrence is not an
+// absolute instant, unlike remindAt, which is.
+//
+// Built from date parts rather than by subtracting milliseconds, so a DST change
+// cannot shift a boundary by an hour and make a chore reopen or stay closed early.
+function periodStart (repeat, now) {
+  const d = new Date(now)
+  const kind = normalizeRepeat(repeat)
+  if (!kind) return null
+  if (kind === 'monthly') return new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+  if (kind === 'weekly') {
+    const back = (d.getDay() - WEEK_STARTS_ON + 7) % 7
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime()
+  }
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+
+// The whole feature: a recurring item is OPEN unless it was completed inside the
+// current period. `checked` on the row is ignored here on purpose - it is a
+// record of the last completion, not the current state.
+function isRecurringOpen (item, now) {
+  const kind = repeatOf(item)
+  if (!kind) return false // not recurring; the caller uses plain `checked`
+  const done = item.lastDoneAt
+  if (typeof done !== 'number' || !Number.isFinite(done)) return true // never done
+  return done < periodStart(kind, now)
+}
+
+// THE SEAM. Every read surface asks this instead of reading `item.checked`, so
+// none of them can be half-migrated: item:getAll, the digest count, the reminder
+// target, the all-done completion scan and (through item:getAll) the UI's
+// auto-collapse. For a non-recurring item it is exactly `item.checked`, so
+// nothing existing changes behaviour.
+function effectiveChecked (item, now) {
+  if (!item) return false
+  if (!repeatOf(item)) return item.checked === true
+  return !isRecurringOpen(item, now)
+}
+
+// When it comes back, for the UI's "due again" line. Null when not recurring.
+function nextDueAt (item, now) {
+  const kind = repeatOf(item)
+  if (!kind) return null
+  const start = periodStart(kind, now)
+  const d = new Date(start)
+  if (kind === 'monthly') return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime()
+  if (kind === 'weekly') return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7).getTime()
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
+}
+
 // --- per-item reminders ----------------------------------------------------
 // P2 of proposals/2026-07-27-reminder-notifications.md. `remindAt` is an epoch
 // ms on the item row, additive and optional: rowApplyDecision validates only
@@ -385,7 +459,9 @@ function reminderTargetOf (item, list) {
 // A checked item never rings: finishing something early is the normal way to
 // cancel a reminder, and it must not still fire.
 function isReminderPending (item, list, selfKey, now) {
-  if (!item || item.deleted === true || item.checked === true) return false
+  // effectiveChecked, not item.checked: a recurring chore completed LAST period
+  // is open again and must ring, and one completed this period must not.
+  if (!item || item.deleted === true || effectiveChecked(item, now)) return false
   if (typeof item.remindAt !== 'number' || !Number.isFinite(item.remindAt)) return false
   if (item.remindAt <= now) return false // already past; the OS has fired it or it was missed
   return !!selfKey && reminderTargetOf(item, list) === selfKey
@@ -396,4 +472,4 @@ function isReminderPending (item, list, selfKey, now) {
 // fire. 32 leaves generous headroom, plus a slot for the daily digest.
 const MAX_SCHEDULED_REMINDERS = 32
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS }
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }

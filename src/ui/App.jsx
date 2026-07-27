@@ -1896,6 +1896,9 @@ export default function App () {
             try { await call('item:setReminder', { groupId: gid, listId: openListId, itemId: sheet.item.id, remindAt: patch.remindAt ?? null }) }
             catch (e) { alert('Could not set that reminder: ' + (e?.message || e)) }
           }
+          if ((patch.repeat || '') !== (sheet.item.repeat || '')) {
+            await call('item:setRepeat', { groupId: gid, listId: openListId, itemId: sheet.item.id, repeat: patch.repeat || null }).catch(() => {})
+          }
           if (patch.catTouched) {
             const cat = patch.category || ''
             await call('ai:setCategory', { groupId: gid, listId: openListId, itemId: sheet.item.id, category: cat, by: 'user' }).catch(() => {})
@@ -2885,7 +2888,8 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
   const [picking, setPicking] = useState(false)
   const [pickingAisle, setPickingAisle] = useState(false)
   const [remindAt, setRemindAt] = useState(null)
-  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null) } }, [open, item])
+  const [repeat, setRepeat] = useState('')
+  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null); setRepeat(item.repeat || '') } }, [open, item])
   if (!item) return null
   const isGrocery = kind === 'grocery'
   const nounLabel = noun.charAt(0).toUpperCase() + noun.slice(1) // "Aisle" / "Section"
@@ -2919,10 +2923,26 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               <CaretRight size={16} color={c.text.muted} weight='regular' />
             </span>
           </button>
-          {/* One reminder, one instant. Deliberately no repeat and no snooze: that
-              is a chore scheduler, which the proposal keeps out of scope. Whoever
-              the item is assigned to is who gets it (falling back to the list's
-              assignee, then its creator), so exactly one phone rings. */}
+          {/* A chore that comes back. Nothing resets it on a timer: checking it off
+              records WHEN, and whether it is open now is worked out from that at
+              read time (proposals/2026-07-27-recurring-chores.md). */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+            <span style={{ color: c.text.secondary, fontSize: 14, flexShrink: 0 }}>Repeats</span>
+            <select value={repeat} onChange={(e) => setRepeat(e.target.value)} aria-label='Repeats'
+              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: repeat ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }}>
+              <option value=''>Never</option>
+              <option value='daily'>Every day</option>
+              <option value='weekly'>Every week</option>
+              <option value='monthly'>Every month</option>
+            </select>
+          </div>
+          {/* Only worth saying when it is closed: an open chore is due NOW. */}
+          {repeat && repeat === item.repeat && item.checked && item.nextDueAt
+            ? <span style={{ color: c.text.muted, fontSize: 12, marginTop: -6 }}>Done for now. Back on {new Date(item.nextDueAt).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}.</span>
+            : null}
+          {/* One reminder, one instant. No snooze: whoever the item is assigned to
+              is who gets it (falling back to the list's assignee, then its
+              creator), so exactly one phone rings. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
             <span style={{ color: c.text.secondary, fontSize: 14, flexShrink: 0 }}>Remind</span>
             <input type='datetime-local' aria-label='Reminder time'
@@ -2941,7 +2961,7 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
             {url.trim() ? <button onClick={() => openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim())} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
           </div>
-          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched, remindAt })}>Save</Button>
+          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched, remindAt, repeat })}>Save</Button>
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>
