@@ -1,0 +1,1089 @@
+{"type":"start","variants":["v11"],"repeats":1,"items":2,"calls":2}
+{"type":"model","state":"ready","model":"Llama 3.2 1B","error":null}
+{"type":"variant-start","variant":"v11","shots":11,"promptChars":636,"promptTokensEst":159}
+{"type":"meta-keys","variant":"v11","keys":["toolCalls","stats","raw","cacheableAssistantContent"]}
+{"type":"variant","variant":"v11","shots":11,"promptChars":636,"accuracy":0.5,"anyCorrect":0.5,"consistency":1,"nullRate":0,"msPerItem":924,"ttftPerItem":null,"promptTokens":null,"wrong":[{"item":"Sargento","expected":"Dairy & Eggs","got":"Meat & Seafood"}]}
+{"type":"summary","rows":[{"variant":"v11","shots":11,"accuracy":0.5,"consistency":1,"msPerItem":924,"ttftPerItem":null,"promptTokens":null}]}
+{"type":"done-launch"}
+{"type":"start","variants":["v11","v6","v4","v2","v0"],"repeats":5,"items":26,"calls":650,"resumed":true}
+{"type":"model","state":"ready","model":"Llama 3.2 1B","error":null}
+{"type":"variant-start","variant":"v11","shots":11,"promptChars":636,"promptTokensEst":159}
+{"type":"meta-keys","variant":"v11","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":710.6320000000001,"tokensPerSecond":81.24664857574624,"cacheTokens":0,"promptTokens":349,"generatedTokens":10,"backendDevice":"cpu"}}
+{"type":"variant","variant":"v11","shots":11,"promptChars":636,"accuracy":0.5,"anyCorrect":0.731,"consistency":0.815,"nullRate":0,"msPerItem":871,"ttftPerItem":714,"promptTokens":349,"wrong":[{"item":"Sargento","expected":"Dairy & Eggs","got":"Meat & Seafood"},{"item":"Modelo","expected":"Alcohol","got":"Beverages"},{"item":"Barefoot","expected":"Alcohol","got":"Beverages"},{"item":"Folgers","expected":"Beverages","got":"Condiments"},{"item":"Progresso","expected":"Pantry","got":"Condiments"},{"item":"Krusteaz","expected":"Baking","got":"Snacks"},{"item":"Duncan Hines","expected":"Baking","got":"Bakery"},{"item":"Stouffers","expected":"Frozen","got":"Condiments"},{"item":"Butterball","expected":"Meat & Seafood","got":"Pet"},{"item":"Applegate","expected":"Meat & Seafood","got":"Dairy & Eggs"},{"item":"Kikkoman","expected":"Condiments","got":"Other"},{"item":"RXBAR","expected":"Snacks","got":"Produce"},{"item":"Clif","expected":"Snacks","got":"Baking"}]}
+{"type":"variant-start","variant":"v6","shots":6,"promptChars":434,"promptTokensEst":109}
+{"type":"meta-keys","variant":"v6","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":432.504,"tokensPerSecond":86.01780568577696,"cacheTokens":0,"promptTokens":229,"generatedTokens":10,"backendDevice":"cpu"}}
+{"type":"variant","variant":"v6","shots":6,"promptChars":434,"accuracy":0.5,"anyCorrect":0.692,"consistency":0.785,"nullRate":0,"msPerItem":623,"ttftPerItem":466,"promptTokens":229,"wrong":[{"item":"Sargento","expected":"Dairy & Eggs","got":"Meat & Seafood"},{"item":"Modelo","expected":"Alcohol","got":"Beverages"},{"item":"Barefoot","expected":"Alcohol","got":"Beverages"},{"item":"Folgers","expected":"Beverages","got":"Household"},{"item":"Claritin","expected":"Personal Care","got":"Pantry"},{"item":"Progresso","expected":"Pantry","got":"Condiments"},{"item":"Krusteaz","expected":"Baking","got":"Bakery"},{"item":"Stouffers","expected":"Frozen","got":"Dairy & Eggs"},{"item":"Butterball","expected":"Meat & Seafood","got":"Pet"},{"item":"Applegate","expected":"Meat & Seafood","got":"Dairy & Eggs"},{"item":"Kikkoman","expected":"Condiments","got":"Other"},{"item":"RXBAR","expected":"Snacks","got":"Produce"},{"item":"Clif","expected":"Snacks","got":"Beverages"}]}
+{"type":"variant-start","variant":"v4","shots":4,"promptChars":354,"promptTokensEst":89}
+{"type":"meta-keys","variant":"v4","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":358.94,"tokensPerSecond":88.48539548547512,"cacheTokens":0,"promptTokens":180,"generatedTokens":10,"backendDevice":"cpu"}}
+{"type":"variant","variant":"v4","shots":4,"promptChars":354,"accuracy":0.538,"anyCorrect":0.654,"consistency":0.823,"nullRate":0,"msPerItem":526,"ttftPerItem":373,"promptTokens":180,"wrong":[{"item":"Sargento","expected":"Dairy & Eggs","got":"Meat & Seafood"},{"item":"Modelo","expected":"Alcohol","got":"Beverages"},{"item":"Barefoot","expected":"Alcohol","got":"Baking"},{"item":"Folgers","expected":"Beverages","got":"Household"},{"item":"Claritin","expected":"Personal Care","got":"Household"},{"item":"Progresso","expected":"Pantry","got":"Condiments"},{"item":"Krusteaz","expected":"Baking","got":"Bakery"},{"item":"Stouffers","expected":"Frozen","got":"Dairy & Eggs"},{"item":"Sara Lee","expected":"Bakery","got":"Meat & Seafood"},{"item":"Applegate","expected":"Meat & Seafood","got":"Dairy & Eggs"},{"item":"Kikkoman","expected":"Condiments","got":"Other"},{"item":"RXBAR","expected":"Snacks","got":"Produce"}]}
+{"type":"variant-start","variant":"v2","shots":2,"promptChars":273,"promptTokensEst":68}
+{"type":"meta-keys","variant":"v2","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":291.818,"tokensPerSecond":87.40036358551252,"cacheTokens":0,"promptTokens":130,"generatedTokens":10,"backendDevice":"cpu"}}
+{"type":"variant","variant":"v2","shots":2,"promptChars":273,"accuracy":0.577,"anyCorrect":0.654,"consistency":0.846,"nullRate":0,"msPerItem":427,"ttftPerItem":272,"promptTokens":130,"wrong":[{"item":"Sargento","expected":"Dairy & Eggs","got":"Meat & Seafood"},{"item":"Modelo","expected":"Alcohol","got":"Beverages"},{"item":"Barefoot","expected":"Alcohol","got":"Baking"},{"item":"Claritin","expected":"Personal Care","got":"Pet"},{"item":"Progresso","expected":"Pantry","got":"Condiments"},{"item":"Stouffers","expected":"Frozen","got":"Condiments"},{"item":"Butterball","expected":"Meat & Seafood","got":"Pet"},{"item":"Applegate","expected":"Meat & Seafood","got":"Produce"},{"item":"Kikkoman","expected":"Condiments","got":"Other"},{"item":"RXBAR","expected":"Snacks","got":"Produce"},{"item":"Clif","expected":"Snacks","got":"Produce"}]}
+{"type":"variant-start","variant":"v0","shots":0,"promptChars":204,"promptTokensEst":51}
+{"type":"meta-keys","variant":"v0","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":189.156,"tokensPerSecond":88.95430174916504,"cacheTokens":0,"promptTokens":84,"generatedTokens":11,"backendDevice":"cpu"}}
+{"type":"variant","variant":"v0","shots":0,"promptChars":204,"accuracy":0.192,"anyCorrect":0.462,"consistency":0.762,"nullRate":0,"msPerItem":412,"ttftPerItem":176,"promptTokens":84,"wrong":[{"item":"Sargento","expected":"Dairy & Eggs","got":"Snacks"},{"item":"Kerrygold","expected":"Dairy & Eggs","got":"Other"},{"item":"Modelo","expected":"Alcohol","got":"Beverages"},{"item":"Barefoot","expected":"Alcohol","got":"Snacks"},{"item":"Folgers","expected":"Beverages","got":"Condiments"},{"item":"Spindrift","expected":"Beverages","got":"Produce"},{"item":"Claritin","expected":"Personal Care","got":"Pantry"},{"item":"Mrs Meyers","expected":"Household","got":"Snacks"},{"item":"Seventh Generation","expected":"Household","got":"Baking"},{"item":"Progresso","expected":"Pantry","got":"Condiments"},{"item":"Stouffers","expected":"Frozen","got":"Baking"},{"item":"Ore-Ida","expected":"Frozen","got":"Snacks"},{"item":"King's Hawaiian","expected":"Bakery","got":"Snacks"},{"item":"Sara Lee","expected":"Bakery","got":"Baking"},{"item":"Butterball","expected":"Meat & Seafood","got":"Snacks"},{"item":"Applegate","expected":"Meat & Seafood","got":"Produce"},{"item":"Kikkoman","expected":"Condiments","got":"Other"},{"item":"RXBAR","expected":"Snacks","got":"Produce"},{"item":"Clif","expected":"Snacks","got":"Produce"},{"item":"Fresh Step","expected":"Pet","got":"Produce"},{"item":"Kong","expected":"Pet","got":"Snacks"}]}
+{"type":"summary","rows":[{"variant":"v11","shots":11,"accuracy":0.5,"consistency":0.815,"msPerItem":871,"ttftPerItem":714,"promptTokens":349},{"variant":"v6","shots":6,"accuracy":0.5,"consistency":0.785,"msPerItem":623,"ttftPerItem":466,"promptTokens":229},{"variant":"v4","shots":4,"accuracy":0.538,"consistency":0.823,"msPerItem":526,"ttftPerItem":373,"promptTokens":180},{"variant":"v2","shots":2,"accuracy":0.577,"consistency":0.846,"msPerItem":427,"ttftPerItem":272,"promptTokens":130},{"variant":"v0","shots":0,"accuracy":0.192,"consistency":0.762,"msPerItem":412,"ttftPerItem":176,"promptTokens":84}]}
+{"type":"done"}
+{"type":"start","variants":["v11","v4","v2"],"repeats":5,"items":70,"calls":1050,"resumed":true}
+{"type":"model","state":"ready","model":"Llama 3.2 1B","error":null}
+{"type":"variant-start","variant":"v11","shots":11,"promptChars":636,"promptTokensEst":159}
+{"type":"call","variant":"v11","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":1032,"ttft":865.7,"promptTokens":349,"run":1}
+{"type":"meta-keys","variant":"v11","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":865.7,"tokensPerSecond":79.83748636109607,"cacheTokens":0,"promptTokens":349,"generatedTokens":9,"backendDevice":"cpu"}}
+{"type":"call","variant":"v11","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":1018,"ttft":835.5550000000001,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":914,"ttft":720.785,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":814,"ttft":669.001,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":812,"ttft":670.575,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Good Culture","expected":"Dairy & Eggs","got":"Baking","ms":814,"ttft":663.703,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Good Culture","expected":"Dairy & Eggs","got":"Baking","ms":815,"ttft":663.741,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Good Culture","expected":"Dairy & Eggs","got":"Baking","ms":1013,"ttft":823.024,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Good Culture","expected":"Dairy & Eggs","got":"Baking","ms":908,"ttft":803.437,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Good Culture","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":1225,"ttft":1077.872,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":921,"ttft":731.311,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":816,"ttft":670.613,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":814,"ttft":669.455,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Stonyfield","expected":"Dairy & Eggs","got":"Baking","ms":812,"ttft":668.88,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Stonyfield","expected":"Dairy & Eggs","got":"Baking","ms":815,"ttft":669.37,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Belgioioso","expected":"Dairy & Eggs","got":"Bakery","ms":815,"ttft":670.207,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":815,"ttft":670.581,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Belgioioso","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":816,"ttft":671.385,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":816,"ttft":671.508,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Belgioioso","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":920,"ttft":753.629,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Personal Care","ms":811,"ttft":703.717,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Baking","ms":1020,"ttft":852.9200000000001,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Meat & Seafood","ms":816,"ttft":672.78,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Baking","ms":812,"ttft":671.107,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Produce","ms":816,"ttft":667.689,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":816,"ttft":671.253,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":814,"ttft":672.402,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":814,"ttft":672.489,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":816,"ttft":672.234,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":917,"ttft":716.214,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":810,"ttft":669.544,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":917,"ttft":733.191,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":815,"ttft":669.365,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":1020,"ttft":815.691,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Wellshire","expected":"Meat & Seafood","got":"Produce","ms":815,"ttft":670.041,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":913,"ttft":703.554,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":916,"ttft":695.9730000000001,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":813,"ttft":674.799,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":817,"ttft":687.347,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":812,"ttft":676.116,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Bell & Evans","expected":"Meat & Seafood","got":"Dairy & Eggs","ms":818,"ttft":675.006,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":917,"ttft":705.352,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":918,"ttft":700.168,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":815,"ttft":676.145,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":810,"ttft":675.119,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Aidells","expected":"Meat & Seafood","got":"Baking","ms":1021,"ttft":833.099,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Aidells","expected":"Meat & Seafood","got":"Bakery","ms":814,"ttft":677.929,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Aidells","expected":"Meat & Seafood","got":"Bakery","ms":812,"ttft":675.211,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Aidells","expected":"Meat & Seafood","got":"Bakery","ms":812,"ttft":694.315,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Aidells","expected":"Meat & Seafood","got":"Baking","ms":815,"ttft":675.868,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Franz","expected":"Bakery","got":"Personal Care","ms":816,"ttft":672.097,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Franz","expected":"Bakery","got":"Condiments","ms":814,"ttft":671.534,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Franz","expected":"Bakery","got":"Baking","ms":817,"ttft":672.315,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Franz","expected":"Bakery","got":"Personal Care","ms":914,"ttft":740.957,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Franz","expected":"Bakery","got":"Produce","ms":918,"ttft":679.681,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Rudis","expected":"Bakery","got":"Snacks","ms":814,"ttft":678.692,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Rudis","expected":"Bakery","got":"Snacks","ms":817,"ttft":676.4350000000001,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Rudis","expected":"Bakery","got":"Snacks","ms":1016,"ttft":825.918,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Rudis","expected":"Bakery","got":"Snacks","ms":815,"ttft":679.8100000000001,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Rudis","expected":"Bakery","got":"Snacks","ms":815,"ttft":677.696,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Alpine Valley","expected":"Bakery","got":"Meat & Seafood","ms":916,"ttft":677.41,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Alpine Valley","expected":"Bakery","got":"Produce","ms":815,"ttft":680.46,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Alpine Valley","expected":"Bakery","got":"Meat & Seafood","ms":916,"ttft":677.345,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Alpine Valley","expected":"Bakery","got":"Dairy & Eggs","ms":813,"ttft":680.482,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Alpine Valley","expected":"Bakery","got":"Dairy & Eggs","ms":812,"ttft":678.249,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Aunt Millies","expected":"Bakery","got":"Pet","ms":815,"ttft":694.061,"promptTokens":350,"run":1}
+{"type":"call","variant":"v11","item":"Aunt Millies","expected":"Bakery","got":"Household","ms":923,"ttft":779.265,"promptTokens":350,"run":2}
+{"type":"call","variant":"v11","item":"Aunt Millies","expected":"Bakery","got":"Dairy & Eggs","ms":814,"ttft":681.909,"promptTokens":350,"run":3}
+{"type":"call","variant":"v11","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":815,"ttft":682.83,"promptTokens":350,"run":4}
+{"type":"call","variant":"v11","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":917,"ttft":813.849,"promptTokens":350,"run":5}
+{"type":"call","variant":"v11","item":"Brownberry","expected":"Bakery","got":"Baking","ms":816,"ttft":672.899,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Brownberry","expected":"Bakery","got":"Snacks","ms":813,"ttft":675.121,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Brownberry","expected":"Bakery","got":"Bakery","ms":815,"ttft":675.034,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Brownberry","expected":"Bakery","got":"Snacks","ms":816,"ttft":674.58,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Brownberry","expected":"Bakery","got":"Baking","ms":813,"ttft":682.309,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Michelinas","expected":"Frozen","got":"Dairy & Eggs","ms":814,"ttft":679.029,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Michelinas","expected":"Frozen","got":"Other","ms":914,"ttft":681.647,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Michelinas","expected":"Frozen","got":"Baking","ms":918,"ttft":701.258,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Michelinas","expected":"Frozen","got":"Baking","ms":919,"ttft":776.413,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Michelinas","expected":"Frozen","got":"Dairy & Eggs","ms":915,"ttft":678.743,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Banquet","expected":"Frozen","got":"Condiments","ms":813,"ttft":678.528,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Banquet","expected":"Frozen","got":"Condiments","ms":1021,"ttft":792.318,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Banquet","expected":"Frozen","got":"Condiments","ms":918,"ttft":679.126,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Banquet","expected":"Frozen","got":"Condiments","ms":815,"ttft":675.958,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Banquet","expected":"Frozen","got":"Condiments","ms":817,"ttft":675.0360000000001,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Devour","expected":"Frozen","got":"Produce","ms":816,"ttft":676.114,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Devour","expected":"Frozen","got":"Snacks","ms":818,"ttft":675.033,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Devour","expected":"Frozen","got":"Pet","ms":817,"ttft":674.2280000000001,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Devour","expected":"Frozen","got":"Snacks","ms":814,"ttft":694.451,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Devour","expected":"Frozen","got":"Condiments","ms":816,"ttft":674.166,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Evol","expected":"Frozen","got":"Produce","ms":918,"ttft":779.3720000000001,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":811,"ttft":674.484,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":912,"ttft":679.363,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":916,"ttft":765.468,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":815,"ttft":674.871,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Alexia","expected":"Frozen","got":"Condiments","ms":916,"ttft":675.152,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Alexia","expected":"Frozen","got":"Pantry","ms":815,"ttft":674.385,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Alexia","expected":"Frozen","got":"Condiments","ms":918,"ttft":676.727,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Alexia","expected":"Frozen","got":"Condiments","ms":913,"ttft":676.354,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Alexia","expected":"Frozen","got":"Pantry","ms":816,"ttft":674.793,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Waterloo","expected":"Beverages","got":"Household","ms":813,"ttft":702.817,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Waterloo","expected":"Beverages","got":"Baking","ms":816,"ttft":675.138,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Waterloo","expected":"Beverages","got":"Other","ms":917,"ttft":790.162,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Waterloo","expected":"Beverages","got":"Condiments","ms":816,"ttft":674.772,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Waterloo","expected":"Beverages","got":"Dairy & Eggs","ms":917,"ttft":704.3100000000001,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Bubly","expected":"Beverages","got":"Beverages","ms":917,"ttft":723.6750000000001,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Bubly","expected":"Beverages","got":"Beverages","ms":817,"ttft":681.279,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Bubly","expected":"Beverages","got":"Beverages","ms":812,"ttft":679.356,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Bubly","expected":"Beverages","got":"Beverages","ms":816,"ttft":678.1270000000001,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Bubly","expected":"Beverages","got":"Beverages","ms":813,"ttft":678.004,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":917,"ttft":674.503,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":811,"ttft":674.214,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":917,"ttft":701.468,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":919,"ttft":692.061,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":920,"ttft":785.354,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Schweppes","expected":"Beverages","got":"Condiments","ms":916,"ttft":720.654,"promptTokens":350,"run":1}
+{"type":"call","variant":"v11","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":1021,"ttft":844.366,"promptTokens":350,"run":2}
+{"type":"call","variant":"v11","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":816,"ttft":682.919,"promptTokens":350,"run":3}
+{"type":"call","variant":"v11","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":815,"ttft":682.011,"promptTokens":350,"run":4}
+{"type":"call","variant":"v11","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":814,"ttft":681.782,"promptTokens":350,"run":5}
+{"type":"call","variant":"v11","item":"Jarritos","expected":"Beverages","got":"Condiments","ms":918,"ttft":678.438,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Jarritos","expected":"Beverages","got":"Frozen","ms":814,"ttft":677.5790000000001,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Jarritos","expected":"Beverages","got":"Snacks","ms":817,"ttft":674.035,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Jarritos","expected":"Beverages","got":"Snacks","ms":816,"ttft":678.903,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Jarritos","expected":"Beverages","got":"Condiments","ms":815,"ttft":687.298,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":815,"ttft":678.274,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Pabst","expected":"Alcohol","got":"Condiments","ms":917,"ttft":757.1,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Pabst","expected":"Alcohol","got":"Alcohol","ms":915,"ttft":806.688,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":1121,"ttft":946.999,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":816,"ttft":677.9,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Natural Light","expected":"Alcohol","got":"Baking","ms":816,"ttft":673.566,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":815,"ttft":674.471,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":814,"ttft":674.115,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Natural Light","expected":"Alcohol","got":"Dairy & Eggs","ms":817,"ttft":673.5070000000001,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Natural Light","expected":"Alcohol","got":"Baking","ms":813,"ttft":675.23,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":815,"ttft":678.347,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":816,"ttft":683.452,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":814,"ttft":678.356,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":919,"ttft":737.224,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":817,"ttft":678.572,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":1020,"ttft":821.299,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":818,"ttft":675.658,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":816,"ttft":675.913,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":816,"ttft":673.743,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":810,"ttft":674.697,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":916,"ttft":673.78,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":814,"ttft":674.648,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Shiner","expected":"Alcohol","got":"Snacks","ms":807,"ttft":676.121,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":813,"ttft":678.083,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":817,"ttft":676.453,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":919,"ttft":751.394,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":816,"ttft":679.615,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":1019,"ttft":828.772,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":815,"ttft":680.188,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":814,"ttft":676.958,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Bugles","expected":"Snacks","got":"Snacks","ms":815,"ttft":672.622,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Bugles","expected":"Snacks","got":"Bakery","ms":814,"ttft":672.893,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Bugles","expected":"Snacks","got":"Snacks","ms":816,"ttft":675.893,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Bugles","expected":"Snacks","got":"Snacks","ms":814,"ttft":676.626,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Bugles","expected":"Snacks","got":"Snacks","ms":814,"ttft":673.298,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":815,"ttft":681.0070000000001,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":817,"ttft":673.0020000000001,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":923,"ttft":760.756,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":816,"ttft":673.677,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":1018,"ttft":817.125,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":812,"ttft":679.186,"promptTokens":352,"run":1}
+{"type":"call","variant":"v11","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":816,"ttft":675.261,"promptTokens":352,"run":2}
+{"type":"call","variant":"v11","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":813,"ttft":675.0790000000001,"promptTokens":352,"run":3}
+{"type":"call","variant":"v11","item":"Orville Redenbacher","expected":"Snacks","got":"Snacks","ms":813,"ttft":675.357,"promptTokens":352,"run":4}
+{"type":"call","variant":"v11","item":"Orville Redenbacher","expected":"Snacks","got":"Snacks","ms":812,"ttft":677.636,"promptTokens":352,"run":5}
+{"type":"call","variant":"v11","item":"Late July","expected":"Snacks","got":"Condiments","ms":917,"ttft":672.374,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Late July","expected":"Snacks","got":"Personal Care","ms":916,"ttft":672.438,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Late July","expected":"Snacks","got":"Condiments","ms":917,"ttft":671.9540000000001,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Late July","expected":"Snacks","got":"Condiments","ms":918,"ttft":673.27,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Late July","expected":"Snacks","got":"Snacks","ms":814,"ttft":679.235,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":817,"ttft":681.486,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":1020,"ttft":839.04,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":812,"ttft":678.431,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":814,"ttft":675.944,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":814,"ttft":675.993,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Seeds of Change","expected":"Pantry","got":"Produce","ms":813,"ttft":692.803,"promptTokens":350,"run":1}
+{"type":"call","variant":"v11","item":"Seeds of Change","expected":"Pantry","got":"Baking","ms":916,"ttft":708.159,"promptTokens":350,"run":2}
+{"type":"call","variant":"v11","item":"Seeds of Change","expected":"Pantry","got":"Baking","ms":918,"ttft":682.694,"promptTokens":350,"run":3}
+{"type":"call","variant":"v11","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":916,"ttft":727.318,"promptTokens":350,"run":4}
+{"type":"call","variant":"v11","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":813,"ttft":679.642,"promptTokens":350,"run":5}
+{"type":"call","variant":"v11","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":1020,"ttft":780.04,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":910,"ttft":701.2810000000001,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":916,"ttft":671.58,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":916,"ttft":699.371,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":916,"ttft":671.874,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"San-J","expected":"Pantry","got":"Dairy & Eggs","ms":815,"ttft":672.569,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"San-J","expected":"Pantry","got":"Dairy & Eggs","ms":813,"ttft":671.922,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"San-J","expected":"Pantry","got":"Baking","ms":813,"ttft":677.135,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"San-J","expected":"Pantry","got":"Condiments","ms":815,"ttft":672.457,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"San-J","expected":"Pantry","got":"Condiments","ms":816,"ttft":671.771,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":815,"ttft":691.534,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":819,"ttft":675.94,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":914,"ttft":788.118,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":812,"ttft":675.817,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":818,"ttft":675.245,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Swans Down","expected":"Baking","got":"Meat & Seafood","ms":915,"ttft":755.8720000000001,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Swans Down","expected":"Baking","got":"Dairy & Eggs","ms":816,"ttft":675.815,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Swans Down","expected":"Baking","got":"Dairy & Eggs","ms":814,"ttft":676.461,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Swans Down","expected":"Baking","got":"Dairy & Eggs","ms":817,"ttft":676.955,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Swans Down","expected":"Baking","got":"Dairy & Eggs","ms":816,"ttft":677.39,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"White Lily","expected":"Baking","got":"Baking","ms":816,"ttft":671.753,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"White Lily","expected":"Baking","got":"Bakery","ms":816,"ttft":672.0360000000001,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"White Lily","expected":"Baking","got":"Household","ms":815,"ttft":702.553,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"White Lily","expected":"Baking","got":"Bakery","ms":815,"ttft":673.761,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"White Lily","expected":"Baking","got":"Baking","ms":914,"ttft":775.566,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":812,"ttft":683.301,"promptTokens":351,"run":1}
+{"type":"call","variant":"v11","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":814,"ttft":684.306,"promptTokens":351,"run":2}
+{"type":"call","variant":"v11","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":921,"ttft":813.839,"promptTokens":351,"run":3}
+{"type":"call","variant":"v11","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":817,"ttft":683.8340000000001,"promptTokens":351,"run":4}
+{"type":"call","variant":"v11","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":816,"ttft":683.784,"promptTokens":351,"run":5}
+{"type":"call","variant":"v11","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":817,"ttft":675.6320000000001,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":812,"ttft":676.268,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":814,"ttft":681.998,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":817,"ttft":699.576,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":916,"ttft":725.727,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Guittard","expected":"Baking","got":"Condiments","ms":917,"ttft":677.431,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Guittard","expected":"Baking","got":"Pantry","ms":916,"ttft":787.5600000000001,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Guittard","expected":"Baking","got":"Pantry","ms":813,"ttft":675.707,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Guittard","expected":"Baking","got":"Baking","ms":814,"ttft":675.867,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Guittard","expected":"Baking","got":"Condiments","ms":1019,"ttft":809.623,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Lea & Perrins","expected":"Condiments","got":"Beverages","ms":814,"ttft":683.812,"promptTokens":351,"run":1}
+{"type":"call","variant":"v11","item":"Lea & Perrins","expected":"Condiments","got":"Beverages","ms":815,"ttft":683.928,"promptTokens":351,"run":2}
+{"type":"call","variant":"v11","item":"Lea & Perrins","expected":"Condiments","got":"Beverages","ms":814,"ttft":683.253,"promptTokens":351,"run":3}
+{"type":"call","variant":"v11","item":"Lea & Perrins","expected":"Condiments","got":"Condiments","ms":916,"ttft":683.7040000000001,"promptTokens":351,"run":4}
+{"type":"call","variant":"v11","item":"Lea & Perrins","expected":"Condiments","got":"Condiments","ms":816,"ttft":683.149,"promptTokens":351,"run":5}
+{"type":"call","variant":"v11","item":"Maille","expected":"Condiments","got":"Household","ms":817,"ttft":671.038,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Maille","expected":"Condiments","got":"Household","ms":817,"ttft":698.74,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Maille","expected":"Condiments","got":"Baking","ms":812,"ttft":672.403,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Maille","expected":"Condiments","got":"Snacks","ms":916,"ttft":775.4830000000001,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Maille","expected":"Condiments","got":"Dairy & Eggs","ms":814,"ttft":671.457,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":816,"ttft":679.437,"promptTokens":350,"run":1}
+{"type":"call","variant":"v11","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":1020,"ttft":833.418,"promptTokens":350,"run":2}
+{"type":"call","variant":"v11","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":813,"ttft":680.355,"promptTokens":350,"run":3}
+{"type":"call","variant":"v11","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":910,"ttft":679.564,"promptTokens":350,"run":4}
+{"type":"call","variant":"v11","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":915,"ttft":682.617,"promptTokens":350,"run":5}
+{"type":"call","variant":"v11","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":917,"ttft":676.516,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":816,"ttft":670.652,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Texas Pete","expected":"Condiments","got":"Snacks","ms":809,"ttft":671.039,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":813,"ttft":689.843,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":815,"ttft":670.854,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"El Yucateco","expected":"Condiments","got":"Condiments","ms":1017,"ttft":786.469,"promptTokens":351,"run":1}
+{"type":"call","variant":"v11","item":"El Yucateco","expected":"Condiments","got":"Snacks","ms":810,"ttft":683.77,"promptTokens":351,"run":2}
+{"type":"call","variant":"v11","item":"El Yucateco","expected":"Condiments","got":"Baking","ms":919,"ttft":684.9970000000001,"promptTokens":351,"run":3}
+{"type":"call","variant":"v11","item":"El Yucateco","expected":"Condiments","got":"Other","ms":915,"ttft":701.298,"promptTokens":351,"run":4}
+{"type":"call","variant":"v11","item":"El Yucateco","expected":"Condiments","got":"Other","ms":916,"ttft":683.462,"promptTokens":351,"run":5}
+{"type":"call","variant":"v11","item":"Zep","expected":"Household","got":"Household","ms":813,"ttft":673.929,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Zep","expected":"Household","got":"Baking","ms":816,"ttft":672.5020000000001,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Zep","expected":"Household","got":"Household","ms":814,"ttft":670.625,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Zep","expected":"Household","got":"Household","ms":815,"ttft":670.799,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Zep","expected":"Household","got":"Baking","ms":813,"ttft":670.965,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Goo Gone","expected":"Household","got":"Household","ms":816,"ttft":675.698,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Goo Gone","expected":"Household","got":"Household","ms":816,"ttft":674.607,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Goo Gone","expected":"Household","got":"Household","ms":918,"ttft":787.839,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Goo Gone","expected":"Household","got":"Household","ms":816,"ttft":675.616,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Goo Gone","expected":"Household","got":"Household","ms":814,"ttft":674.34,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Bon Ami","expected":"Household","got":"Household","ms":918,"ttft":745.624,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Bon Ami","expected":"Household","got":"Household","ms":817,"ttft":676.524,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Bon Ami","expected":"Household","got":"Household","ms":816,"ttft":673.85,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Bon Ami","expected":"Household","got":"Household","ms":815,"ttft":674.94,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Bon Ami","expected":"Household","got":"Household","ms":816,"ttft":674.715,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Soft Scrub","expected":"Household","got":"Household","ms":817,"ttft":674.1510000000001,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Soft Scrub","expected":"Household","got":"Household","ms":816,"ttft":674.124,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Soft Scrub","expected":"Household","got":"Household","ms":815,"ttft":682.099,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Soft Scrub","expected":"Household","got":"Household","ms":816,"ttft":674.995,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Soft Scrub","expected":"Household","got":"Household","ms":922,"ttft":790.13,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Formula 409","expected":"Household","got":"Household","ms":816,"ttft":674.08,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Formula 409","expected":"Household","got":"Household","ms":816,"ttft":675.682,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Formula 409","expected":"Household","got":"Household","ms":913,"ttft":805.08,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Formula 409","expected":"Household","got":"Household","ms":818,"ttft":674.622,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Formula 409","expected":"Household","got":"Household","ms":814,"ttft":680.039,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Curel","expected":"Personal Care","got":"Household","ms":816,"ttft":675.993,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":816,"ttft":674.429,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":819,"ttft":674.167,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":817,"ttft":673.985,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Curel","expected":"Personal Care","got":"Household","ms":812,"ttft":702.367,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"St Ives","expected":"Personal Care","got":"Condiments","ms":919,"ttft":674.7570000000001,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"St Ives","expected":"Personal Care","got":"Condiments","ms":1020,"ttft":785.496,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"St Ives","expected":"Personal Care","got":"Condiments","ms":916,"ttft":674.24,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":815,"ttft":675.033,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":917,"ttft":784.3530000000001,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Ponds","expected":"Personal Care","got":"Pet","ms":815,"ttft":670.499,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Ponds","expected":"Personal Care","got":"Pet","ms":815,"ttft":670.681,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Ponds","expected":"Personal Care","got":"Pantry","ms":814,"ttft":670.984,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Ponds","expected":"Personal Care","got":"Pet","ms":815,"ttft":670.71,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Ponds","expected":"Personal Care","got":"Pet","ms":817,"ttft":671.576,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":813,"ttft":673.997,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":816,"ttft":690.917,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":816,"ttft":674.491,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":918,"ttft":785.375,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":813,"ttft":680.094,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Biore","expected":"Personal Care","got":"Personal Care","ms":814,"ttft":670.017,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Biore","expected":"Personal Care","got":"Personal Care","ms":1035,"ttft":846.338,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Biore","expected":"Personal Care","got":"Baking","ms":814,"ttft":672.809,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Biore","expected":"Personal Care","got":"Personal Care","ms":814,"ttft":670.372,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Biore","expected":"Personal Care","got":"Household","ms":814,"ttft":670.7810000000001,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Alpo","expected":"Pet","got":"Pet","ms":814,"ttft":670.258,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Alpo","expected":"Pet","got":"Pet","ms":815,"ttft":670.509,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Alpo","expected":"Pet","got":"Pet","ms":818,"ttft":671.6030000000001,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Alpo","expected":"Pet","got":"Pet","ms":812,"ttft":689.932,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Alpo","expected":"Pet","got":"Pet","ms":815,"ttft":669.9540000000001,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Nutrish","expected":"Pet","got":"Pet","ms":813,"ttft":703.569,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Nutrish","expected":"Pet","got":"Pet","ms":814,"ttft":696.229,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Nutrish","expected":"Pet","got":"Pet","ms":814,"ttft":670.427,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Nutrish","expected":"Pet","got":"Pet","ms":917,"ttft":805.715,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Nutrish","expected":"Pet","got":"Pet","ms":813,"ttft":670.933,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Merrick","expected":"Pet","got":"Pet","ms":814,"ttft":670.072,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Merrick","expected":"Pet","got":"Pet","ms":814,"ttft":670.126,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Merrick","expected":"Pet","got":"Pet","ms":815,"ttft":670.1080000000001,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Merrick","expected":"Pet","got":"Pet","ms":816,"ttft":670.229,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Merrick","expected":"Pet","got":"Pet","ms":816,"ttft":670.524,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Instinct","expected":"Pet","got":"Pet","ms":815,"ttft":698.214,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Instinct","expected":"Pet","got":"Pet","ms":814,"ttft":673.738,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Instinct","expected":"Pet","got":"Pet","ms":814,"ttft":693.29,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Instinct","expected":"Pet","got":"Pet","ms":920,"ttft":780.23,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Instinct","expected":"Pet","got":"Pet","ms":812,"ttft":669.992,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":919,"ttft":674.1610000000001,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":918,"ttft":696.684,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":915,"ttft":689.049,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":812,"ttft":676.667,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":814,"ttft":674.301,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"NatureSweet","expected":"Produce","got":"Baking","ms":918,"ttft":754.242,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"NatureSweet","expected":"Produce","got":"Condiments","ms":814,"ttft":674.008,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"NatureSweet","expected":"Produce","got":"Condiments","ms":917,"ttft":705.618,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"NatureSweet","expected":"Produce","got":"Condiments","ms":816,"ttft":671.5550000000001,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"NatureSweet","expected":"Produce","got":"Condiments","ms":811,"ttft":671.6800000000001,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Ocean Mist","expected":"Produce","got":"Household","ms":917,"ttft":749.77,"promptTokens":348,"run":1}
+{"type":"call","variant":"v11","item":"Ocean Mist","expected":"Produce","got":"Household","ms":816,"ttft":670.795,"promptTokens":348,"run":2}
+{"type":"call","variant":"v11","item":"Ocean Mist","expected":"Produce","got":"Household","ms":916,"ttft":805.562,"promptTokens":348,"run":3}
+{"type":"call","variant":"v11","item":"Ocean Mist","expected":"Produce","got":"Household","ms":816,"ttft":670.391,"promptTokens":348,"run":4}
+{"type":"call","variant":"v11","item":"Ocean Mist","expected":"Produce","got":"Household","ms":809,"ttft":670.066,"promptTokens":348,"run":5}
+{"type":"call","variant":"v11","item":"Grimmway","expected":"Produce","got":"Bakery","ms":815,"ttft":678.932,"promptTokens":350,"run":1}
+{"type":"call","variant":"v11","item":"Grimmway","expected":"Produce","got":"Pet","ms":813,"ttft":678.213,"promptTokens":350,"run":2}
+{"type":"call","variant":"v11","item":"Grimmway","expected":"Produce","got":"Household","ms":816,"ttft":677.869,"promptTokens":350,"run":3}
+{"type":"call","variant":"v11","item":"Grimmway","expected":"Produce","got":"Household","ms":814,"ttft":677.591,"promptTokens":350,"run":4}
+{"type":"call","variant":"v11","item":"Grimmway","expected":"Produce","got":"Household","ms":814,"ttft":709.902,"promptTokens":350,"run":5}
+{"type":"call","variant":"v11","item":"Melissas","expected":"Produce","got":"Dairy & Eggs","ms":816,"ttft":674.5,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Melissas","expected":"Produce","got":"Snacks","ms":810,"ttft":677.7230000000001,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Melissas","expected":"Produce","got":"Dairy & Eggs","ms":1016,"ttft":787.139,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Melissas","expected":"Produce","got":"Bakery","ms":812,"ttft":681.0980000000001,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Melissas","expected":"Produce","got":"Snacks","ms":919,"ttft":694.492,"promptTokens":349,"run":5}
+{"type":"call","variant":"v11","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":812,"ttft":681.066,"promptTokens":349,"run":1}
+{"type":"call","variant":"v11","item":"Manns","expected":"Produce","got":"Pantry","ms":816,"ttft":675.125,"promptTokens":349,"run":2}
+{"type":"call","variant":"v11","item":"Manns","expected":"Produce","got":"Produce","ms":815,"ttft":674.615,"promptTokens":349,"run":3}
+{"type":"call","variant":"v11","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":815,"ttft":674.643,"promptTokens":349,"run":4}
+{"type":"call","variant":"v11","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":911,"ttft":674.673,"promptTokens":349,"run":5}
+{"type":"variant","variant":"v11","shots":11,"promptChars":636,"accuracy":0.371,"anyCorrect":0.529,"consistency":0.737,"nullRate":0,"msPerItem":854,"ttftPerItem":699,"promptTokens":349,"wrong":[{"item":"Good Culture","expected":"Dairy & Eggs","got":"Baking"},{"item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry"},{"item":"Crystal Farms","expected":"Dairy & Eggs","got":"Baking"},{"item":"Aidells","expected":"Meat & Seafood","got":"Bakery"},{"item":"Franz","expected":"Bakery","got":"Personal Care"},{"item":"Rudis","expected":"Bakery","got":"Snacks"},{"item":"Alpine Valley","expected":"Bakery","got":"Meat & Seafood"},{"item":"Aunt Millies","expected":"Bakery","got":"Baking"},{"item":"Brownberry","expected":"Bakery","got":"Baking"},{"item":"Michelinas","expected":"Frozen","got":"Dairy & Eggs"},{"item":"Banquet","expected":"Frozen","got":"Condiments"},{"item":"Devour","expected":"Frozen","got":"Snacks"},{"item":"Evol","expected":"Frozen","got":"Meat & Seafood"},{"item":"Alexia","expected":"Frozen","got":"Condiments"},{"item":"Waterloo","expected":"Beverages","got":"Household"},{"item":"Canada Dry","expected":"Beverages","got":"Condiments"},{"item":"Jarritos","expected":"Beverages","got":"Condiments"},{"item":"Pabst","expected":"Alcohol","got":"Beverages"},{"item":"Natural Light","expected":"Alcohol","got":"Baking"},{"item":"Rolling Rock","expected":"Alcohol","got":"Beverages"},{"item":"New Belgium","expected":"Alcohol","got":"Beverages"},{"item":"Shiner","expected":"Alcohol","got":"Beverages"},{"item":"Pop Secret","expected":"Snacks","got":"Condiments"},{"item":"Orville Redenbacher","expected":"Snacks","got":"Pantry"},{"item":"Late July","expected":"Snacks","got":"Condiments"},{"item":"Tasty Bite","expected":"Pantry","got":"Snacks"},{"item":"Seeds of Change","expected":"Pantry","got":"Baking"},{"item":"Thai Kitchen","expected":"Pantry","got":"Condiments"},{"item":"San-J","expected":"Pantry","got":"Dairy & Eggs"},{"item":"Eden Foods","expected":"Pantry","got":"Produce"},{"item":"Swans Down","expected":"Baking","got":"Dairy & Eggs"},{"item":"Guittard","expected":"Baking","got":"Condiments"},{"item":"Lea & Perrins","expected":"Condiments","got":"Beverages"},{"item":"Maille","expected":"Condiments","got":"Household"},{"item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood"},{"item":"El Yucateco","expected":"Condiments","got":"Other"},{"item":"St Ives","expected":"Personal Care","got":"Condiments"},{"item":"Ponds","expected":"Personal Care","got":"Pet"},{"item":"Orijen","expected":"Pet","got":"Meat & Seafood"},{"item":"NatureSweet","expected":"Produce","got":"Condiments"},{"item":"Ocean Mist","expected":"Produce","got":"Household"},{"item":"Grimmway","expected":"Produce","got":"Household"},{"item":"Melissas","expected":"Produce","got":"Dairy & Eggs"},{"item":"Manns","expected":"Produce","got":"Meat & Seafood"}]}
+{"type":"variant-start","variant":"v4","shots":4,"promptChars":354,"promptTokensEst":89}
+{"type":"call","variant":"v4","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":511,"ttft":334.152,"promptTokens":180,"run":1}
+{"type":"meta-keys","variant":"v4","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":334.152,"tokensPerSecond":89.09920701705755,"cacheTokens":0,"promptTokens":180,"generatedTokens":9,"backendDevice":"cpu"}}
+{"type":"call","variant":"v4","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":508,"ttft":335.083,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":511,"ttft":362.675,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":508,"ttft":335.206,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":510,"ttft":334.988,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Good Culture","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":509,"ttft":339.23900000000003,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Good Culture","expected":"Dairy & Eggs","got":"Bakery","ms":511,"ttft":341.81100000000004,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Good Culture","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":511,"ttft":365.583,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Good Culture","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":510,"ttft":337.97700000000003,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Good Culture","expected":"Dairy & Eggs","got":"Bakery","ms":511,"ttft":338.354,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":510,"ttft":334.29200000000003,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":613,"ttft":498.652,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":511,"ttft":335.315,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":511,"ttft":334.728,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":510,"ttft":335.632,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Belgioioso","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":509,"ttft":357.449,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":512,"ttft":338.08,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":511,"ttft":338.387,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":510,"ttft":335.082,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":510,"ttft":334.382,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Beverages","ms":510,"ttft":336.991,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Beverages","ms":511,"ttft":338.168,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Condiments","ms":609,"ttft":357.324,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":510,"ttft":337.278,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":509,"ttft":338.533,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":510,"ttft":334.499,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":611,"ttft":448.923,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":509,"ttft":334.33,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":510,"ttft":334.966,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":509,"ttft":334.502,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":510,"ttft":339.31600000000003,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":511,"ttft":381.063,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":510,"ttft":338.737,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":511,"ttft":338.003,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":511,"ttft":340.894,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":511,"ttft":335.517,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":510,"ttft":336.369,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":509,"ttft":334.538,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":509,"ttft":337.15500000000003,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":510,"ttft":334.853,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":510,"ttft":335.019,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":509,"ttft":346.488,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Bell & Evans","expected":"Meat & Seafood","got":"Dairy & Eggs","ms":510,"ttft":335.403,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Bell & Evans","expected":"Meat & Seafood","got":"Dairy & Eggs","ms":510,"ttft":334.685,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Bell & Evans","expected":"Meat & Seafood","got":"Dairy & Eggs","ms":511,"ttft":335.434,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Aidells","expected":"Meat & Seafood","got":"Baking","ms":508,"ttft":334.437,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Aidells","expected":"Meat & Seafood","got":"Bakery","ms":614,"ttft":436.178,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Aidells","expected":"Meat & Seafood","got":"Frozen","ms":509,"ttft":334.012,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Aidells","expected":"Meat & Seafood","got":"Bakery","ms":511,"ttft":335.14300000000003,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Aidells","expected":"Meat & Seafood","got":"Bakery","ms":510,"ttft":334.23900000000003,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Franz","expected":"Bakery","got":"Household","ms":608,"ttft":422.547,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Franz","expected":"Bakery","got":"Meat & Seafood","ms":511,"ttft":337.406,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Franz","expected":"Bakery","got":"Household","ms":507,"ttft":337.862,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Franz","expected":"Bakery","got":"Meat & Seafood","ms":510,"ttft":337.76,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Franz","expected":"Bakery","got":"Meat & Seafood","ms":506,"ttft":337.785,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Rudis","expected":"Bakery","got":"Dairy & Eggs","ms":510,"ttft":334.967,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Rudis","expected":"Bakery","got":"Snacks","ms":511,"ttft":335.894,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Rudis","expected":"Bakery","got":"Dairy & Eggs","ms":508,"ttft":333.948,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Rudis","expected":"Bakery","got":"Dairy & Eggs","ms":510,"ttft":334.561,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Rudis","expected":"Bakery","got":"Dairy & Eggs","ms":510,"ttft":334.645,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Alpine Valley","expected":"Bakery","got":"Dairy & Eggs","ms":511,"ttft":334.403,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Alpine Valley","expected":"Bakery","got":"Frozen","ms":508,"ttft":361.129,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Alpine Valley","expected":"Bakery","got":"Meat & Seafood","ms":509,"ttft":356.19,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Alpine Valley","expected":"Bakery","got":"Meat & Seafood","ms":509,"ttft":340.034,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Alpine Valley","expected":"Bakery","got":"Produce","ms":511,"ttft":334.551,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":510,"ttft":346.79900000000004,"promptTokens":181,"run":1}
+{"type":"call","variant":"v4","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":511,"ttft":357.493,"promptTokens":181,"run":2}
+{"type":"call","variant":"v4","item":"Aunt Millies","expected":"Bakery","got":"Household","ms":510,"ttft":338.63100000000003,"promptTokens":181,"run":3}
+{"type":"call","variant":"v4","item":"Aunt Millies","expected":"Bakery","got":"Dairy & Eggs","ms":510,"ttft":337.947,"promptTokens":181,"run":4}
+{"type":"call","variant":"v4","item":"Aunt Millies","expected":"Bakery","got":"Dairy & Eggs","ms":510,"ttft":338.443,"promptTokens":181,"run":5}
+{"type":"call","variant":"v4","item":"Brownberry","expected":"Bakery","got":"Snacks","ms":614,"ttft":479.55,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Brownberry","expected":"Bakery","got":"Baking","ms":511,"ttft":337.94,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Brownberry","expected":"Bakery","got":"Baking","ms":512,"ttft":336.996,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Brownberry","expected":"Bakery","got":"Snacks","ms":512,"ttft":337.896,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Brownberry","expected":"Bakery","got":"Snacks","ms":509,"ttft":337.076,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Michelinas","expected":"Frozen","got":"Baking","ms":510,"ttft":334.039,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Michelinas","expected":"Frozen","got":"Bakery","ms":508,"ttft":333.541,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Michelinas","expected":"Frozen","got":"Bakery","ms":509,"ttft":333.962,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Michelinas","expected":"Frozen","got":"Dairy & Eggs","ms":510,"ttft":334.326,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Michelinas","expected":"Frozen","got":"Meat & Seafood","ms":511,"ttft":334.298,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Banquet","expected":"Frozen","got":"Condiments","ms":509,"ttft":337.886,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Banquet","expected":"Frozen","got":"Condiments","ms":510,"ttft":340.485,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Banquet","expected":"Frozen","got":"Condiments","ms":506,"ttft":337.718,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Banquet","expected":"Frozen","got":"Condiments","ms":511,"ttft":340.323,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Banquet","expected":"Frozen","got":"Meat & Seafood","ms":511,"ttft":337.658,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Devour","expected":"Frozen","got":"Condiments","ms":617,"ttft":447.58,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Devour","expected":"Frozen","got":"Meat & Seafood","ms":510,"ttft":337.384,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Devour","expected":"Frozen","got":"Condiments","ms":507,"ttft":337.583,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Devour","expected":"Frozen","got":"Snacks","ms":511,"ttft":337.764,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Devour","expected":"Frozen","got":"Bakery","ms":512,"ttft":336.916,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":615,"ttft":425.55,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":509,"ttft":337.921,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":512,"ttft":337.665,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":511,"ttft":337.932,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":510,"ttft":337.615,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Alexia","expected":"Frozen","got":"Pantry","ms":510,"ttft":366.136,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Alexia","expected":"Frozen","got":"Frozen","ms":508,"ttft":337.698,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Alexia","expected":"Frozen","got":"Pantry","ms":511,"ttft":337.398,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Alexia","expected":"Frozen","got":"Frozen","ms":509,"ttft":337.868,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Alexia","expected":"Frozen","got":"Meat & Seafood","ms":510,"ttft":336.885,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Waterloo","expected":"Beverages","got":"Beverages","ms":509,"ttft":364.035,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Waterloo","expected":"Beverages","got":"Dairy & Eggs","ms":512,"ttft":337.65500000000003,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Waterloo","expected":"Beverages","got":"Other","ms":510,"ttft":338.184,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Waterloo","expected":"Beverages","got":"Household","ms":510,"ttft":337.836,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Waterloo","expected":"Beverages","got":"Household","ms":511,"ttft":336.972,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Bubly","expected":"Beverages","got":"Beverages","ms":609,"ttft":415.338,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Bubly","expected":"Beverages","got":"Beverages","ms":511,"ttft":333.82800000000003,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Bubly","expected":"Beverages","got":"Snacks","ms":510,"ttft":334.008,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Bubly","expected":"Beverages","got":"Beverages","ms":511,"ttft":334.24,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Bubly","expected":"Beverages","got":"Snacks","ms":611,"ttft":464.48400000000004,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":509,"ttft":337.845,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":509,"ttft":339.786,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":508,"ttft":337.649,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":508,"ttft":337.773,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Canada Dry","expected":"Beverages","got":"Beverages","ms":511,"ttft":338.05400000000003,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":510,"ttft":344.303,"promptTokens":181,"run":1}
+{"type":"call","variant":"v4","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":509,"ttft":338.038,"promptTokens":181,"run":2}
+{"type":"call","variant":"v4","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":510,"ttft":338.664,"promptTokens":181,"run":3}
+{"type":"call","variant":"v4","item":"Schweppes","expected":"Beverages","got":"Condiments","ms":509,"ttft":337.88800000000003,"promptTokens":181,"run":4}
+{"type":"call","variant":"v4","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":511,"ttft":338.101,"promptTokens":181,"run":5}
+{"type":"call","variant":"v4","item":"Jarritos","expected":"Beverages","got":"Frozen","ms":510,"ttft":344.117,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Jarritos","expected":"Beverages","got":"Snacks","ms":511,"ttft":337.557,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Jarritos","expected":"Beverages","got":"Condiments","ms":509,"ttft":337.475,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Jarritos","expected":"Beverages","got":"Condiments","ms":509,"ttft":337.88800000000003,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Jarritos","expected":"Beverages","got":"Condiments","ms":614,"ttft":425.257,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":508,"ttft":334.45300000000003,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":510,"ttft":333.579,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":510,"ttft":334.593,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":511,"ttft":334.692,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":613,"ttft":475.622,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":511,"ttft":349.922,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":510,"ttft":338.826,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Natural Light","expected":"Alcohol","got":"Bakery","ms":509,"ttft":337.079,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":511,"ttft":337.31,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Natural Light","expected":"Alcohol","got":"Baking","ms":511,"ttft":337.18,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":510,"ttft":333.93,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":507,"ttft":333.46500000000003,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":509,"ttft":333.971,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":511,"ttft":333.80400000000003,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":511,"ttft":360.294,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":509,"ttft":337.605,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":510,"ttft":338.511,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":509,"ttft":337.71,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":512,"ttft":337.785,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":612,"ttft":445.663,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":509,"ttft":337.882,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":508,"ttft":401.854,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":510,"ttft":338.462,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":505,"ttft":371.93600000000004,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":609,"ttft":378.43600000000004,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":510,"ttft":333.808,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":511,"ttft":333.65500000000003,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":510,"ttft":333.559,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":513,"ttft":336.839,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":510,"ttft":333.514,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Bugles","expected":"Snacks","got":"Baking","ms":510,"ttft":336.902,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Bugles","expected":"Snacks","got":"Condiments","ms":509,"ttft":337.154,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Bugles","expected":"Snacks","got":"Baking","ms":510,"ttft":337.681,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Bugles","expected":"Snacks","got":"Condiments","ms":510,"ttft":337.66700000000003,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Bugles","expected":"Snacks","got":"Snacks","ms":509,"ttft":343.789,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":511,"ttft":338.224,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":509,"ttft":337.273,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":508,"ttft":337.90000000000003,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":511,"ttft":363.985,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":512,"ttft":359.895,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":512,"ttft":346.062,"promptTokens":183,"run":1}
+{"type":"call","variant":"v4","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":512,"ttft":346.248,"promptTokens":183,"run":2}
+{"type":"call","variant":"v4","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":511,"ttft":345.952,"promptTokens":183,"run":3}
+{"type":"call","variant":"v4","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":614,"ttft":488.272,"promptTokens":183,"run":4}
+{"type":"call","variant":"v4","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":513,"ttft":345.933,"promptTokens":183,"run":5}
+{"type":"call","variant":"v4","item":"Late July","expected":"Snacks","got":"Condiments","ms":511,"ttft":338.495,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Late July","expected":"Snacks","got":"Beverages","ms":509,"ttft":337.37600000000003,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Late July","expected":"Snacks","got":"Condiments","ms":508,"ttft":337.794,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Late July","expected":"Snacks","got":"Baking","ms":509,"ttft":337.885,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Late July","expected":"Snacks","got":"Bakery","ms":509,"ttft":337.664,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":511,"ttft":334.02,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":512,"ttft":335.611,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Tasty Bite","expected":"Pantry","got":"Dairy & Eggs","ms":511,"ttft":335.409,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Tasty Bite","expected":"Pantry","got":"Dairy & Eggs","ms":509,"ttft":356.056,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":510,"ttft":334.573,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":509,"ttft":339.565,"promptTokens":181,"run":1}
+{"type":"call","variant":"v4","item":"Seeds of Change","expected":"Pantry","got":"Produce","ms":509,"ttft":338.543,"promptTokens":181,"run":2}
+{"type":"call","variant":"v4","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":511,"ttft":337.909,"promptTokens":181,"run":3}
+{"type":"call","variant":"v4","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":610,"ttft":467.925,"promptTokens":181,"run":4}
+{"type":"call","variant":"v4","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":512,"ttft":338.146,"promptTokens":181,"run":5}
+{"type":"call","variant":"v4","item":"Thai Kitchen","expected":"Pantry","got":"Alcohol","ms":509,"ttft":337.289,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":611,"ttft":337.397,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":612,"ttft":354.75600000000003,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":610,"ttft":349.975,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Thai Kitchen","expected":"Pantry","got":"Alcohol","ms":508,"ttft":338.186,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"San-J","expected":"Pantry","got":"Other","ms":508,"ttft":337.454,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"San-J","expected":"Pantry","got":"Meat & Seafood","ms":508,"ttft":337.21500000000003,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"San-J","expected":"Pantry","got":"Other","ms":509,"ttft":337.507,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"San-J","expected":"Pantry","got":"Condiments","ms":507,"ttft":338.04900000000004,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"San-J","expected":"Pantry","got":"Condiments","ms":511,"ttft":337.505,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":510,"ttft":337.22700000000003,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Eden Foods","expected":"Pantry","got":"Meat & Seafood","ms":508,"ttft":334.089,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":512,"ttft":334.982,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":508,"ttft":333.962,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":510,"ttft":335.428,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Swans Down","expected":"Baking","got":"Meat & Seafood","ms":511,"ttft":334.058,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Swans Down","expected":"Baking","got":"Baking","ms":510,"ttft":334.37,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Swans Down","expected":"Baking","got":"Meat & Seafood","ms":613,"ttft":374.753,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Swans Down","expected":"Baking","got":"Meat & Seafood","ms":511,"ttft":334.111,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Swans Down","expected":"Baking","got":"Meat & Seafood","ms":512,"ttft":334.401,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"White Lily","expected":"Baking","got":"Baking","ms":511,"ttft":335.624,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"White Lily","expected":"Baking","got":"Bakery","ms":510,"ttft":336.76800000000003,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"White Lily","expected":"Baking","got":"Bakery","ms":612,"ttft":475.587,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"White Lily","expected":"Baking","got":"Bakery","ms":511,"ttft":337.457,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"White Lily","expected":"Baking","got":"Bakery","ms":511,"ttft":337.144,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":511,"ttft":342.47700000000003,"promptTokens":182,"run":1}
+{"type":"call","variant":"v4","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":510,"ttft":342.291,"promptTokens":182,"run":2}
+{"type":"call","variant":"v4","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":509,"ttft":341.821,"promptTokens":182,"run":3}
+{"type":"call","variant":"v4","item":"Hodgson Mill","expected":"Baking","got":"Pantry","ms":511,"ttft":341.618,"promptTokens":182,"run":4}
+{"type":"call","variant":"v4","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":509,"ttft":341.818,"promptTokens":182,"run":5}
+{"type":"call","variant":"v4","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":510,"ttft":334.26800000000003,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":508,"ttft":334.673,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":511,"ttft":359.136,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":511,"ttft":335.443,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":508,"ttft":334.308,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Guittard","expected":"Baking","got":"Bakery","ms":510,"ttft":334.431,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Guittard","expected":"Baking","got":"Baking","ms":511,"ttft":336.559,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Guittard","expected":"Baking","got":"Baking","ms":614,"ttft":432.293,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Guittard","expected":"Baking","got":"Baking","ms":512,"ttft":333.552,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Guittard","expected":"Baking","got":"Baking","ms":506,"ttft":336.719,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Lea & Perrins","expected":"Condiments","got":"Household","ms":510,"ttft":342.535,"promptTokens":182,"run":1}
+{"type":"call","variant":"v4","item":"Lea & Perrins","expected":"Condiments","got":"Meat & Seafood","ms":613,"ttft":378.209,"promptTokens":182,"run":2}
+{"type":"call","variant":"v4","item":"Lea & Perrins","expected":"Condiments","got":"Household","ms":509,"ttft":347.249,"promptTokens":182,"run":3}
+{"type":"call","variant":"v4","item":"Lea & Perrins","expected":"Condiments","got":"Beverages","ms":509,"ttft":342.61,"promptTokens":182,"run":4}
+{"type":"call","variant":"v4","item":"Lea & Perrins","expected":"Condiments","got":"Beverages","ms":510,"ttft":341.955,"promptTokens":182,"run":5}
+{"type":"call","variant":"v4","item":"Maille","expected":"Condiments","got":"Household","ms":508,"ttft":337.399,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Maille","expected":"Condiments","got":"Baking","ms":508,"ttft":338.115,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Maille","expected":"Condiments","got":"Baking","ms":509,"ttft":373.032,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Maille","expected":"Condiments","got":"Household","ms":510,"ttft":337.64,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Maille","expected":"Condiments","got":"Household","ms":511,"ttft":336.817,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":510,"ttft":337.515,"promptTokens":181,"run":1}
+{"type":"call","variant":"v4","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":510,"ttft":341.29,"promptTokens":181,"run":2}
+{"type":"call","variant":"v4","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":511,"ttft":340.647,"promptTokens":181,"run":3}
+{"type":"call","variant":"v4","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":509,"ttft":337.981,"promptTokens":181,"run":4}
+{"type":"call","variant":"v4","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":511,"ttft":338.301,"promptTokens":181,"run":5}
+{"type":"call","variant":"v4","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":511,"ttft":337.593,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":508,"ttft":363.25,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":508,"ttft":369.921,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":512,"ttft":337.672,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":511,"ttft":337.603,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"El Yucateco","expected":"Condiments","got":"Other","ms":511,"ttft":341.53700000000003,"promptTokens":182,"run":1}
+{"type":"call","variant":"v4","item":"El Yucateco","expected":"Condiments","got":"Condiments","ms":716,"ttft":463.504,"promptTokens":182,"run":2}
+{"type":"call","variant":"v4","item":"El Yucateco","expected":"Condiments","got":"Other","ms":511,"ttft":343.336,"promptTokens":182,"run":3}
+{"type":"call","variant":"v4","item":"El Yucateco","expected":"Condiments","got":"Meat & Seafood","ms":510,"ttft":341.791,"promptTokens":182,"run":4}
+{"type":"call","variant":"v4","item":"El Yucateco","expected":"Condiments","got":"Other","ms":511,"ttft":342.122,"promptTokens":182,"run":5}
+{"type":"call","variant":"v4","item":"Zep","expected":"Household","got":"Baking","ms":510,"ttft":337.831,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Zep","expected":"Household","got":"Beverages","ms":512,"ttft":337.322,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Zep","expected":"Household","got":"Household","ms":510,"ttft":337.743,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Zep","expected":"Household","got":"Baking","ms":512,"ttft":337.601,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Zep","expected":"Household","got":"Baking","ms":509,"ttft":336.685,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Goo Gone","expected":"Household","got":"Household","ms":508,"ttft":333.996,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Goo Gone","expected":"Household","got":"Household","ms":508,"ttft":360.106,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Goo Gone","expected":"Household","got":"Household","ms":510,"ttft":337.634,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Goo Gone","expected":"Household","got":"Household","ms":510,"ttft":333.442,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Goo Gone","expected":"Household","got":"Household","ms":509,"ttft":333.984,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Bon Ami","expected":"Household","got":"Household","ms":509,"ttft":334.041,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Bon Ami","expected":"Household","got":"Household","ms":614,"ttft":428.72,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Bon Ami","expected":"Household","got":"Household","ms":508,"ttft":333.62,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Bon Ami","expected":"Household","got":"Household","ms":510,"ttft":334.086,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Bon Ami","expected":"Household","got":"Household","ms":507,"ttft":333.81600000000003,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Soft Scrub","expected":"Household","got":"Household","ms":508,"ttft":340.702,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Soft Scrub","expected":"Household","got":"Household","ms":510,"ttft":419.68,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Soft Scrub","expected":"Household","got":"Household","ms":509,"ttft":335.993,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Soft Scrub","expected":"Household","got":"Household","ms":509,"ttft":333.798,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Soft Scrub","expected":"Household","got":"Household","ms":511,"ttft":333.999,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Formula 409","expected":"Household","got":"Household","ms":512,"ttft":333.79200000000003,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Formula 409","expected":"Household","got":"Household","ms":509,"ttft":333.57800000000003,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Formula 409","expected":"Household","got":"Household","ms":509,"ttft":336.076,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Formula 409","expected":"Household","got":"Household","ms":509,"ttft":334.095,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Formula 409","expected":"Household","got":"Household","ms":511,"ttft":333.69100000000003,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":510,"ttft":335.471,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":510,"ttft":338.42900000000003,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":511,"ttft":333.562,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":512,"ttft":333.781,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":510,"ttft":333.582,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":510,"ttft":340.258,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":612,"ttft":418.957,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":508,"ttft":333.89300000000003,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":512,"ttft":334.00600000000003,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"St Ives","expected":"Personal Care","got":"Household","ms":510,"ttft":334.515,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Ponds","expected":"Personal Care","got":"Pet","ms":511,"ttft":403.469,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Ponds","expected":"Personal Care","got":"Pet","ms":509,"ttft":366.939,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Ponds","expected":"Personal Care","got":"Pet","ms":511,"ttft":337.539,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Ponds","expected":"Personal Care","got":"Pet","ms":511,"ttft":337.348,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Ponds","expected":"Personal Care","got":"Household","ms":510,"ttft":337.41200000000003,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":510,"ttft":333.461,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":510,"ttft":335.783,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Noxzema","expected":"Personal Care","got":"Household","ms":511,"ttft":334.319,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":509,"ttft":335.202,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":510,"ttft":334.25600000000003,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Biore","expected":"Personal Care","got":"Household","ms":511,"ttft":349.875,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Biore","expected":"Personal Care","got":"Produce","ms":509,"ttft":338.36,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Biore","expected":"Personal Care","got":"Produce","ms":511,"ttft":337.311,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Biore","expected":"Personal Care","got":"Frozen","ms":510,"ttft":337.517,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Biore","expected":"Personal Care","got":"Frozen","ms":509,"ttft":337.178,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Alpo","expected":"Pet","got":"Pet","ms":509,"ttft":365.669,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Alpo","expected":"Pet","got":"Pet","ms":509,"ttft":377.341,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Alpo","expected":"Pet","got":"Pet","ms":509,"ttft":337.904,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Alpo","expected":"Pet","got":"Pet","ms":509,"ttft":337.24,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Alpo","expected":"Pet","got":"Pet","ms":510,"ttft":336.708,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Nutrish","expected":"Pet","got":"Pet","ms":511,"ttft":408.07300000000004,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Nutrish","expected":"Pet","got":"Pet","ms":508,"ttft":358.079,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Nutrish","expected":"Pet","got":"Pet","ms":510,"ttft":337.408,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Nutrish","expected":"Pet","got":"Pet","ms":509,"ttft":337.29200000000003,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Nutrish","expected":"Pet","got":"Pet","ms":509,"ttft":340.649,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Merrick","expected":"Pet","got":"Pet","ms":510,"ttft":337.003,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Merrick","expected":"Pet","got":"Dairy & Eggs","ms":510,"ttft":336.868,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Merrick","expected":"Pet","got":"Pet","ms":512,"ttft":337.642,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Merrick","expected":"Pet","got":"Pet","ms":508,"ttft":336.758,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Merrick","expected":"Pet","got":"Pet","ms":509,"ttft":336.672,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Instinct","expected":"Pet","got":"Pet","ms":511,"ttft":362.002,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Instinct","expected":"Pet","got":"Pet","ms":509,"ttft":338.67900000000003,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Instinct","expected":"Pet","got":"Pet","ms":509,"ttft":337.113,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Instinct","expected":"Pet","got":"Pet","ms":508,"ttft":336.947,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Instinct","expected":"Pet","got":"Pet","ms":508,"ttft":336.936,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":509,"ttft":361.694,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":509,"ttft":369.94,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":510,"ttft":334.505,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":511,"ttft":334.605,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":511,"ttft":335.194,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"NatureSweet","expected":"Produce","got":"Baking","ms":610,"ttft":445.883,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"NatureSweet","expected":"Produce","got":"Baking","ms":508,"ttft":339.439,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"NatureSweet","expected":"Produce","got":"Baking","ms":511,"ttft":337.317,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"NatureSweet","expected":"Produce","got":"Condiments","ms":510,"ttft":337.731,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"NatureSweet","expected":"Produce","got":"Baking","ms":512,"ttft":338.968,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Ocean Mist","expected":"Produce","got":"Household","ms":511,"ttft":337.079,"promptTokens":179,"run":1}
+{"type":"call","variant":"v4","item":"Ocean Mist","expected":"Produce","got":"Household","ms":509,"ttft":336.92400000000004,"promptTokens":179,"run":2}
+{"type":"call","variant":"v4","item":"Ocean Mist","expected":"Produce","got":"Household","ms":510,"ttft":337.12600000000003,"promptTokens":179,"run":3}
+{"type":"call","variant":"v4","item":"Ocean Mist","expected":"Produce","got":"Household","ms":510,"ttft":336.842,"promptTokens":179,"run":4}
+{"type":"call","variant":"v4","item":"Ocean Mist","expected":"Produce","got":"Household","ms":509,"ttft":336.85200000000003,"promptTokens":179,"run":5}
+{"type":"call","variant":"v4","item":"Grimmway","expected":"Produce","got":"Household","ms":508,"ttft":367.927,"promptTokens":181,"run":1}
+{"type":"call","variant":"v4","item":"Grimmway","expected":"Produce","got":"Baking","ms":511,"ttft":338.504,"promptTokens":181,"run":2}
+{"type":"call","variant":"v4","item":"Grimmway","expected":"Produce","got":"Household","ms":511,"ttft":337.694,"promptTokens":181,"run":3}
+{"type":"call","variant":"v4","item":"Grimmway","expected":"Produce","got":"Baking","ms":510,"ttft":337.791,"promptTokens":181,"run":4}
+{"type":"call","variant":"v4","item":"Grimmway","expected":"Produce","got":"Household","ms":509,"ttft":338.214,"promptTokens":181,"run":5}
+{"type":"call","variant":"v4","item":"Melissas","expected":"Produce","got":"Dairy & Eggs","ms":614,"ttft":415.104,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Melissas","expected":"Produce","got":"Bakery","ms":508,"ttft":339.468,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Melissas","expected":"Produce","got":"Bakery","ms":510,"ttft":334.172,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Melissas","expected":"Produce","got":"Dairy & Eggs","ms":511,"ttft":334.01800000000003,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Melissas","expected":"Produce","got":"Bakery","ms":510,"ttft":334.523,"promptTokens":180,"run":5}
+{"type":"call","variant":"v4","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":610,"ttft":465.531,"promptTokens":180,"run":1}
+{"type":"call","variant":"v4","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":509,"ttft":334.688,"promptTokens":180,"run":2}
+{"type":"call","variant":"v4","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":510,"ttft":335.142,"promptTokens":180,"run":3}
+{"type":"call","variant":"v4","item":"Manns","expected":"Produce","got":"Other","ms":509,"ttft":334.651,"promptTokens":180,"run":4}
+{"type":"call","variant":"v4","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":510,"ttft":366.981,"promptTokens":180,"run":5}
+{"type":"variant","variant":"v4","shots":4,"promptChars":354,"accuracy":0.343,"anyCorrect":0.5,"consistency":0.763,"nullRate":0,"msPerItem":519,"ttftPerItem":348,"promptTokens":180,"wrong":[{"item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry"},{"item":"Crystal Farms","expected":"Dairy & Eggs","got":"Beverages"},{"item":"Bell & Evans","expected":"Meat & Seafood","got":"Dairy & Eggs"},{"item":"Aidells","expected":"Meat & Seafood","got":"Bakery"},{"item":"Franz","expected":"Bakery","got":"Meat & Seafood"},{"item":"Rudis","expected":"Bakery","got":"Dairy & Eggs"},{"item":"Alpine Valley","expected":"Bakery","got":"Meat & Seafood"},{"item":"Aunt Millies","expected":"Bakery","got":"Baking"},{"item":"Brownberry","expected":"Bakery","got":"Snacks"},{"item":"Michelinas","expected":"Frozen","got":"Bakery"},{"item":"Banquet","expected":"Frozen","got":"Condiments"},{"item":"Devour","expected":"Frozen","got":"Condiments"},{"item":"Evol","expected":"Frozen","got":"Meat & Seafood"},{"item":"Alexia","expected":"Frozen","got":"Pantry"},{"item":"Waterloo","expected":"Beverages","got":"Household"},{"item":"Canada Dry","expected":"Beverages","got":"Condiments"},{"item":"Jarritos","expected":"Beverages","got":"Condiments"},{"item":"Pabst","expected":"Alcohol","got":"Beverages"},{"item":"Natural Light","expected":"Alcohol","got":"Beverages"},{"item":"Rolling Rock","expected":"Alcohol","got":"Beverages"},{"item":"New Belgium","expected":"Alcohol","got":"Beverages"},{"item":"Shiner","expected":"Alcohol","got":"Beverages"},{"item":"Bugles","expected":"Snacks","got":"Baking"},{"item":"Pop Secret","expected":"Snacks","got":"Condiments"},{"item":"Orville Redenbacher","expected":"Snacks","got":"Pantry"},{"item":"Late July","expected":"Snacks","got":"Condiments"},{"item":"Tasty Bite","expected":"Pantry","got":"Snacks"},{"item":"Seeds of Change","expected":"Pantry","got":"Beverages"},{"item":"Thai Kitchen","expected":"Pantry","got":"Condiments"},{"item":"San-J","expected":"Pantry","got":"Other"},{"item":"Eden Foods","expected":"Pantry","got":"Produce"},{"item":"Swans Down","expected":"Baking","got":"Meat & Seafood"},{"item":"White Lily","expected":"Baking","got":"Bakery"},{"item":"Lea & Perrins","expected":"Condiments","got":"Household"},{"item":"Maille","expected":"Condiments","got":"Household"},{"item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood"},{"item":"El Yucateco","expected":"Condiments","got":"Other"},{"item":"Zep","expected":"Household","got":"Baking"},{"item":"Ponds","expected":"Personal Care","got":"Pet"},{"item":"Biore","expected":"Personal Care","got":"Produce"},{"item":"Orijen","expected":"Pet","got":"Meat & Seafood"},{"item":"NatureSweet","expected":"Produce","got":"Baking"},{"item":"Ocean Mist","expected":"Produce","got":"Household"},{"item":"Grimmway","expected":"Produce","got":"Household"},{"item":"Melissas","expected":"Produce","got":"Bakery"},{"item":"Manns","expected":"Produce","got":"Meat & Seafood"}]}
+{"type":"variant-start","variant":"v2","shots":2,"promptChars":273,"promptTokensEst":68}
+{"type":"call","variant":"v2","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":410,"ttft":250.06900000000002,"promptTokens":130,"run":1}
+{"type":"meta-keys","variant":"v2","keys":["toolCalls","stats","raw","cacheableAssistantContent"],"stats":{"timeToFirstToken":250.06900000000002,"tokensPerSecond":89.9883015208023,"cacheTokens":0,"promptTokens":130,"generatedTokens":9,"backendDevice":"cpu"}}
+{"type":"call","variant":"v2","item":"Kite Hill","expected":"Dairy & Eggs","got":"Baking","ms":409,"ttft":249.75900000000001,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Kite Hill","expected":"Dairy & Eggs","got":"Baking","ms":405,"ttft":248.578,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Kite Hill","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":410,"ttft":249.891,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Kite Hill","expected":"Dairy & Eggs","got":"Bakery","ms":408,"ttft":249.693,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Good Culture","expected":"Dairy & Eggs","got":"Bakery","ms":407,"ttft":244.893,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Good Culture","expected":"Dairy & Eggs","got":"Bakery","ms":408,"ttft":255.767,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Good Culture","expected":"Dairy & Eggs","got":"Bakery","ms":407,"ttft":247,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Good Culture","expected":"Dairy & Eggs","got":"Baking","ms":409,"ttft":245.761,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Good Culture","expected":"Dairy & Eggs","got":"Bakery","ms":408,"ttft":245.793,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":407,"ttft":249.78300000000002,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":408,"ttft":249.904,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":407,"ttft":266.603,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":408,"ttft":269.085,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Stonyfield","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":408,"ttft":250.098,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":406,"ttft":249.773,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":406,"ttft":248.858,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":408,"ttft":249.589,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Belgioioso","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":508,"ttft":316.754,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry","ms":409,"ttft":260.157,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Frozen","ms":408,"ttft":245.68,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Baking","ms":408,"ttft":244.96800000000002,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Beverages","ms":405,"ttft":245.622,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":409,"ttft":246.29500000000002,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Crystal Farms","expected":"Dairy & Eggs","got":"Dairy & Eggs","ms":409,"ttft":245.89600000000002,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":410,"ttft":249.991,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":407,"ttft":250.202,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":408,"ttft":250.05100000000002,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":408,"ttft":250.144,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Boars Head","expected":"Meat & Seafood","got":"Meat & Seafood","ms":409,"ttft":250.102,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":409,"ttft":257.4,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":408,"ttft":246.02100000000002,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Wellshire","expected":"Meat & Seafood","got":"Produce","ms":407,"ttft":246.06,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":409,"ttft":245.211,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Wellshire","expected":"Meat & Seafood","got":"Meat & Seafood","ms":407,"ttft":246.022,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":407,"ttft":250.184,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":406,"ttft":250.213,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":509,"ttft":336.207,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":409,"ttft":250.229,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Niman Ranch","expected":"Meat & Seafood","got":"Meat & Seafood","ms":407,"ttft":250.149,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":408,"ttft":250.458,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":410,"ttft":249.448,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":409,"ttft":250.141,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Bell & Evans","expected":"Meat & Seafood","got":"Dairy & Eggs","ms":509,"ttft":352.534,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Bell & Evans","expected":"Meat & Seafood","got":"Meat & Seafood","ms":408,"ttft":250.22,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Aidells","expected":"Meat & Seafood","got":"Baking","ms":408,"ttft":250.203,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Aidells","expected":"Meat & Seafood","got":"Frozen","ms":409,"ttft":249.029,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Aidells","expected":"Meat & Seafood","got":"Bakery","ms":408,"ttft":248.543,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Aidells","expected":"Meat & Seafood","got":"Frozen","ms":408,"ttft":250.139,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Aidells","expected":"Meat & Seafood","got":"Condiments","ms":408,"ttft":249.08700000000002,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Franz","expected":"Bakery","got":"Baking","ms":407,"ttft":245.905,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Franz","expected":"Bakery","got":"Meat & Seafood","ms":408,"ttft":244.80100000000002,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Franz","expected":"Bakery","got":"Meat & Seafood","ms":408,"ttft":246.73600000000002,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Franz","expected":"Bakery","got":"Baking","ms":408,"ttft":246.20000000000002,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Franz","expected":"Bakery","got":"Condiments","ms":408,"ttft":245.965,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Rudis","expected":"Bakery","got":"Snacks","ms":409,"ttft":259.877,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Rudis","expected":"Bakery","got":"Snacks","ms":406,"ttft":249.465,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Rudis","expected":"Bakery","got":"Dairy & Eggs","ms":410,"ttft":248.75900000000001,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Rudis","expected":"Bakery","got":"Snacks","ms":409,"ttft":250.173,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Rudis","expected":"Bakery","got":"Snacks","ms":407,"ttft":248.596,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Alpine Valley","expected":"Bakery","got":"Produce","ms":409,"ttft":248.681,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Alpine Valley","expected":"Bakery","got":"Produce","ms":409,"ttft":275.583,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Alpine Valley","expected":"Bakery","got":"Produce","ms":408,"ttft":284.409,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Alpine Valley","expected":"Bakery","got":"Produce","ms":407,"ttft":250.13400000000001,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Alpine Valley","expected":"Bakery","got":"Meat & Seafood","ms":409,"ttft":248.803,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":408,"ttft":254.247,"promptTokens":131,"run":1}
+{"type":"call","variant":"v2","item":"Aunt Millies","expected":"Bakery","got":"Dairy & Eggs","ms":407,"ttft":253.085,"promptTokens":131,"run":2}
+{"type":"call","variant":"v2","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":409,"ttft":306.41200000000003,"promptTokens":131,"run":3}
+{"type":"call","variant":"v2","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":512,"ttft":327.385,"promptTokens":131,"run":4}
+{"type":"call","variant":"v2","item":"Aunt Millies","expected":"Bakery","got":"Baking","ms":408,"ttft":261.176,"promptTokens":131,"run":5}
+{"type":"call","variant":"v2","item":"Brownberry","expected":"Bakery","got":"Bakery","ms":409,"ttft":246.398,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Brownberry","expected":"Bakery","got":"Snacks","ms":408,"ttft":245.406,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Brownberry","expected":"Bakery","got":"Baking","ms":410,"ttft":245.65800000000002,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Brownberry","expected":"Bakery","got":"Snacks","ms":408,"ttft":246.535,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Brownberry","expected":"Bakery","got":"Bakery","ms":408,"ttft":246.03900000000002,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Michelinas","expected":"Frozen","got":"Bakery","ms":408,"ttft":250.06,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Michelinas","expected":"Frozen","got":"Bakery","ms":409,"ttft":250.082,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Michelinas","expected":"Frozen","got":"Bakery","ms":408,"ttft":250.26500000000001,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Michelinas","expected":"Frozen","got":"Bakery","ms":410,"ttft":250.113,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Michelinas","expected":"Frozen","got":"Bakery","ms":408,"ttft":269.962,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Banquet","expected":"Frozen","got":"Condiments","ms":409,"ttft":246.23600000000002,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Banquet","expected":"Frozen","got":"Condiments","ms":409,"ttft":246.567,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Banquet","expected":"Frozen","got":"Condiments","ms":511,"ttft":246.27,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Banquet","expected":"Frozen","got":"Condiments","ms":509,"ttft":245.663,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Banquet","expected":"Frozen","got":"Condiments","ms":509,"ttft":245.596,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Devour","expected":"Frozen","got":"Produce","ms":408,"ttft":259,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Devour","expected":"Frozen","got":"Frozen","ms":408,"ttft":262.38800000000003,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Devour","expected":"Frozen","got":"Meat & Seafood","ms":408,"ttft":245.526,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Devour","expected":"Frozen","got":"Frozen","ms":407,"ttft":246.249,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Devour","expected":"Frozen","got":"Meat & Seafood","ms":408,"ttft":245.747,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Evol","expected":"Frozen","got":"Produce","ms":409,"ttft":246.397,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":507,"ttft":313.841,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":405,"ttft":256.455,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":409,"ttft":247.05700000000002,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Evol","expected":"Frozen","got":"Meat & Seafood","ms":409,"ttft":246.338,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Alexia","expected":"Frozen","got":"Other","ms":407,"ttft":246.928,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Alexia","expected":"Frozen","got":"Condiments","ms":410,"ttft":246.28900000000002,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Alexia","expected":"Frozen","got":"Pantry","ms":410,"ttft":246.433,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Alexia","expected":"Frozen","got":"Pantry","ms":411,"ttft":245.037,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Alexia","expected":"Frozen","got":"Frozen","ms":409,"ttft":244.864,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Waterloo","expected":"Beverages","got":"Condiments","ms":407,"ttft":244.882,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Waterloo","expected":"Beverages","got":"Beverages","ms":409,"ttft":245.875,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Waterloo","expected":"Beverages","got":"Condiments","ms":408,"ttft":245.19,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Waterloo","expected":"Beverages","got":"Baking","ms":407,"ttft":271.476,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Waterloo","expected":"Beverages","got":"Condiments","ms":408,"ttft":246.37900000000002,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Bubly","expected":"Beverages","got":"Snacks","ms":408,"ttft":248.92000000000002,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Bubly","expected":"Beverages","got":"Condiments","ms":508,"ttft":250.127,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Bubly","expected":"Beverages","got":"Snacks","ms":410,"ttft":249.95600000000002,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Bubly","expected":"Beverages","got":"Snacks","ms":406,"ttft":250.171,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Bubly","expected":"Beverages","got":"Snacks","ms":407,"ttft":276.47,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":509,"ttft":332.289,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":409,"ttft":246.535,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":408,"ttft":246.89000000000001,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":408,"ttft":246.429,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Canada Dry","expected":"Beverages","got":"Condiments","ms":408,"ttft":246.226,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Schweppes","expected":"Beverages","got":"Condiments","ms":511,"ttft":295.199,"promptTokens":131,"run":1}
+{"type":"call","variant":"v2","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":408,"ttft":285.333,"promptTokens":131,"run":2}
+{"type":"call","variant":"v2","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":407,"ttft":254.36,"promptTokens":131,"run":3}
+{"type":"call","variant":"v2","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":407,"ttft":254.347,"promptTokens":131,"run":4}
+{"type":"call","variant":"v2","item":"Schweppes","expected":"Beverages","got":"Beverages","ms":409,"ttft":254.98600000000002,"promptTokens":131,"run":5}
+{"type":"call","variant":"v2","item":"Jarritos","expected":"Beverages","got":"Snacks","ms":407,"ttft":246.023,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Jarritos","expected":"Beverages","got":"Condiments","ms":408,"ttft":247.328,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Jarritos","expected":"Beverages","got":"Condiments","ms":409,"ttft":246.44,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Jarritos","expected":"Beverages","got":"Dairy & Eggs","ms":410,"ttft":246.346,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Jarritos","expected":"Beverages","got":"Frozen","ms":408,"ttft":246.74800000000002,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":406,"ttft":251.536,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":409,"ttft":249.87800000000001,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":410,"ttft":270.257,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":409,"ttft":250.699,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Pabst","expected":"Alcohol","got":"Beverages","ms":408,"ttft":249.99,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":407,"ttft":246.39600000000002,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Natural Light","expected":"Alcohol","got":"Bakery","ms":409,"ttft":245.83100000000002,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":408,"ttft":246.008,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":408,"ttft":251.273,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Natural Light","expected":"Alcohol","got":"Beverages","ms":511,"ttft":303.807,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":409,"ttft":249.915,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":407,"ttft":250.70000000000002,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":408,"ttft":250.239,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":409,"ttft":250.382,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Rolling Rock","expected":"Alcohol","got":"Beverages","ms":409,"ttft":250.857,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":509,"ttft":351.991,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":409,"ttft":246.495,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":407,"ttft":246.44,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":405,"ttft":246.36100000000002,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"New Belgium","expected":"Alcohol","got":"Beverages","ms":411,"ttft":246.34,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":407,"ttft":246.174,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":410,"ttft":246.578,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":408,"ttft":247.421,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":410,"ttft":246.583,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Shiner","expected":"Alcohol","got":"Beverages","ms":408,"ttft":246.711,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":408,"ttft":250.499,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":404,"ttft":252.00900000000001,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":409,"ttft":253.416,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":410,"ttft":249.828,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Funyuns","expected":"Snacks","got":"Snacks","ms":408,"ttft":249.68800000000002,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Bugles","expected":"Snacks","got":"Condiments","ms":406,"ttft":245.065,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Bugles","expected":"Snacks","got":"Snacks","ms":407,"ttft":249.28,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Bugles","expected":"Snacks","got":"Condiments","ms":409,"ttft":245.368,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Bugles","expected":"Snacks","got":"Snacks","ms":408,"ttft":261.55,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Bugles","expected":"Snacks","got":"Condiments","ms":511,"ttft":304.544,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":409,"ttft":247.191,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":409,"ttft":246.048,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":407,"ttft":246.494,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":408,"ttft":247.836,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Pop Secret","expected":"Snacks","got":"Condiments","ms":408,"ttft":298.09000000000003,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":406,"ttft":297.307,"promptTokens":133,"run":1}
+{"type":"call","variant":"v2","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":409,"ttft":255.437,"promptTokens":133,"run":2}
+{"type":"call","variant":"v2","item":"Orville Redenbacher","expected":"Snacks","got":"Baking","ms":406,"ttft":255.28,"promptTokens":133,"run":3}
+{"type":"call","variant":"v2","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":408,"ttft":254.859,"promptTokens":133,"run":4}
+{"type":"call","variant":"v2","item":"Orville Redenbacher","expected":"Snacks","got":"Pantry","ms":411,"ttft":255.058,"promptTokens":133,"run":5}
+{"type":"call","variant":"v2","item":"Late July","expected":"Snacks","got":"Frozen","ms":409,"ttft":246.354,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Late July","expected":"Snacks","got":"Dairy & Eggs","ms":408,"ttft":246.64600000000002,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Late July","expected":"Snacks","got":"Frozen","ms":409,"ttft":246.752,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Late July","expected":"Snacks","got":"Pantry","ms":409,"ttft":246.481,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Late July","expected":"Snacks","got":"Frozen","ms":409,"ttft":245.023,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Tasty Bite","expected":"Pantry","got":"Bakery","ms":406,"ttft":250.675,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Tasty Bite","expected":"Pantry","got":"Baking","ms":407,"ttft":276.958,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Tasty Bite","expected":"Pantry","got":"Snacks","ms":409,"ttft":250.92000000000002,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Tasty Bite","expected":"Pantry","got":"Meat & Seafood","ms":408,"ttft":249.257,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Tasty Bite","expected":"Pantry","got":"Dairy & Eggs","ms":407,"ttft":250.731,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Seeds of Change","expected":"Pantry","got":"Baking","ms":409,"ttft":254.773,"promptTokens":131,"run":1}
+{"type":"call","variant":"v2","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":406,"ttft":256.47700000000003,"promptTokens":131,"run":2}
+{"type":"call","variant":"v2","item":"Seeds of Change","expected":"Pantry","got":"Baking","ms":408,"ttft":260.88800000000003,"promptTokens":131,"run":3}
+{"type":"call","variant":"v2","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":508,"ttft":294.636,"promptTokens":131,"run":4}
+{"type":"call","variant":"v2","item":"Seeds of Change","expected":"Pantry","got":"Beverages","ms":408,"ttft":254.781,"promptTokens":131,"run":5}
+{"type":"call","variant":"v2","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":512,"ttft":246.794,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":510,"ttft":246.601,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Thai Kitchen","expected":"Pantry","got":"Alcohol","ms":409,"ttft":247.393,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Thai Kitchen","expected":"Pantry","got":"Condiments","ms":511,"ttft":299.232,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Thai Kitchen","expected":"Pantry","got":"Snacks","ms":510,"ttft":274.686,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"San-J","expected":"Pantry","got":"Produce","ms":411,"ttft":246.249,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"San-J","expected":"Pantry","got":"Condiments","ms":409,"ttft":246.51500000000001,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"San-J","expected":"Pantry","got":"Other","ms":409,"ttft":246.761,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"San-J","expected":"Pantry","got":"Condiments","ms":410,"ttft":246.757,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"San-J","expected":"Pantry","got":"Condiments","ms":409,"ttft":245.314,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":406,"ttft":249.035,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":410,"ttft":250.292,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":409,"ttft":250.229,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":410,"ttft":249.594,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Eden Foods","expected":"Pantry","got":"Produce","ms":410,"ttft":249.90800000000002,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Swans Down","expected":"Baking","got":"Meat & Seafood","ms":409,"ttft":258.365,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Swans Down","expected":"Baking","got":"Meat & Seafood","ms":409,"ttft":251.034,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Swans Down","expected":"Baking","got":"Baking","ms":410,"ttft":250.78,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Swans Down","expected":"Baking","got":"Pantry","ms":409,"ttft":250.389,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Swans Down","expected":"Baking","got":"Dairy & Eggs","ms":409,"ttft":249.172,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"White Lily","expected":"Baking","got":"Baking","ms":409,"ttft":246.576,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"White Lily","expected":"Baking","got":"Baking","ms":408,"ttft":271.472,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"White Lily","expected":"Baking","got":"Baking","ms":508,"ttft":341.671,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"White Lily","expected":"Baking","got":"Bakery","ms":410,"ttft":245.428,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"White Lily","expected":"Baking","got":"Baking","ms":410,"ttft":245.198,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":409,"ttft":249.907,"promptTokens":132,"run":1}
+{"type":"call","variant":"v2","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":407,"ttft":250.627,"promptTokens":132,"run":2}
+{"type":"call","variant":"v2","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":408,"ttft":275.321,"promptTokens":132,"run":3}
+{"type":"call","variant":"v2","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":509,"ttft":345.714,"promptTokens":132,"run":4}
+{"type":"call","variant":"v2","item":"Hodgson Mill","expected":"Baking","got":"Baking","ms":406,"ttft":251.642,"promptTokens":132,"run":5}
+{"type":"call","variant":"v2","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":411,"ttft":250.705,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":407,"ttft":257.64300000000003,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":410,"ttft":250.817,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":408,"ttft":250.934,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Arrowhead Mills","expected":"Baking","got":"Baking","ms":407,"ttft":250.572,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Guittard","expected":"Baking","got":"Baking","ms":408,"ttft":250.81900000000002,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Guittard","expected":"Baking","got":"Condiments","ms":410,"ttft":253.056,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Guittard","expected":"Baking","got":"Dairy & Eggs","ms":409,"ttft":250.738,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Guittard","expected":"Baking","got":"Pantry","ms":406,"ttft":253.23000000000002,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Guittard","expected":"Baking","got":"Baking","ms":407,"ttft":275.70300000000003,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Lea & Perrins","expected":"Condiments","got":"Condiments","ms":408,"ttft":251.275,"promptTokens":132,"run":1}
+{"type":"call","variant":"v2","item":"Lea & Perrins","expected":"Condiments","got":"Baking","ms":409,"ttft":251.25900000000001,"promptTokens":132,"run":2}
+{"type":"call","variant":"v2","item":"Lea & Perrins","expected":"Condiments","got":"Meat & Seafood","ms":410,"ttft":251.386,"promptTokens":132,"run":3}
+{"type":"call","variant":"v2","item":"Lea & Perrins","expected":"Condiments","got":"Beverages","ms":408,"ttft":251.62,"promptTokens":132,"run":4}
+{"type":"call","variant":"v2","item":"Lea & Perrins","expected":"Condiments","got":"Condiments","ms":405,"ttft":256.52,"promptTokens":132,"run":5}
+{"type":"call","variant":"v2","item":"Maille","expected":"Condiments","got":"Condiments","ms":409,"ttft":260.11,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Maille","expected":"Condiments","got":"Baking","ms":409,"ttft":277.317,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Maille","expected":"Condiments","got":"Baking","ms":409,"ttft":251.4,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Maille","expected":"Condiments","got":"Meat & Seafood","ms":408,"ttft":247.08,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Maille","expected":"Condiments","got":"Baking","ms":408,"ttft":248.131,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":406,"ttft":254.772,"promptTokens":131,"run":1}
+{"type":"call","variant":"v2","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":408,"ttft":255.024,"promptTokens":131,"run":2}
+{"type":"call","variant":"v2","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":507,"ttft":313.851,"promptTokens":131,"run":3}
+{"type":"call","variant":"v2","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":409,"ttft":260.409,"promptTokens":131,"run":4}
+{"type":"call","variant":"v2","item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood","ms":407,"ttft":255.255,"promptTokens":131,"run":5}
+{"type":"call","variant":"v2","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":409,"ttft":247.45000000000002,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":409,"ttft":245.137,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":407,"ttft":251.131,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":407,"ttft":247.75300000000001,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Texas Pete","expected":"Condiments","got":"Condiments","ms":409,"ttft":248.06,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"El Yucateco","expected":"Condiments","got":"Other","ms":510,"ttft":251.288,"promptTokens":132,"run":1}
+{"type":"call","variant":"v2","item":"El Yucateco","expected":"Condiments","got":"Condiments","ms":510,"ttft":250.654,"promptTokens":132,"run":2}
+{"type":"call","variant":"v2","item":"El Yucateco","expected":"Condiments","got":"Condiments","ms":510,"ttft":251.375,"promptTokens":132,"run":3}
+{"type":"call","variant":"v2","item":"El Yucateco","expected":"Condiments","got":"Condiments","ms":509,"ttft":273.99,"promptTokens":132,"run":4}
+{"type":"call","variant":"v2","item":"El Yucateco","expected":"Condiments","got":"Condiments","ms":509,"ttft":251.654,"promptTokens":132,"run":5}
+{"type":"call","variant":"v2","item":"Zep","expected":"Household","got":"Bakery","ms":409,"ttft":245.538,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Zep","expected":"Household","got":"Baking","ms":410,"ttft":246.278,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Zep","expected":"Household","got":"Beverages","ms":406,"ttft":245.858,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Zep","expected":"Household","got":"Baking","ms":408,"ttft":246.619,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Zep","expected":"Household","got":"Beverages","ms":407,"ttft":254.53,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Goo Gone","expected":"Household","got":"Household","ms":511,"ttft":323.15500000000003,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Goo Gone","expected":"Household","got":"Household","ms":410,"ttft":249.958,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Goo Gone","expected":"Household","got":"Household","ms":408,"ttft":248.864,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Goo Gone","expected":"Household","got":"Household","ms":410,"ttft":250.728,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Goo Gone","expected":"Household","got":"Household","ms":409,"ttft":249.66,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Bon Ami","expected":"Household","got":"Dairy & Eggs","ms":508,"ttft":300.289,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Bon Ami","expected":"Household","got":"Household","ms":407,"ttft":270.41700000000003,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Bon Ami","expected":"Household","got":"Household","ms":408,"ttft":251.211,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Bon Ami","expected":"Household","got":"Baking","ms":406,"ttft":250.763,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Bon Ami","expected":"Household","got":"Household","ms":409,"ttft":250.09,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Soft Scrub","expected":"Household","got":"Household","ms":407,"ttft":250.961,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Soft Scrub","expected":"Household","got":"Household","ms":409,"ttft":250.07,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Soft Scrub","expected":"Household","got":"Household","ms":408,"ttft":249.886,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Soft Scrub","expected":"Household","got":"Household","ms":408,"ttft":249.745,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Soft Scrub","expected":"Household","got":"Household","ms":407,"ttft":249.704,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Formula 409","expected":"Household","got":"Household","ms":407,"ttft":252.332,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Formula 409","expected":"Household","got":"Household","ms":408,"ttft":249.70000000000002,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Formula 409","expected":"Household","got":"Household","ms":410,"ttft":260.50600000000003,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Formula 409","expected":"Household","got":"Household","ms":407,"ttft":250.489,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Formula 409","expected":"Household","got":"Household","ms":407,"ttft":250.409,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":407,"ttft":250.078,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":405,"ttft":249.699,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":407,"ttft":249.553,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Curel","expected":"Personal Care","got":"Pet","ms":409,"ttft":278.287,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Curel","expected":"Personal Care","got":"Personal Care","ms":509,"ttft":356.943,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":409,"ttft":250.49,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"St Ives","expected":"Personal Care","got":"Personal Care","ms":405,"ttft":250.608,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"St Ives","expected":"Personal Care","got":"Condiments","ms":510,"ttft":250.63400000000001,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"St Ives","expected":"Personal Care","got":"Household","ms":410,"ttft":249.079,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"St Ives","expected":"Personal Care","got":"Condiments","ms":512,"ttft":327.107,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Ponds","expected":"Personal Care","got":"Pet","ms":407,"ttft":306.541,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Ponds","expected":"Personal Care","got":"Pet","ms":409,"ttft":248.018,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Ponds","expected":"Personal Care","got":"Pet","ms":408,"ttft":246.067,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Ponds","expected":"Personal Care","got":"Pet","ms":410,"ttft":246.086,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Ponds","expected":"Personal Care","got":"Beverages","ms":406,"ttft":245.766,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":406,"ttft":252.042,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":408,"ttft":249.631,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":405,"ttft":249.24800000000002,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":409,"ttft":249.38500000000002,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Noxzema","expected":"Personal Care","got":"Personal Care","ms":408,"ttft":251.377,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Biore","expected":"Personal Care","got":"Produce","ms":407,"ttft":246.703,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Biore","expected":"Personal Care","got":"Produce","ms":408,"ttft":264.948,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Biore","expected":"Personal Care","got":"Produce","ms":405,"ttft":246.907,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Biore","expected":"Personal Care","got":"Produce","ms":409,"ttft":246.144,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Biore","expected":"Personal Care","got":"Produce","ms":406,"ttft":245.621,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Alpo","expected":"Pet","got":"Pet","ms":409,"ttft":245.589,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Alpo","expected":"Pet","got":"Pet","ms":408,"ttft":245.68200000000002,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Alpo","expected":"Pet","got":"Pet","ms":409,"ttft":273.521,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Alpo","expected":"Pet","got":"Pet","ms":408,"ttft":313.94100000000003,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Alpo","expected":"Pet","got":"Pet","ms":408,"ttft":251.413,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Nutrish","expected":"Pet","got":"Pet","ms":408,"ttft":245.425,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Nutrish","expected":"Pet","got":"Pet","ms":409,"ttft":245.561,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Nutrish","expected":"Pet","got":"Pet","ms":409,"ttft":245.489,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Nutrish","expected":"Pet","got":"Pet","ms":410,"ttft":245.433,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Nutrish","expected":"Pet","got":"Pet","ms":408,"ttft":289.052,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Merrick","expected":"Pet","got":"Pet","ms":409,"ttft":291.887,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Merrick","expected":"Pet","got":"Pet","ms":409,"ttft":247.056,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Merrick","expected":"Pet","got":"Pet","ms":410,"ttft":245.225,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Merrick","expected":"Pet","got":"Pet","ms":409,"ttft":245.205,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Merrick","expected":"Pet","got":"Pet","ms":410,"ttft":245.22400000000002,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Instinct","expected":"Pet","got":"Pet","ms":410,"ttft":245.221,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Instinct","expected":"Pet","got":"Pet","ms":408,"ttft":246.199,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Instinct","expected":"Pet","got":"Pet","ms":410,"ttft":244.98600000000002,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Instinct","expected":"Pet","got":"Pet","ms":406,"ttft":246.56,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Instinct","expected":"Pet","got":"Pet","ms":410,"ttft":247.663,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":409,"ttft":248.871,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":405,"ttft":253.64000000000001,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":408,"ttft":251.011,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":408,"ttft":250.691,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Orijen","expected":"Pet","got":"Meat & Seafood","ms":407,"ttft":250.941,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"NatureSweet","expected":"Produce","got":"Baking","ms":406,"ttft":247.75400000000002,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"NatureSweet","expected":"Produce","got":"Baking","ms":407,"ttft":246.03,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"NatureSweet","expected":"Produce","got":"Baking","ms":409,"ttft":270.574,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"NatureSweet","expected":"Produce","got":"Baking","ms":512,"ttft":330.986,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"NatureSweet","expected":"Produce","got":"Baking","ms":406,"ttft":245.62,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Ocean Mist","expected":"Produce","got":"Household","ms":409,"ttft":245.58,"promptTokens":129,"run":1}
+{"type":"call","variant":"v2","item":"Ocean Mist","expected":"Produce","got":"Beverages","ms":409,"ttft":246.514,"promptTokens":129,"run":2}
+{"type":"call","variant":"v2","item":"Ocean Mist","expected":"Produce","got":"Beverages","ms":409,"ttft":245.927,"promptTokens":129,"run":3}
+{"type":"call","variant":"v2","item":"Ocean Mist","expected":"Produce","got":"Household","ms":408,"ttft":245.727,"promptTokens":129,"run":4}
+{"type":"call","variant":"v2","item":"Ocean Mist","expected":"Produce","got":"Household","ms":511,"ttft":318.423,"promptTokens":129,"run":5}
+{"type":"call","variant":"v2","item":"Grimmway","expected":"Produce","got":"Frozen","ms":407,"ttft":254.94400000000002,"promptTokens":131,"run":1}
+{"type":"call","variant":"v2","item":"Grimmway","expected":"Produce","got":"Household","ms":408,"ttft":254.576,"promptTokens":131,"run":2}
+{"type":"call","variant":"v2","item":"Grimmway","expected":"Produce","got":"Baking","ms":408,"ttft":254.33700000000002,"promptTokens":131,"run":3}
+{"type":"call","variant":"v2","item":"Grimmway","expected":"Produce","got":"Beverages","ms":409,"ttft":254.395,"promptTokens":131,"run":4}
+{"type":"call","variant":"v2","item":"Grimmway","expected":"Produce","got":"Beverages","ms":407,"ttft":254.511,"promptTokens":131,"run":5}
+{"type":"call","variant":"v2","item":"Melissas","expected":"Produce","got":"Bakery","ms":409,"ttft":250.531,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Melissas","expected":"Produce","got":"Snacks","ms":409,"ttft":250.201,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Melissas","expected":"Produce","got":"Bakery","ms":409,"ttft":249.076,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Melissas","expected":"Produce","got":"Bakery","ms":408,"ttft":263.348,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Melissas","expected":"Produce","got":"Bakery","ms":408,"ttft":250.797,"promptTokens":130,"run":5}
+{"type":"call","variant":"v2","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":407,"ttft":272.466,"promptTokens":130,"run":1}
+{"type":"call","variant":"v2","item":"Manns","expected":"Produce","got":"Condiments","ms":408,"ttft":251.453,"promptTokens":130,"run":2}
+{"type":"call","variant":"v2","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":410,"ttft":251.469,"promptTokens":130,"run":3}
+{"type":"call","variant":"v2","item":"Manns","expected":"Produce","got":"Meat & Seafood","ms":512,"ttft":279.95,"promptTokens":130,"run":4}
+{"type":"call","variant":"v2","item":"Manns","expected":"Produce","got":"Condiments","ms":405,"ttft":252.477,"promptTokens":130,"run":5}
+{"type":"variant","variant":"v2","shots":2,"promptChars":273,"accuracy":0.414,"anyCorrect":0.5,"consistency":0.763,"nullRate":0,"msPerItem":418,"ttftPerItem":256,"promptTokens":130,"wrong":[{"item":"Good Culture","expected":"Dairy & Eggs","got":"Bakery"},{"item":"Belgioioso","expected":"Dairy & Eggs","got":"Pantry"},{"item":"Aidells","expected":"Meat & Seafood","got":"Frozen"},{"item":"Franz","expected":"Bakery","got":"Baking"},{"item":"Rudis","expected":"Bakery","got":"Snacks"},{"item":"Alpine Valley","expected":"Bakery","got":"Produce"},{"item":"Aunt Millies","expected":"Bakery","got":"Baking"},{"item":"Michelinas","expected":"Frozen","got":"Bakery"},{"item":"Banquet","expected":"Frozen","got":"Condiments"},{"item":"Evol","expected":"Frozen","got":"Meat & Seafood"},{"item":"Alexia","expected":"Frozen","got":"Pantry"},{"item":"Waterloo","expected":"Beverages","got":"Condiments"},{"item":"Bubly","expected":"Beverages","got":"Snacks"},{"item":"Canada Dry","expected":"Beverages","got":"Condiments"},{"item":"Jarritos","expected":"Beverages","got":"Condiments"},{"item":"Pabst","expected":"Alcohol","got":"Beverages"},{"item":"Natural Light","expected":"Alcohol","got":"Beverages"},{"item":"Rolling Rock","expected":"Alcohol","got":"Beverages"},{"item":"New Belgium","expected":"Alcohol","got":"Beverages"},{"item":"Shiner","expected":"Alcohol","got":"Beverages"},{"item":"Bugles","expected":"Snacks","got":"Condiments"},{"item":"Pop Secret","expected":"Snacks","got":"Condiments"},{"item":"Orville Redenbacher","expected":"Snacks","got":"Pantry"},{"item":"Late July","expected":"Snacks","got":"Frozen"},{"item":"Tasty Bite","expected":"Pantry","got":"Bakery"},{"item":"Seeds of Change","expected":"Pantry","got":"Beverages"},{"item":"Thai Kitchen","expected":"Pantry","got":"Condiments"},{"item":"San-J","expected":"Pantry","got":"Condiments"},{"item":"Eden Foods","expected":"Pantry","got":"Produce"},{"item":"Swans Down","expected":"Baking","got":"Meat & Seafood"},{"item":"Maille","expected":"Condiments","got":"Baking"},{"item":"Cattlemans","expected":"Condiments","got":"Meat & Seafood"},{"item":"Zep","expected":"Household","got":"Baking"},{"item":"Ponds","expected":"Personal Care","got":"Pet"},{"item":"Biore","expected":"Personal Care","got":"Produce"},{"item":"Orijen","expected":"Pet","got":"Meat & Seafood"},{"item":"NatureSweet","expected":"Produce","got":"Baking"},{"item":"Ocean Mist","expected":"Produce","got":"Household"},{"item":"Grimmway","expected":"Produce","got":"Beverages"},{"item":"Melissas","expected":"Produce","got":"Bakery"},{"item":"Manns","expected":"Produce","got":"Meat & Seafood"}]}
+{"type":"summary","rows":[{"variant":"v11","shots":11,"accuracy":0.371,"consistency":0.737,"msPerItem":854,"ttftPerItem":699,"promptTokens":349},{"variant":"v4","shots":4,"accuracy":0.343,"consistency":0.763,"msPerItem":519,"ttftPerItem":348,"promptTokens":180},{"variant":"v2","shots":2,"accuracy":0.414,"consistency":0.763,"msPerItem":418,"ttftPerItem":256,"promptTokens":130}]}
+{"type":"done"}

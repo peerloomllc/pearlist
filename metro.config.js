@@ -1,20 +1,14 @@
-const path = require('path')
 const { getDefaultConfig } = require('expo/metro-config')
 
 const config = getDefaultConfig(__dirname)
+// The worklet and UI bundles ride along as assets (assets/bare-*.bundle,
+// assets/app-ui.bundle), so Metro has to treat .bundle as an asset rather than
+// try to parse it as JavaScript.
 config.resolver.assetExts.push('bundle')
 
-// Drop @qvac/langdetect-text (and its 2 MB tinyld/heavy table) from the RN bundle.
-// It arrives only through the QVAC SDK's translate API, which PearList never calls,
-// and Metro does not tree-shake, so an unreachable import still costs full size.
-// See shims/qvac-langdetect-stub.js for what the stub does and how to undo this.
-const LANGDETECT_STUB = path.resolve(__dirname, 'shims/qvac-langdetect-stub.js')
-const defaultResolveRequest = config.resolver.resolveRequest
-config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (moduleName === '@qvac/langdetect-text') {
-    return { type: 'sourceFile', filePath: LANGDETECT_STUB }
-  }
-  return (defaultResolveRequest || context.resolveRequest)(context, moduleName, platform)
-}
+// This file used to carry a resolver that swapped @qvac/langdetect-text for a
+// stub, keeping 2 MB of language-detection tables out of the RN bundle (PR #82).
+// It went with the on-device AI on 2026-07-26: no QVAC dependency, nothing to
+// trim, and shims/qvac-langdetect-stub.js went with it.
 
 module.exports = config

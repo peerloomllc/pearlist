@@ -243,3 +243,77 @@ test('aisleOrder sorts Other last and unknowns past the end', () => {
   assert.equal(aisleOrder('Other'), AISLES.length - 1)
   assert.equal(aisleOrder('Nope'), AISLES.length)
 })
+
+// ── Fixture-driven accuracy guard ───────────────────────────────────────────
+// The keyword table is the WHOLE classifier since the on-device model was
+// removed (DECISIONS.md 2026-07-26), so its coverage is a shipping property and
+// belongs in the verify gate rather than in a script someone remembers to run.
+//
+// Two assertions, and the second is the important one:
+//
+//   1. Accuracy stays above a floor. Catches vocabulary rotting away.
+//   2. NOTHING is filed into a confidently WRONG aisle. An item left in 'Other'
+//      is a miss the user fixes with one drag, and PearList then remembers it.
+//      An item filed wrongly is not noticed until they are standing in the wrong
+//      part of the shop. So a regression that moves an item correct -> Other is
+//      tolerable and one that moves it correct -> wrong aisle is not, and only
+//      the second fails the build.
+//
+// Both fixtures currently score 100%. The floor is deliberately BELOW that, so
+// adding a genuinely hard item to a fixture does not break the build - but if it
+// lands in the wrong aisle rather than Other, assertion 2 still catches it.
+const FIXTURES = ['./fixtures/aisle-items.json', './fixtures/aisle-phrasing.json']
+const ACCURACY_FLOOR = 0.9
+
+for (const path of FIXTURES) {
+  const { items } = require(path)
+  const name = path.split('/').pop()
+
+  test(`${name}: nothing lands in a confidently WRONG aisle`, () => {
+    const misfiled = items
+      .map((it) => ({ ...it, got: classifyAisle(it.text) }))
+      .filter((r) => r.got !== r.expect && r.got !== FALLBACK)
+      .map((r) => `${r.text}: expected ${r.expect}, got ${r.got}`)
+    assert.deepEqual(misfiled, [], `misfiled items (Other would be acceptable, a wrong aisle is not):\n  ${misfiled.join('\n  ')}`)
+  })
+
+  test(`${name}: accuracy stays above the floor`, () => {
+    const hit = items.filter((it) => classifyAisle(it.text) === it.expect).length
+    const pct = hit / items.length
+    assert.ok(pct >= ACCURACY_FLOOR, `${name} accuracy ${(100 * pct).toFixed(1)}% fell below the ${100 * ACCURACY_FLOOR}% floor (${hit}/${items.length})`)
+  })
+}
+
+// ── Precedence probes ───────────────────────────────────────────────────────
+// The 2026-07-26 widening roughly 2.5x'd the keyword table, and every word added
+// is a chance to STEAL an item from a phrase that was working. These pairs are
+// the collisions that widening created or narrowly avoided: each left-hand item
+// must beat a shorter rule pointing somewhere else, and each right-hand one must
+// still reach the shorter rule. They fail as a pair, which is the point - fixing
+// a steal by reordering the table usually breaks its partner.
+test('longest-match precedence survives the widened table', () => {
+  const probes = [
+    ['pie crust', 'Bakery'], ['pot pie', 'Frozen'], ['pie filling', 'Pantry'],
+    ['butternut squash', 'Produce'], ['fig bars', 'Snacks'],
+    ['pepper jack', 'Dairy & Eggs'], ['bell pepper', 'Produce'],
+    ['blue cheese dressing', 'Condiments'], ['blue cheese', 'Dairy & Eggs'],
+    ['sour cream dip', 'Condiments'], ['sour cream', 'Dairy & Eggs'],
+    ['ice pack', 'Personal Care'], ['ice cream', 'Frozen'],
+    ['fish food', 'Pet'], ['fish sauce', 'Condiments'], ['fish sticks', 'Frozen'], ['salmon', 'Meat & Seafood'],
+    ['pet wipes', 'Pet'], ['baby wipes', 'Personal Care'], ['disinfecting wipes', 'Household'],
+    ['rice cakes', 'Snacks'], ['rice krispies', 'Pantry'], ['rice krispie treats', 'Snacks'], ['brown rice', 'Pantry'],
+    ['hot chocolate', 'Beverages'], ['chocolate chips', 'Baking'], ['chocolate bar', 'Snacks'],
+    ['coconut milk', 'Pantry'], ['whole milk', 'Dairy & Eggs'],
+    ['tomato paste', 'Pantry'], ['tomatoes', 'Produce'],
+    ['beef jerky', 'Snacks'], ['ground beef', 'Meat & Seafood'],
+    ['pizza dough', 'Bakery'], ['frozen pizza', 'Frozen'],
+    ['hand soap', 'Personal Care'], ['dish soap', 'Household'], ['laundry soap', 'Household'],
+    ['red wine', 'Alcohol'], ['red wine vinegar', 'Pantry'],
+    // 'corn' is deliberately NOT a rule - fresh, canned and frozen are three
+    // aisles - so all four of these have to come from the qualified phrase.
+    ['corn on the cob', 'Produce'], ['canned corn', 'Pantry'], ['frozen corn', 'Frozen'], ['corn chips', 'Snacks'],
+  ]
+  const wrong = probes.filter(([text, want]) => classifyAisle(text) !== want)
+    .map(([text, want]) => `${text}: expected ${want}, got ${classifyAisle(text)}`)
+  assert.deepEqual(wrong, [], `precedence broken:\n  ${wrong.join('\n  ')}`)
+})

@@ -2,6 +2,76 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-26 - A vendored native addon outlives the dependency that brought it
+Tier: T1 (build-script guard; no wire, pairing or data change). PR #99.
+Context: PearList's QVAC dependency was removed, `npm run verify` was green,
+`expo config --type prebuild` resolved clean and the Android APK contained no ggml
+library anywhere. The iPhone IPA still shipped ELEVEN qvac frameworks - 40 MB of
+68 MB. The archive succeeded and the app ran, so nothing reported a problem.
+Cause: `react-native-bare-kit.podspec` vendors `ios/addons/*.xcframework` BY GLOB,
+and that directory is a cache INSIDE node_modules that only ever grows. `expo
+prebuild` writes addons into it, `npm install` does not clean files a plugin wrote
+into an already-installed package, and every rsync to a build host excludes
+node_modules. No step on the normal path removes an addon once it lands.
+Choice: prune stale qvac addons before `pod install` in both iOS scripts, via
+scripts/prune-stale-bare-addons.sh. Safe unconditionally - this repo has no QVAC
+dependency, so any qvac addon is stale by definition.
+Duplicate addon VERSIONS are warned about and NOT deleted (bare-fs 4.7.2 beside
+4.7.3, rocksdb-native 3.17.0 beside 3.17.2). Choosing which copy to drop needs the
+version the worklet bundle was built against, and dropping the wrong one turns a
+size problem into ADDON_NOT_FOUND at init - null localDb, every worklet method
+failing, iOS only. Warning is the safe half of the fix.
+THE GENERAL LESSON, which is why this is a decision and not a bug fix: removing a
+dependency from package.json does NOT remove what it wrote into node_modules, and
+a glob in someone else's podspec will keep shipping it. Verify, config resolution
+and the Android build were all green and all blind to it. The only thing that
+caught it was building the artifact and reading what was inside. Treat "the
+dependency is gone" as a claim about source, never about the shipped binary.
+Consequences: IPA 68.5 -> 39.7 MiB. `bare-ffmpeg` (12 MB, the largest single item
+left) is vendored by the same glob and PearList has no obvious use for it - filed
+in TODO rather than removed here, because unlike qvac it cannot be shown stale by
+inspection alone.
+
+## 2026-07-26 - The on-device model is REMOVED, keyword-only aisles stand alone
+Tier: T2. No proposal: this retires a shipped feature rather than adding one, and the
+measurements below were the deciding artifact. Reverses the follow-through promised in
+the 2026-07-11 entry below. PRs #98 (features) and this one (the dependency).
+Context: PearList shipped a QVAC-hosted small language model as the fallback for
+grocery items the keyword pass could not place, plus a recipe -> items expander. A day
+of benchmarking on both platforms (metadata/bench/) measured what it actually bought:
+  37%  of the items that reached it placed correctly (1702 calls, two hosts), with 36
+       of 70 wrong in EVERY prompt variant tried
+  4.0s per item at best, 6.5s as shipped - per item, so a batch is a minute of spinner
+  0.8GB downloaded, ~2GB resident: unusable on a 3GB iPhone, and the TCL killed other
+       apps to fit it
+  0    users could have benefited on iOS since 1.0.2 anyway - it could not start there
+       at all (PR #94) and nobody noticed for five weeks, which is its own verdict on
+       how much the feature was carrying
+Meanwhile the keyword pass places 23 of 26 realistically-written items instantly, and
+gained 346 brand names the same day (PR #95).
+Choice: remove it outright rather than keep it behind the off-by-default toggle. A
+coin-flip that costs four seconds and 0.8GB is worse than the thing it was protecting
+against, which is an item resting in "Other" until you drag it - one gesture, and
+Learned Aisles then remembers it. Keeping it "just in case" would preserve the
+download, the RAM ceiling, the ~half of the binary its native backends occupied and a
+second classifier path to reason about, in exchange for a fallback we would not
+recommend anyone enable.
+KEPT: `classifyItem` in listMethods.js stays as the seam, and `ai:categorize` /
+`ai:categorizeList` / `ai:setCategory` keep their names and wire shape. The methods are
+load-bearing for user drags and Learned Aisles overrides, and renaming them off "ai:"
+would be a wire change (T3) bought with nothing but tidiness. Also KEPT: Learned
+Aisles itself, which is device-local text -> aisle memory read by the KEYWORD
+classifier and never needed the model.
+Bytes, not just code: removing a feature does not remove what it downloaded, so launch
+does a one-time purge of Documents/.qvac and the AsyncStorage flags, via
+expo-file-system rather than the SDK - the whole point is that nothing imports @qvac.
+Consequences: no QVAC dependency, no llamacpp/ggml native libs, no expo config plugin,
+no generated worker bundle to hand-sync to the Mac before an archive (the hard gate in
+ios-appstore.sh and scripts/sync-qvac-worker.sh both go), and no Metro resolver shim
+for langdetect (PR #82's 2MB trim is moot). The bench data stays in metadata/bench/ so
+this is not re-proposed from intuition. If a classifier ever earns its place again, the
+seam is where it plugs in - and the bar is now measured, not assumed.
+
 ## 2026-07-23 - The off-LAN backstop is a relay POLICY, not a relay MECHANISM
 Tier: T2. Proposal: 2026-07-23-blind-relay-adoption (the T3 design and the node are
 PearTune's, ../peartune/proposals/2026-07-23-blind-relay.md).

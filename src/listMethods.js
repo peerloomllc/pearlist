@@ -15,9 +15,9 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const relay = require('./relay')
 
-// Offline keyword aisle classifier for the worklet-side ai:categorize methods -
-// the always-available baseline. `classifyItem` is the single seam a smarter
-// classifier can swap into; the RN shell can also compute a category out-of-band
+// Offline keyword aisle classifier for the worklet-side ai:categorize methods.
+// `classifyItem` is the single seam a smarter classifier would swap into; the RN
+// shell can also compute a category out-of-band (its Learned Aisles overrides)
 // and persist it via ai:setCategory below, so both paths write the same signed,
 // synced `category` field.
 async function classifyItem (_ctx, text) {
@@ -839,8 +839,8 @@ const methods = {
     return { category }
   },
 
-  // Persist a category computed elsewhere (the RN shell's QVAC worker) as a
-  // normal signed op, so one capable device's classification syncs to every
+  // Persist a category decided elsewhere (a user drag, or the shell's Learned
+  // Aisles override) as a normal signed op, so one device's filing syncs to every
   // peer. The category is validated against the known aisles; an unknown value
   // is dropped rather than written. Re-reads to avoid clobbering a concurrent edit.
   'ai:setCategory': async ({ groupId, listId, itemId, category, by }, ctx) => {
