@@ -25,17 +25,38 @@ import { terminateWebViewRenderer } from '../modules/webview-recovery'
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
 // default (permission requested on first run; user can turn it off in Profile).
 // The worklet emits notify:* when it applies a fresh peer change; the shell
-// raises an OS notification if the user has it enabled. Suppress the OS banner
-// while the
-// app is foreground (the WebView shows its own in-app banner); the OS still
-// shows it when we are backgrounded. No background sync yet, so this fires while
-// the app is running (foreground + its brief background window).
+// raises an OS notification if the user has it enabled.
+//
+// This handler decides what a notification does WHILE THE APP IS FOREGROUND. The
+// two kinds need opposite answers:
+//
+// - Peer notifications (assigned / joined / completed) suppress the OS banner,
+//   because the WebView draws its own in-app banner for them. Two banners for one
+//   event is worse than one.
+// - REMINDERS must show. Nothing draws an in-app banner for them, so suppressing
+//   the OS one means the reminder is filed silently into Notification Center and
+//   the user sees NOTHING. That is exactly what happened on the iPhone
+//   (2026-07-27): the reminder fired correctly and was invisible because the app
+//   happened to be open. It looked like "reminders do not work on iOS" and was
+//   really this line. It passed on Android only because that test backgrounded
+//   the app first.
+//
+// `data.reminder` is set by refreshDailyReminder and refreshItemReminders.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: false, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false,
-  }),
+  handleNotification: async (n) => {
+    const isReminder = (n?.request?.content?.data as any)?.reminder === true
+    return {
+      shouldShowBanner: isReminder,
+      shouldShowList: true,
+      shouldPlaySound: isReminder,
+      shouldSetBadge: false,
+    }
+  },
 })
 
+// Bumped from 'reminder' when the importance went DEFAULT -> HIGH; see
+// ensureNotifPermission for why that needs a new id rather than an edit.
+const REMINDER_CHANNEL = 'reminders'
 const NOTIF_KEY = 'pearlist:notifications'
 let _notifEnabled = false
 async function loadNotifEnabled () {
@@ -72,8 +93,18 @@ async function ensureNotifPermission () {
     // Its own channel so reminders can be muted without muting the alerts that
     // follow something a person actually did. Carries both the daily nudge and
     // per-item reminders: they are the same kind of interruption to a user.
-    await Notifications.setNotificationChannelAsync('reminder', {
-      name: 'Reminders', importance: Notifications.AndroidImportance.DEFAULT,
+    //
+    // HIGH, not DEFAULT, and on a NEW id. A DEFAULT-importance channel posts to
+    // the shade with no heads-up banner, so a reminder the user explicitly asked
+    // for at 4:44 arrived silently and looked like it had not fired at all
+    // (measured on the Pixel 2026-07-27: it posted, importance=3, no banner). A
+    // reminder is a time-critical alert the user set themselves; it should
+    // interrupt. The id changes because Android channels are IMMUTABLE once
+    // created - setNotificationChannelAsync can LOWER an importance but never
+    // raise it - so the old one is deleted and replaced rather than edited.
+    await Notifications.deleteNotificationChannelAsync('reminder').catch(() => {})
+    await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL, {
+      name: 'Reminders', importance: Notifications.AndroidImportance.HIGH,
       description: 'The daily nudge, and reminders you set on individual items',
     })
   }
@@ -161,15 +192,16 @@ async function refreshDailyReminder () {
       identifier: REMINDER_ID,
       content: {
         title: digest.title, body: digest.body,
-        data: { groupId: digest.groupId, listId: digest.listId }, // tap -> open the top list
-        ...(Platform.OS === 'android' ? { channelId: 'reminder' } : {}),
+        // `reminder: true` tells the foreground handler above to SHOW this one.
+        data: { groupId: digest.groupId, listId: digest.listId, reminder: true }, // tap -> open the top list
+        ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL } : {}),
       },
       // channelId belongs on the TRIGGER for a scheduled notification. Android
       // ignores the one in `content` here and drops it on expo's fallback
       // channel instead, which silently breaks "mute reminders on their own".
       // Caught on the Pixel: the first one that fired landed on
       // expo_notifications_fallback_notification_channel.
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: pref.hour, minute: pref.minute, channelId: 'reminder' },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: pref.hour, minute: pref.minute, channelId: REMINDER_CHANNEL },
     })
   } catch {}
 }
@@ -231,11 +263,12 @@ async function refreshItemReminders () {
         content: {
           title: 'Reminder',
           body: `"${r.text}" on ${r.listName}`,
-          data: { groupId: r.groupId, listId: r.listId }, // tap -> open the list
-          ...(Platform.OS === 'android' ? { channelId: 'reminder' } : {}),
+          // `reminder: true` tells the foreground handler to SHOW this one.
+          data: { groupId: r.groupId, listId: r.listId, reminder: true }, // tap -> open the list
+          ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL } : {}),
         },
         // channelId on the TRIGGER, not just the content - see refreshDailyReminder.
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.remindAt, channelId: 'reminder' },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.remindAt, channelId: REMINDER_CHANNEL },
       }).catch(() => {})
     }
   } catch {}
