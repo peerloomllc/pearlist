@@ -301,7 +301,15 @@ async function refreshItemReminders () {
       }).then(() => remindLog(`scheduled ${r.key} for ${new Date(r.remindAt).toISOString()}`))
         .catch((e: any) => remindLog(`FAILED to schedule ${r.key}: ${e?.message ?? String(e)}`))
     }
-    if (!want.length) remindLog('items: nothing to schedule')
+    if (!want.length) {
+      const elsewhere = Number(wm.result.elsewhere) || 0
+      // Name the difference explicitly: "nothing exists" and "they all belong to
+      // another member" look identical from here, and confusing the two is what
+      // made the iPhone look broken when it was behaving correctly.
+      remindLog(elsewhere > 0
+        ? `items: nothing for THIS device (${elsewhere} future reminder(s) target another member)`
+        : 'items: nothing to schedule')
+    }
   } catch (e: any) { remindLog('items FAILED: ' + (e?.message ?? String(e))) }
 }
 

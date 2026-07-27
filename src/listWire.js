@@ -442,14 +442,29 @@ function nextDueAt (item, now) {
 // Resolution order, first hit wins:
 //   1. item.assignee  - whoever owns this specific job
 //   2. list.assignee  - whoever the whole list belongs to
-//   3. list.createdBy - whoever set the list up, as the backstop
-// Returns null when nothing resolves (e.g. the list is gone), and the caller
-// then schedules nothing rather than guessing.
+//   3. item.remindBy  - WHOEVER SET THE REMINDER
+//   4. list.createdBy - the backstop, and only for rows written before remindBy
+//
+// remindBy was added 2026-07-27 after Tim got NO reminders on his iPhone. The
+// rule used to fall straight from list.assignee to list.createdBy, and createdBy
+// is a DEVICE identity: his lists were created on the Pixel, so a reminder he set
+// on the iPhone resolved to the Pixel and his iPhone correctly scheduled nothing.
+// Measured, not guessed - the iPhone logged "items: nothing to schedule" at the
+// same moment the Pixel held an exact alarm for it.
+//
+// "The person who asked for the reminder gets the reminder" is the intuitive rule
+// and it is what a single human with two phones expects. It sits BELOW the two
+// assignee checks on purpose, so the parent-sets-a-reminder-on-the-kid's-chore
+// case still reaches the kid rather than the parent.
+//
+// Returns null when nothing resolves (e.g. the list is gone), and the caller then
+// schedules nothing rather than guessing.
 function reminderTargetOf (item, list) {
   if (!item || item.deleted === true) return null
   if (typeof item.assignee === 'string' && item.assignee) return item.assignee
   if (!list || list.deleted === true) return null
   if (typeof list.assignee === 'string' && list.assignee) return list.assignee
+  if (typeof item.remindBy === 'string' && item.remindBy) return item.remindBy
   if (typeof list.createdBy === 'string' && list.createdBy) return list.createdBy
   return null
 }

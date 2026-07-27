@@ -764,7 +764,9 @@ test('item:setReminder round-trips, clears, and refuses a time already gone', as
   const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
 
   const when = Date.now() + 60 * 60 * 1000
-  assert.deepEqual(await call('item:setReminder', { groupId, listId, itemId, remindAt: when }), { remindAt: when })
+  const set = await call('item:setReminder', { groupId, listId, itemId, remindAt: when })
+  assert.equal(set.remindAt, when)
+  assert.ok(set.remindBy, 'the setter is recorded, so the reminder rings on the device that asked')
   let row = (await call('item:getAll', { groupId, listId })).find((r) => r.id === itemId)
   assert.equal(row.remindAt, when)
   assert.equal(row.text, 'bins', 'the rest of the row survives the read-modify-write')
@@ -775,7 +777,7 @@ test('item:setReminder round-trips, clears, and refuses a time already gone', as
   await assert.rejects(
     () => call('item:setReminder', { groupId, listId, itemId, remindAt: 'soon' }), /timestamp/)
 
-  assert.deepEqual(await call('item:setReminder', { groupId, listId, itemId, remindAt: null }), { remindAt: null })
+  assert.deepEqual(await call('item:setReminder', { groupId, listId, itemId, remindAt: null }), { remindAt: null, remindBy: null })
   row = (await call('item:getAll', { groupId, listId })).find((r) => r.id === itemId)
   assert.equal(row.remindAt, null, 'cleared')
   await engine.close()
@@ -929,3 +931,44 @@ async function putRawRow (engine, groupId, key, value) {
   const base = engine.bases.get(groupId)
   await base.update()
 }
+
+test('a reminder rings on the device that SET it, not the one that made the list', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
+
+  const res = await call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() + 60 * 60 * 1000 })
+  assert.ok(res.remindBy, 'the setter is recorded on the row')
+  const row = (await call('item:getAll', { groupId, listId })).find((r) => r.id === itemId)
+  assert.equal(row.remindBy, res.remindBy)
+
+  // This peer both created the list and set the reminder, so it is the target
+  // either way - what matters is that remindBy is what carries it.
+  assert.equal((await call('reminder:pending', {})).reminders.length, 1)
+
+  await call('item:setReminder', { groupId, listId, itemId, remindAt: null })
+  const cleared = (await call('item:getAll', { groupId, listId })).find((r) => r.id === itemId)
+  assert.equal(cleared.remindBy, null, 'clearing the reminder clears who asked for it')
+  await engine.close()
+})
+
+test('reminder:pending distinguishes "none exist" from "none are MINE"', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
+
+  let s = await call('reminder:pending', {})
+  assert.deepEqual([s.reminders.length, s.elsewhere], [0, 0], 'nothing exists')
+
+  // Assigned to somebody else, so it is pending for THEM, not us.
+  await call('item:assign', { groupId, listId, itemId, assignee: 'f'.repeat(64) })
+  await call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() + 60 * 60 * 1000 })
+  s = await call('reminder:pending', {})
+  assert.deepEqual([s.reminders.length, s.elsewhere], [0, 1],
+    'these two cases look identical without the count, which is what made a working iPhone look broken')
+  await engine.close()
+})

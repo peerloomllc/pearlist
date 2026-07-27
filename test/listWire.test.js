@@ -421,12 +421,23 @@ const KID = 'k'.repeat(64)
 const PARENT = 'p'.repeat(64)
 const OTHER_M = 'o'.repeat(64)
 
-test('reminder target: item assignee wins, then list assignee, then list creator', () => {
+test('reminder target: item assignee, then list assignee, then WHO SET IT, then creator', () => {
   const list = { assignee: OTHER_M, createdBy: PARENT }
   assert.equal(reminderTargetOf({ assignee: KID }, list), KID, 'the item assignee owns this job')
   assert.equal(reminderTargetOf({}, list), OTHER_M, 'unassigned item falls back to the list')
   assert.equal(reminderTargetOf({}, { createdBy: PARENT }), PARENT, 'then to whoever made the list')
   assert.equal(reminderTargetOf({ assignee: null }, { createdBy: PARENT }), PARENT, 'an explicit null is not an assignee')
+
+  // THE BUG THIS FIXES. list.createdBy is a DEVICE identity, so on an unassigned
+  // item a reminder set from Tim's iPhone resolved to the Pixel that made the
+  // list, and his iPhone correctly scheduled nothing.
+  const iphone = 'i'.repeat(64)
+  assert.equal(reminderTargetOf({ remindBy: iphone }, { createdBy: PARENT }), iphone,
+    'whoever asked for the reminder gets it, not whoever made the list')
+  // ...but explicit ownership still outranks it, so a parent setting a reminder
+  // on the kid's chore still reaches the KID.
+  assert.equal(reminderTargetOf({ assignee: KID, remindBy: PARENT }, { createdBy: PARENT }), KID)
+  assert.equal(reminderTargetOf({ remindBy: PARENT }, { assignee: KID, createdBy: PARENT }), KID)
 })
 
 test('reminder target: null when nothing resolves, so nothing is scheduled on a guess', () => {

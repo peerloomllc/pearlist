@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const relay = require('./relay')
@@ -886,8 +886,12 @@ const methods = {
       if (t <= Date.now()) throw new Error('that time has already passed')
       next = Math.trunc(t)
     }
-    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, remindAt: next })
-    return { remindAt: next }
+    // Record WHO asked. reminderTargetOf uses it so the reminder rings on the
+    // device that set it, rather than falling through to the list's creator -
+    // which is a DEVICE identity and sent it to the wrong phone.
+    const remindBy = next === null ? null : pubkeyHex(ctx)
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, remindAt: next, remindBy })
+    return { remindAt: next, remindBy }
   },
 
   // Every reminder THIS device should have scheduled, across every joined space.
@@ -901,6 +905,7 @@ const methods = {
     const selfKey = pubkeyHex(ctx)
     const now = Date.now()
     const out = []
+    let elsewhere = 0
     for (const [groupId, base] of ctx.bases) {
       try {
         await base.update()
@@ -910,7 +915,11 @@ const methods = {
         }
         for (const [listId, list] of lists) {
           for await (const { value: it } of base.view.createReadStream(itemRange(listId))) {
-            if (!isReminderPending(it, list, selfKey, now)) continue
+            if (!isReminderPending(it, list, selfKey, now)) {
+              // Would have been pending for SOMEONE, just not us.
+              if (it && !it.deleted && !effectiveChecked(it, now) && typeof it.remindAt === 'number' && it.remindAt > now && reminderTargetOf(it, list)) elsewhere++
+              continue
+            }
             out.push({
               key: itemKey(listId, it.id), groupId, listId, itemId: it.id,
               text: String(it.text || 'an item'), listName: String(list.name || 'a list'),
@@ -921,7 +930,15 @@ const methods = {
       } catch { continue }
     }
     out.sort((a, b) => a.remindAt - b.remindAt) // soonest first, so the cap keeps the urgent ones
-    return { reminders: out.slice(0, MAX_SCHEDULED_REMINDERS), dropped: Math.max(0, out.length - MAX_SCHEDULED_REMINDERS) }
+    // `elsewhere` is a diagnostic, not a feature: future reminders that resolve to
+    // a DIFFERENT member. Some is normal (a parent setting one for a kid), but it
+    // is also exactly what a targeting bug looks like from this side - "nothing to
+    // schedule" and "nothing exists" are indistinguishable without it.
+    return {
+      reminders: out.slice(0, MAX_SCHEDULED_REMINDERS),
+      dropped: Math.max(0, out.length - MAX_SCHEDULED_REMINDERS),
+      elsewhere,
+    }
   },
 
   'item:delete': async ({ groupId, listId, itemId }, ctx) => {
