@@ -356,6 +356,13 @@ const WEBVIEW_RECOVERY_MIN_BG_MS = 20_000
 // buys is that "the backend is broken" can never again present as a blank screen.
 const WORKLET_INIT_TIMEOUT_MS = 25_000
 
+// How long the WebView gets to report its first load before we assume the render
+// process is never going to paint, and recover it the same way the resume-freeze
+// does (see the boot-watchdog effect). Generous for the same reason as the init
+// timeout: an old, slow device parsing a 1.4 MB inline bundle is legitimately
+// slow, and a false trip costs one reload rather than a broken app.
+const WEBVIEW_FIRST_LOAD_TIMEOUT_MS = 15_000
+
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
 let _workletStarted = false
@@ -909,6 +916,39 @@ export default function Shell () {
     return () => sub.remove()
   }, [])
 
+  // Boot watchdog: a WebView that mounts and never loads is a black screen.
+  //
+  // The rest of the boot path now fails open (worklet init is bounded, every
+  // failure still renders), so the one remaining way to show nothing is the
+  // WebView itself: the render process is bound but never paints, and nothing
+  // above this line can tell. That is the same failure the GrapheneOS/Vanadium
+  // freeze produces on resume, and it has the same cure - a FRESH render process,
+  // not a remount - so this reuses that mechanism at boot instead of inventing a
+  // second one.
+  //
+  // Deliberately not conditioned on a diagnosis. We have an unreproduced report of
+  // a permanent black screen on Android 12 (see TODO.md) and four dead theories;
+  // this does not explain it, it survives it. Whatever stops the first paint, the
+  // user gets one automatic retry rather than an app that is simply dead.
+  //
+  // ONCE. A renderer that dies again on the reload is a real, reproducible failure
+  // and a retry loop would hide it behind an endless flicker.
+  const bootRecoveryTried = useRef(false)
+  useEffect(() => {
+    if (!html || bootRecoveryTried.current) return
+    const t = setTimeout(() => {
+      if (webViewLoaded.current) return // painted; nothing to do
+      bootRecoveryTried.current = true
+      bootLog(`webview did not load within ${WEBVIEW_FIRST_LOAD_TIMEOUT_MS}ms -> recovering`)
+      terminateWebViewRenderer().then((killed) => {
+        // 0 means there was no renderer to kill (iOS, or the API declined), so
+        // onRenderProcessGone will never fire and nothing would reload us.
+        if (killed === 0) webViewRef.current?.reload()
+      })
+    }, WEBVIEW_FIRST_LOAD_TIMEOUT_MS)
+    return () => clearTimeout(t)
+  }, [html])
+
   const onLoad = () => {
     webViewLoaded.current = true
     injectInsets()
@@ -931,8 +971,9 @@ export default function Shell () {
         source={{ html, baseUrl: 'https://localhost/' }}
         onMessage={onMessage}
         onLoad={onLoad}
-        // The other half of the resume-freeze recovery above: reload into the
-        // fresh render process. didCrash=false is our own deliberate terminate;
+        // The other half of BOTH recoveries above (resume-freeze and boot
+        // watchdog): reload into the fresh render process, whichever one asked for
+        // it. didCrash=false is our own deliberate terminate;
         // didCrash=true is a real renderer crash, and reloading is the right
         // response to both. webViewLoaded is reset so queued IPC waits for the
         // reloaded UI rather than being injected into a dead page.
