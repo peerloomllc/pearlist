@@ -8,6 +8,7 @@ import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
+import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
@@ -188,6 +189,108 @@ function BottomSheet ({ open, onClose, title, children }) {
         {children}
       </div>
     </div>
+  )
+}
+
+// --- reminder time pickers ---------------------------------------------------
+// Ours, not the OS one. The system pickers cannot be themed, look different on
+// each platform, and make you spin a wheel to say "tomorrow morning". These are
+// plain buttons in the app's own type and colour, identical everywhere, and a
+// screen reader reads them as what they are.
+//
+// The exact-time fallback is steppers rather than a rebuilt wheel: no drag
+// gesture to tune, and every control is a labelled button. Time maths lives in
+// src/reminderPresets.js, which is pure and unit-tested.
+
+function PresetRow ({ label, detail, onClick, danger }) {
+  return (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: sp.md, padding: '14px 16px', marginBottom: sp.sm, background: c.surface.input, border: `1px solid ${c.border}`, borderRadius: r.md, cursor: 'pointer', textAlign: 'left', fontFamily: FONT }}>
+      <span style={{ color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{label}</span>
+      {detail ? <span style={{ color: c.text.muted, fontSize: 13, flexShrink: 0 }}>{detail}</span> : null}
+    </button>
+  )
+}
+
+// One labelled value with a minus and a plus. Used for both the day and the time
+// so they read as the same control.
+function Stepper ({ label, value, onStep }) {
+  const btn = { width: 44, height: 44, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, marginBottom: sp.sm }}>
+      <span style={{ color: c.text.secondary, fontSize: 13, width: 44, flexShrink: 0 }}>{label}</span>
+      <button onClick={() => onStep(-1)} aria-label={`${label} earlier`} style={btn}><Minus size={18} weight='bold' /></button>
+      <span style={{ flex: 1, textAlign: 'center', color: c.text.primary, fontSize: 17, fontFamily: MONO }}>{value}</span>
+      <button onClick={() => onStep(1)} aria-label={`${label} later`} style={btn}><Plus size={18} weight='bold' /></button>
+    </div>
+  )
+}
+
+// When to remind, for a single item. `value` is epoch ms or null.
+function WhenSheet ({ open, value, onClose, onPick, onClear }) {
+  const [exact, setExact] = useState(null) // null = showing presets
+  useEffect(() => { if (open) setExact(null) }, [open])
+  if (!open) return null
+  const now = Date.now()
+  const current = describeWhen(value, now)
+  const shown = describeWhen(exact, now)
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Remind me'>
+      {exact == null ? (
+        <>
+          {itemPresets(now).map((p) => {
+            const d = describeWhen(p.at, now)
+            return <PresetRow key={p.key} label={p.label} detail={`${d.day} ${d.time}`} onClick={() => { onPick(p.at); onClose() }} />
+          })}
+          <PresetRow label='Pick exact time' onClick={() => setExact(value && value > now ? value : defaultExact(now))} />
+          {value ? <PresetRow label='Remove reminder' detail={current ? `${current.day} ${current.time}` : ''} danger onClick={() => { onClear(); onClose() }} /> : null}
+        </>
+      ) : (
+        <>
+          <div style={{ textAlign: 'center', color: c.text.primary, fontSize: 20, fontWeight: 300, margin: `0 0 ${sp.base}px` }}>
+            {shown ? `${shown.day}, ${shown.time}` : ''}
+          </div>
+          <Stepper label='Day' value={shown ? shown.day : ''} onStep={(n) => setExact((v) => stepDays(v, n))} />
+          <Stepper label='Time' value={shown ? shown.time : ''} onStep={(n) => setExact((v) => stepMinutes(v, n))} />
+          {exact <= now
+            ? <div style={{ color: c.error, fontSize: 12, margin: `${sp.xs}px 0 ${sp.sm}px` }}>That is in the past, so nothing would fire.</div>
+            : null}
+          <Button disabled={exact <= now} onClick={() => { onPick(exact); onClose() }} style={{ marginTop: sp.sm, opacity: exact <= now ? 0.5 : 1 }}>Set reminder</Button>
+          <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={() => setExact(null)}>Back</Button>
+        </>
+      )}
+    </BottomSheet>
+  )
+}
+
+// Time of day for the daily digest. No date, and no past-time filtering: it
+// repeats, so a time earlier than now just means "starting tomorrow".
+function TimeOfDaySheet ({ open, hour, minute, onClose, onPick }) {
+  const [exact, setExact] = useState(null)
+  useEffect(() => { if (open) setExact(null) }, [open])
+  if (!open) return null
+  // Steppers work in epoch ms, so borrow an arbitrary date and read the clock off it.
+  const asMs = (h, m) => new Date(2026, 0, 1, h, m).getTime()
+  const label = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Remind me each day at'>
+      {exact == null ? (
+        <>
+          {dailyPresets().map((p) => (
+            <PresetRow key={p.key} label={p.label} detail={label(asMs(p.hour, p.minute))}
+              onClick={() => { onPick(p.hour, p.minute); onClose() }} />
+          ))}
+          <PresetRow label='Pick exact time' onClick={() => setExact(asMs(hour ?? 18, minute ?? 0))} />
+        </>
+      ) : (
+        <>
+          {/* No summary line here, unlike WhenSheet: there is only one stepper, so
+              a heading above it would just be the same value printed twice. */}
+          <Stepper label='Time' value={label(exact)} onStep={(n) => setExact((v) => stepMinutes(v, n))} />
+          <Button style={{ marginTop: sp.sm }} onClick={() => { const d = new Date(exact); onPick(d.getHours(), d.getMinutes()); onClose() }}>Set time</Button>
+          <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={() => setExact(null)}>Back</Button>
+        </>
+      )}
+    </BottomSheet>
   )
 }
 
@@ -2492,9 +2595,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
   // Daily reminder: a once-a-day nudge about lists with open items. Off by
-  // default. The time is stored as hour + minute and edited through a native
-  // <input type='time'>, which is the one picker guaranteed to be present in the
-  // WebView on both platforms.
+  // default. The time is stored as hour + minute and edited through
+  // TimeOfDaySheet - ours, not the OS one, so it matches the item picker and
+  // looks the same on both platforms.
   const [reminder, setReminder] = useState({ enabled: false, hour: 18, minute: 0 })
   useEffect(() => { call('shell:reminder:get', {}).then((r) => { if (r) setReminder({ enabled: !!r.enabled, hour: r.hour ?? 18, minute: r.minute ?? 0 }) }).catch(() => {}) }, [])
   async function saveReminder (next) {
@@ -2507,7 +2610,11 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       }
     } catch { setReminder((p) => ({ ...p, enabled: false })) }
   }
-  const reminderTime = `${String(reminder.hour).padStart(2, '0')}:${String(reminder.minute).padStart(2, '0')}`
+  const [pickTime, setPickTime] = useState(false)
+  // Rendered for a person, not stored: the picker owns hour + minute. The old
+  // native <input type='time'> displayed a 24h value in local format, which is
+  // why "18:00" looked like "6:00 PM" and hid the fact this was still the OS one.
+  const reminderTime = new Date(2026, 0, 1, reminder.hour, reminder.minute).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   // "Connect Anywhere" - the off-LAN relay backstop. Default on, so an unanswered
   // read shows on rather than flickering off and back.
   const [relayOn, setRelayOn] = useState(true)
@@ -2612,13 +2719,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           extra={reminder.enabled
             // No "Every day at" label: the title already says daily, so the time
             // on its own is unambiguous (Tim's call).
-            ? <input type='time' value={reminderTime} aria-label='Daily reminder time'
-                onChange={(e) => {
-                  const [h, m] = String(e.target.value || '').split(':')
-                  if (h === undefined || m === undefined) return
-                  saveReminder({ ...reminder, hour: Number(h), minute: Number(m) })
-                }}
-                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '4px 8px', fontSize: 13, outline: 'none' }} />
+            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
             : null}
           control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
         {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
@@ -2628,6 +2730,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
       </Group>
+      <TimeOfDaySheet open={pickTime} hour={reminder.hour} minute={reminder.minute}
+        onClose={() => setPickTime(false)}
+        onPick={(h, m) => saveReminder({ ...reminder, hour: h, minute: m })} />
       <Group title='Help'>
         <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
           control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
@@ -2861,25 +2966,13 @@ function QtySheet ({ open, onCommit }) {
 // left edge.
 const FIELD_LABEL_W = 74
 
-// <input type='datetime-local'> speaks local wall-clock text; the row stores an
-// absolute epoch. Converting at the edge keeps a reminder set by someone in
-// another timezone firing at the same INSTANT everywhere, which is what a
-// household wants, rather than a floating local time nobody asked for.
-function toLocalInput (ms) {
-  const d = new Date(ms)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
-}
-function fromLocalInput (s) {
-  const t = new Date(String(s)).getTime()
-  return Number.isFinite(t) ? t : null
-}
-function reminderLabel (ms) {
-  const d = new Date(ms)
-  const today = new Date()
-  const sameDay = d.toDateString() === today.toDateString()
-  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
+// The row stores an absolute epoch, and the picker deals in the same, so a
+// reminder set by someone in another timezone fires at the same INSTANT
+// everywhere - what a household wants, rather than a floating local time nobody
+// asked for. This is only how that instant reads to a person.
+function whenLabel (ms) {
+  const d = describeWhen(ms, Date.now())
+  return d ? `${d.day}, ${d.time}` : 'Never'
 }
 
 function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
@@ -2894,6 +2987,7 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
   const [pickingAisle, setPickingAisle] = useState(false)
   const [remindAt, setRemindAt] = useState(null)
   const [repeat, setRepeat] = useState('')
+  const [pickWhen, setPickWhen] = useState(false)
   useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null); setRepeat(item.repeat || '') } }, [open, item])
   if (!item) return null
   const isGrocery = kind === 'grocery'
@@ -2933,10 +3027,10 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
               creator), so exactly one phone rings. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
             <span style={{ color: c.text.secondary, fontSize: 14, width: FIELD_LABEL_W, flexShrink: 0 }}>Remind</span>
-            <input type='datetime-local' aria-label='Reminder time'
-              value={remindAt ? toLocalInput(remindAt) : ''}
-              onChange={(e) => setRemindAt(e.target.value ? fromLocalInput(e.target.value) : null)}
-              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: remindAt ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
+            <button onClick={() => setPickWhen(true)} aria-label='Reminder time'
+              style={{ flex: 1, minWidth: 0, padding: '10px 12px', textAlign: 'left', background: c.surface.input, color: remindAt ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, cursor: 'pointer' }}>
+              {remindAt ? whenLabel(remindAt) : 'Never'}
+            </button>
             {remindAt ? <button onClick={() => setRemindAt(null)} aria-label='Clear reminder' style={{ width: 46, flexShrink: 0, height: 42, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.error, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash size={18} weight='regular' /></button> : null}
           </div>
           {remindAt && remindAt <= Date.now()
@@ -2970,6 +3064,8 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>
+      <WhenSheet open={pickWhen} value={remindAt} onClose={() => setPickWhen(false)}
+        onPick={(ms) => setRemindAt(ms)} onClear={() => setRemindAt(null)} />
       <AssigneePickerSheet open={picking} onClose={() => setPicking(false)} members={members} selfPubkey={selfPubkey} current={assignee} onPick={(pk) => setAssignee(pk)} />
       <AislePickerSheet open={pickingAisle} onClose={() => setPickingAisle(false)} noun={noun} builtins={builtins} current={category} custom={customAisles} onPick={(a) => { setCategory(a); setCatTouched(true) }} />
     </>
