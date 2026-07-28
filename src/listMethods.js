@@ -556,7 +556,13 @@ const methods = {
   // exported - which is exactly the space someone most needs to get lists out of.
   // One failing space must not take the whole backup down with it either: a
   // half-mounted or unreadable space is skipped, and the rest still saves.
-  'backup:export': async (_args, ctx) => {
+  //
+  // `learnedAisles` and `customAisles` come IN from the UI: they live in the
+  // WebView's localStorage (a personal shopping habit, not household data), which
+  // the worklet cannot read. Saved templates DO live in localDb, so they are read
+  // here. All three are device-local and were lost silently by a wipe until now.
+  'backup:export': async ({ learnedAisles, customAisles } = {}, ctx) => {
+    const byGroup = (customAisles && typeof customAisles === 'object') ? customAisles : {}
     const spaces = []
     for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
       if (!value || !value.groupId) continue
@@ -578,17 +584,27 @@ const methods = {
           }
           lists.push({ name: l.name, kind: l.kind, notifyOnComplete: l.notifyOnComplete, items })
         }
-        spaces.push({ name, lists })
+        spaces.push({ name, customAisles: byGroup[value.groupId], lists })
       } catch { continue }
     }
 
     const at = Date.now()
-    const doc = buildBackup({ spaces, exportedAt: at })
+    const doc = buildBackup({ spaces, templates: await readTemplates(ctx), learnedAisles, exportedAt: at })
     const lists = doc.spaces.reduce((n, sp) => n + sp.lists.length, 0)
     const items = doc.spaces.reduce((n, sp) => n + sp.lists.reduce((m, l) => m + l.items.length, 0), 0)
     // Pretty-printed on purpose: the file is meant to be openable, and readable,
     // by the person whose groceries are in it.
-    return { json: JSON.stringify(doc, null, 2), filename: backupFilename(at), counts: { spaces: doc.spaces.length, lists, items } }
+    return {
+      json: JSON.stringify(doc, null, 2),
+      filename: backupFilename(at),
+      counts: {
+        spaces: doc.spaces.length,
+        lists,
+        items,
+        templates: (doc.templates || []).length,
+        learnedAisles: Object.keys(doc.learnedAisles || {}).length,
+      },
+    }
   },
 
   // Import into BRAND NEW spaces that this device founds, never into existing
@@ -634,12 +650,39 @@ const methods = {
           })
         }
       }
-      created.push({ groupId, name: sp.name })
+      // The space's own hand-made aisle names ride back out with the id they now
+      // belong to: the UI writes them to localStorage keyed by groupId, and the
+      // NEW id is only known here. Matching them up by index in the caller would
+      // break the moment an empty space is skipped.
+      created.push({ groupId, name: sp.name, customAisles: sp.customAisles || [] })
+    }
+
+    // Saved lists are device-local (localDb), so they are restored here. MERGE,
+    // never overwrite: a name that already exists on this device keeps what is
+    // already there. An import must not be able to quietly rewrite a template the
+    // user has since changed - and on the main case, a fresh phone, there is
+    // nothing to collide with.
+    let templatesAdded = 0
+    if (parsed.templates.length) {
+      const existing = await readTemplates(ctx)
+      const taken = new Set(existing.map((t) => String(t.name || '').toLowerCase()))
+      const next = existing.slice()
+      for (const t of parsed.templates) {
+        if (next.length >= TEMPLATES_CAP) break
+        const norm = String(t.name || '').toLowerCase()
+        if (taken.has(norm)) continue
+        taken.add(norm)
+        next.push({ id: newEntityId(), name: t.name, kind: normalizeKind(t.kind), entries: t.entries, savedAt: Date.now(), updatedAt: Date.now() })
+        templatesAdded++
+      }
+      if (templatesAdded) await writeTemplates(ctx, next)
     }
     // Deliberately NOT recordRecent'd, for the same reason template:apply is not:
     // the autosuggest corpus learns what you TYPE, and an import would dump a
     // whole household's history into it at once.
-    return { spaces: created, counts: parsed.counts }
+    // learnedAisles goes back to the UI to write: it lives in the WebView's
+    // localStorage, which the worklet cannot touch.
+    return { spaces: created, learnedAisles: parsed.learnedAisles, counts: { ...parsed.counts, templates: templatesAdded } }
   },
 
   // --- donation reminder (device-local) ----------------------------------

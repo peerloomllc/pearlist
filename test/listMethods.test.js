@@ -410,7 +410,9 @@ test('backup covers every space on the device, not the one on screen', async () 
   await call('item:add', { groupId: b.groupId, listId: l2.listId, text: 'Bins' })
 
   const exp = await call('backup:export', {})
-  assert.deepEqual(exp.counts, { spaces: 2, lists: 2, items: 2 })
+  assert.equal(exp.counts.spaces, 2)
+  assert.equal(exp.counts.lists, 2)
+  assert.equal(exp.counts.items, 2)
   assert.match(exp.filename, /^pearlist-backup-\d{4}-\d{2}-\d{2}\.json$/)
   const doc = JSON.parse(exp.json)
   assert.deepEqual(doc.spaces.map((s) => s.name).sort(), ['family', 'Fresh'].sort())
@@ -537,6 +539,57 @@ test('an item reminder is NOT carried into a restore', async () => {
   const restored = imp.spaces.find((s) => s.name === 'Home')
   const lid = (await call('list:getAll', { groupId: restored.groupId }))[0].id
   assert.equal((await call('item:getAll', { groupId: restored.groupId, listId: lid }))[0].remindAt, undefined)
+  await engine.close()
+})
+
+test('saved lists survive a restore, and an existing one is never overwritten', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'Monthly shop', kind: 'grocery' })
+  await call('item:add', { groupId, listId, text: 'Rice' })
+  await call('template:save', { groupId, listId, name: 'Monthly shop' })
+
+  const exp = await call('backup:export', {})
+  assert.equal(exp.counts.templates, 1, 'the saved list is in the file')
+
+  // Importing onto the SAME device, which already holds that template by name.
+  const again = await call('backup:import', { jsonString: exp.json })
+  assert.equal(again.counts.templates, 0, 'nothing added: the name is already taken')
+  assert.equal((await call('template:list', {})).length, 1, 'and it was not duplicated')
+
+  // The one that matters is a fresh device, where nothing collides.
+  const fresh = driver()
+  await fresh.call('init', {})
+  const restored = await fresh.call('backup:import', { jsonString: exp.json })
+  assert.equal(restored.counts.templates, 1)
+  const [t] = await fresh.call('template:list', {})
+  assert.equal(t.name, 'Monthly shop')
+  assert.equal(t.count, 1)
+  await engine.close(); await fresh.engine.close()
+})
+
+test('learned aisles and hand-made aisle names ride through the worklet', async () => {
+  // Both live in the WebView's localStorage, so the worklet only ferries them:
+  // in as arguments to export, out as results from import. The custom aisles come
+  // back keyed by the id the space was JUST given, which only the worklet knows.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'G', kind: 'grocery' })
+  await call('item:add', { groupId, listId, text: 'Milk' })
+
+  const exp = await call('backup:export', {
+    learnedAisles: { parmesan: 'Baking' },
+    customAisles: { [groupId]: ['Deli counter'] },
+  })
+  assert.equal(exp.counts.learnedAisles, 1)
+
+  const imp = await call('backup:import', { jsonString: exp.json })
+  assert.deepEqual(imp.learnedAisles, { parmesan: 'Baking' })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  assert.deepEqual(restored.customAisles, ['Deli counter'])
+  assert.notEqual(restored.groupId, groupId, 'and they are attached to the NEW space id')
   await engine.close()
 })
 

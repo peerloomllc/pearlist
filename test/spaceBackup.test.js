@@ -5,7 +5,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { buildBackup, parseBackup, backupFilename, KIND, KIND_LEGACY_SINGLE, VERSION, MAX_ITEMS, MAX_SPACES } = require('../src/spaceBackup')
+const { buildBackup, parseBackup, backupFilename, KIND, KIND_LEGACY_SINGLE, VERSION, MAX_ITEMS, MAX_SPACES, MAX_LEARNED, MAX_TEMPLATES, MAX_CUSTOM_AISLES } = require('../src/spaceBackup')
 
 const row = (over = {}) => ({ text: 'Milk', qty: 1, checked: false, ...over })
 const space = (name, lists) => ({ name, lists })
@@ -35,7 +35,9 @@ test('EVERY space, not just one: that is the whole point of a backup', () => {
   }))
   const back = parseBackup(JSON.stringify(doc))
   assert.deepEqual(back.spaces.map((s) => s.name), ['Fresh', 'family', 'Cabin'])
-  assert.deepEqual(back.counts, { spaces: 3, lists: 3, items: 3 })
+  assert.equal(back.counts.spaces, 3)
+  assert.equal(back.counts.lists, 3)
+  assert.equal(back.counts.items, 3)
 })
 
 test('carries item state a template deliberately drops', () => {
@@ -110,6 +112,48 @@ test('never carries the household: no identity, keys, assignee or reminder', () 
   const it = doc.spaces[0].lists[0].items[0]
   assert.equal(it.assignee, undefined)
   assert.equal(it.remindAt, undefined)
+})
+
+test('device-local extras round trip: learned aisles, custom aisles, saved lists', () => {
+  const doc = buildBackup({
+    exportedAt: 1,
+    spaces: [{ name: 'S', customAisles: ['Deli', 'Deli', '  '], lists: [{ name: 'L', kind: 'grocery', items: [row()] }] }],
+    learnedAisles: { ' Parmesan ': 'Baking', '': 'Nope', milk: '' },
+    templates: [{ id: 'dropped', name: 'Monthly shop', kind: 'grocery', entries: [{ text: 'Rice' }, { text: '' }] }],
+  })
+  const back = parseBackup(JSON.stringify(doc))
+  assert.deepEqual(back.spaces[0].customAisles, ['Deli'], 'deduped, blanks dropped')
+  assert.deepEqual(back.learnedAisles, { parmesan: 'Baking' }, 'trimmed, blank keys and values dropped')
+  assert.equal(back.templates.length, 1)
+  assert.equal(back.templates[0].name, 'Monthly shop')
+  assert.deepEqual(back.templates[0].entries, [{ text: 'Rice' }], 'an entry with no text is not an entry')
+  assert.equal(back.templates[0].id, undefined, 'the importing device mints its own id')
+})
+
+test('an empty template is not carried', () => {
+  const doc = buildBackup({ exportedAt: 1, spaces: [{ name: 'S', lists: [{ name: 'L', items: [row()] }] }], templates: [{ name: 'Empty', entries: [] }] })
+  assert.equal(parseBackup(JSON.stringify(doc)).templates.length, 0)
+})
+
+test('the device-local extras are capped', () => {
+  const learned = {}
+  for (let i = 0; i < MAX_LEARNED + 50; i++) learned['item' + i] = 'Aisle'
+  const templates = Array.from({ length: MAX_TEMPLATES + 5 }, (_, i) => ({ name: 'T' + i, entries: [{ text: 'x' }] }))
+  const customAisles = Array.from({ length: MAX_CUSTOM_AISLES + 10 }, (_, i) => 'A' + i)
+  const doc = buildBackup({ exportedAt: 1, spaces: [{ name: 'S', customAisles, lists: [{ name: 'L', items: [row()] }] }], learnedAisles: learned, templates })
+  const back = parseBackup(JSON.stringify(doc))
+  assert.equal(Object.keys(back.learnedAisles).length, MAX_LEARNED)
+  assert.equal(back.templates.length, MAX_TEMPLATES)
+  assert.equal(back.spaces[0].customAisles.length, MAX_CUSTOM_AISLES)
+})
+
+test('a backup with no device-local extras is still valid', () => {
+  const doc = buildBackup(snapshot())
+  assert.equal(doc.learnedAisles, undefined, 'omitted rather than an empty object')
+  assert.equal(doc.templates, undefined)
+  const back = parseBackup(JSON.stringify(doc))
+  assert.deepEqual(back.learnedAisles, {})
+  assert.deepEqual(back.templates, [])
 })
 
 test('rejects a file that is not ours, with a message for a person', () => {

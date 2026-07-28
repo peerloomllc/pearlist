@@ -690,6 +690,27 @@ function rememberOverride (text, aisle) {
     localStorage.setItem(OVERRIDES_KEY, JSON.stringify(m))
   } catch {}
 }
+// Restore learned aisles from a backup. MERGE, and this device wins: an entry it
+// already holds is a correction the user made HERE, which is newer information
+// than a file that has been sitting in Downloads. Same 500 cap as rememberOverride,
+// oldest dropped first, so a big file cannot push out everything recent.
+function mergeOverrides (incoming) {
+  try {
+    if (!incoming || typeof incoming !== 'object') return 0
+    const m = loadOverrides()
+    let added = 0
+    for (const [text, aisle] of Object.entries(incoming)) {
+      const n = normItemText(text)
+      if (!n || !aisle || m[n]) continue
+      m[n] = String(aisle)
+      added++
+    }
+    const keys = Object.keys(m)
+    if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete m[k]
+    localStorage.setItem(OVERRIDES_KEY, JSON.stringify(m))
+    return added
+  } catch { return 0 }
+}
 function overrideFor (text) { try { return loadOverrides()[normItemText(text)] || null } catch { return null } }
 function overrideCount () { try { return Object.keys(loadOverrides()).length } catch { return 0 } }
 function clearOverrides () { try { localStorage.removeItem(OVERRIDES_KEY) } catch {} }
@@ -1677,7 +1698,15 @@ export default function App () {
   // the one somebody most needs a copy of.
   async function exportBackup () {
     try {
-      const { json, filename, counts } = await call('backup:export', {})
+      // The worklet cannot read these: Learned Aisles and the hand-made aisle
+      // names live in the WebView's localStorage. Collected per space by groupId,
+      // because the import mints new ids and only the worklet knows the mapping.
+      const customAisles = {}
+      for (const sp of spaces) {
+        const names = loadCustomAisles(sp.groupId)
+        if (names.length) customAisles[sp.groupId] = names
+      }
+      const { json, filename, counts } = await call('backup:export', { learnedAisles: loadOverrides(), customAisles })
       const saved = await call('shell:saveFile', { filename, content: json })
       if (saved && saved.canceled) return // they backed out of the folder picker
       const parts = [
@@ -1685,6 +1714,8 @@ export default function App () {
         `${counts.lists} list${counts.lists === 1 ? '' : 's'}`,
         `${counts.items} item${counts.items === 1 ? '' : 's'}`,
       ]
+      // Only mentioned when there are some, so the common case stays short.
+      if (counts.templates) parts.push(`${counts.templates} saved list${counts.templates === 1 ? '' : 's'}`)
       // Where it went matters as much as that it worked: a file nobody can find
       // again is not a backup.
       setBanner('Saved ' + parts.join(', ') + (saved && saved.where ? ` to ${saved.where}` : ''))
@@ -1699,8 +1730,20 @@ export default function App () {
       const picked = await call('shell:pickFile', {})
       if (!picked || picked.canceled) return
       if (!String(picked.content || '').trim()) throw new Error('that file is empty')
-      const { spaces, counts } = await call('backup:import', { jsonString: picked.content })
+      const { spaces, learnedAisles, counts } = await call('backup:import', { jsonString: picked.content })
+      // The localStorage half, which only the UI can write. MERGE for the learned
+      // aisles (an entry this device already has is a more recent correction than
+      // one from a file), and per space for the aisle names, keyed by the id the
+      // space was just given.
+      mergeOverrides(learnedAisles)
+      for (const sp of (spaces || [])) {
+        for (const name of (sp.customAisles || [])) rememberCustomAisle(sp.groupId, name)
+      }
       await loadSpaces()
+      // Saved lists are loaded once at mount, so without this the restored ones
+      // sit in localDb unseen until the next launch - which reads as "my saved
+      // lists did not come back". Caught on-device 2026-07-28.
+      await loadTemplates()
       // A notice, not a banner, because it asks the user to go and DO something,
       // and a banner they miss is the same as never having said it.
       //
