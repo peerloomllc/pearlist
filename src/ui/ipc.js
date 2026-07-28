@@ -224,6 +224,22 @@ const mockMethods = {
   'shell:bgsync:get': async () => ({ supported: false, enabled: false }),
   'shell:bgsync:set': async ({ enabled }) => ({ supported: false, enabled: !!enabled }),
   'shell:scanQr': async () => { const code = window.prompt ? window.prompt('Paste an invite code (camera scan on device):') : null; return { code: code || null } },
+  // Browser preview stands in for the OS file pickers: a download for save, a
+  // paste box for pick. Enough to exercise the flow without a device.
+  'shell:saveFile': async ({ filename, content }) => {
+    try {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
+      a.download = filename || 'pearlist-export.json'
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch {}
+    return { ok: true }
+  },
+  'shell:pickFile': async () => {
+    const content = window.prompt ? window.prompt('Paste an exported PearList space (JSON):') : null
+    return content ? { canceled: false, content, name: 'pasted.json' } : { canceled: true }
+  },
 }
 // Browser design preview: open index.html?seed to land on a populated list
 // instead of onboarding. Seeds lazily on the first mock call (after all module

@@ -15,6 +15,8 @@ import * as Device from 'expo-device'
 import * as Linking from 'expo-linking'
 import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
+import * as DocumentPicker from 'expo-document-picker'
+import * as Sharing from 'expo-sharing'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
@@ -529,6 +531,9 @@ export default function Shell () {
   const pendingDeeplink = useRef<string | null>(null)
   const pendingNotifNav = useRef<any>(null) // notification-tap target, buffered until the WebView mounts
   const canBackRef = useRef(false) // set by shell:navState; drives the back button
+  // Set immediately before we hand off to an OS screen (share sheet, file
+  // picker), cleared by the resume it causes. See the WebView recovery effect.
+  const osUiActive = useRef(false)
   const insets = useSafeAreaInsets()
 
   useEffect(() => { _webViewRef = webViewRef })
@@ -680,6 +685,7 @@ export default function Shell () {
     try {
       switch (method) {
         case 'shell:share': {
+          osUiActive.current = true
           const res = await Share.share({ message: args?.text ?? '', title: args?.title ?? '' })
           return reply(id, { ok: res.action !== Share.dismissedAction })
         }
@@ -690,6 +696,45 @@ export default function Shell () {
         case 'shell:canOpenURL': {
           const can = await Linking.canOpenURL(args?.url ?? '').catch(() => false)
           return reply(id, { ok: true, can: !!can })
+        }
+        // Space export / import (src/spaceBackup.js). The worklet owns the format;
+        // the shell only moves bytes to and from a file the user can see, because
+        // only the shell has the OS file pickers.
+        //
+        // Share sheet rather than a direct write on BOTH platforms. PearGuard has
+        // a native Downloads module for the Android path; PearList has no custom
+        // native code and the share sheet is the same two taps, so this stays
+        // dependency-light and identical on iOS and Android.
+        case 'shell:saveFile': {
+          const filename = args?.filename
+          const content = args?.content
+          if (typeof filename !== 'string' || !filename || typeof content !== 'string') {
+            return replyError(id, 'filename and content are required')
+          }
+          // cacheDirectory, not documentDirectory: once it has been shared the copy
+          // here is dead weight, and the OS reclaims the cache on its own.
+          const uri = (FileSystem.cacheDirectory || '') + filename
+          await FileSystem.writeAsStringAsync(uri, content, { encoding: FileSystem.EncodingType.UTF8 })
+          if (!(await Sharing.isAvailableAsync())) return replyError(id, 'this device cannot share files')
+          osUiActive.current = true
+          await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Save ' + filename, UTI: 'public.json' })
+          return reply(id, { ok: true, uri })
+        }
+        case 'shell:pickFile': {
+          // '*/*' is in the type list deliberately: a .json arriving via a chat app
+          // or a cloud drive is often typed as octet-stream, and a picker that
+          // cannot see the file is indistinguishable from a broken export.
+          osUiActive.current = true
+          const res = await DocumentPicker.getDocumentAsync({
+            type: ['application/json', 'text/plain', '*/*'],
+            copyToCacheDirectory: true,
+            multiple: false,
+          })
+          if (res.canceled) return reply(id, { canceled: true })
+          const asset = res.assets && res.assets[0]
+          if (!asset) return replyError(id, 'no file selected')
+          const content = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.UTF8 })
+          return reply(id, { canceled: false, content, name: asset.name })
         }
         case 'shell:clipboard': {
           // Copy to the OS clipboard. navigator.clipboard is unreliable in the
@@ -817,7 +862,17 @@ export default function Shell () {
       if (state !== 'active') return
       const backgroundedFor = backgroundedAt.current ? Date.now() - backgroundedAt.current : 0
       backgroundedAt.current = 0
-      if (backgroundedFor >= WEBVIEW_RECOVERY_MIN_BG_MS) terminateWebViewRenderer()
+      // NOT after an OS screen WE opened. A file picker or a share sheet is
+      // another activity, so it backgrounds us and easily takes more than 20s -
+      // and the WebView is not frozen behind it, it is simply covered.
+      //
+      // Recovering there is actively destructive: the reload throws away the JS
+      // context holding the pending request, so the reply lands on a page that no
+      // longer has __pearResponse and the whole operation is silently lost.
+      // Measured on the TCL 2026-07-28 picking a file to import - `Renderer
+      // process crash detected` followed by three `window.__pearResponse is not a
+      // function`, and an import that simply never happened.
+      if (osUiActive.current) { osUiActive.current = false } else if (backgroundedFor >= WEBVIEW_RECOVERY_MIN_BG_MS) terminateWebViewRenderer()
       // Android 15+ allows only 6h of dataSync foreground service per 24h. When
       // that runs out the service stops itself (see BgSyncService.onTimeout), and
       // the allowance resets precisely when the app is foregrounded - here. Re-arm
