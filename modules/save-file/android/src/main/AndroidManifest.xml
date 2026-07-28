@@ -1,0 +1,3 @@
+<!-- No permissions and no components: ACTION_CREATE_DOCUMENT is the system's own
+     save dialog, and it grants access to exactly the one file the user picks. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

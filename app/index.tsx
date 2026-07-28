@@ -22,6 +22,7 @@ import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
 import { terminateWebViewRenderer } from '../modules/webview-recovery'
+import { saveTextFile, saveFileSupported } from '../modules/save-file'
 
 // --- local notifications (assignment + join + completion; ON by default) ----
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
@@ -146,6 +147,7 @@ const _remindLines: string[] = []
 // answer is the same one: the app did something invisible and nobody can tell
 // what. Pullable with scripts/pull-reminder-log.sh.
 function bootLog (msg: string) { remindLog('BOOT ' + msg) }
+
 
 function remindLog (msg: string) {
   const line = new Date().toISOString() + ' ' + msg
@@ -711,6 +713,30 @@ export default function Shell () {
           if (typeof filename !== 'string' || !filename || typeof content !== 'string') {
             return replyError(id, 'filename and content are required')
           }
+          // ANDROID: the system SAVE dialog (modules/save-file), not the share
+          // sheet. Two routes were tried and measured on 2026-07-28 before this
+          // one, and both fail at exactly the moment a backup matters:
+          //
+          //   The share sheet only offers APPS, and which apps can put a file into
+          //   storage varies by device. On GrapheneOS there is no "save to
+          //   Downloads" target at all, so the file had nowhere to go - the report
+          //   that started this.
+          //
+          //   SAF directory permissions cannot be granted on Downloads OR on the
+          //   storage root: the picker says "Can't use this folder - To protect
+          //   your privacy, choose another folder" with the confirm disabled. That
+          //   is an OS rule since Android 11, reproduced on the stock-Android TCL,
+          //   so it is not a GrapheneOS quirk to work around.
+          if (Platform.OS === 'android') {
+            if (!saveFileSupported) return replyError(id, 'saving files is not supported on this device')
+            osUiActive.current = true // an OS screen: see the WebView recovery effect
+            const res = await saveTextFile(filename, content)
+            if (res.canceled) return reply(id, { canceled: true })
+            return reply(id, { ok: true, uri: res.uri, where: res.name })
+          }
+          // iOS: the share sheet IS the file picker here - "Save to Files" leads to
+          // the same choose-a-folder flow, and there is no SAF to use instead.
+          //
           // cacheDirectory, not documentDirectory: once it has been shared the copy
           // here is dead weight, and the OS reclaims the cache on its own.
           const uri = (FileSystem.cacheDirectory || '') + filename
