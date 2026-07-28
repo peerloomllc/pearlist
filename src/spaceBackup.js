@@ -34,6 +34,48 @@
 // A recurring chore's CYCLE is not a reminder and is carried: see lastDoneAt in
 // exportItem.
 
+// FIELD AUDIT (2026-07-28). Every field applyListOp accepts on a list or item
+// row, and the decision for each. Two omissions in the first cut were found by
+// writing this out rather than by anyone noticing: `repeat` (guarded on the wrong
+// type, so recurring chores were never carried) and `notifyOnComplete`. Keep this
+// table in step with the row shapes at the top of listWire.js - a field added
+// there and not decided here is dropped silently, which is exactly the failure
+// mode this exists to prevent.
+//
+// ITEM ROW
+//   text, qty, checked, category, ord, note, url   CARRY - the item itself
+//   catBy                                          CARRY - pins a hand-chosen aisle
+//   repeat, lastDoneAt                             CARRY - the chore and its cycle
+//   assignee                                       DROP  - a pubkey with no meaning
+//                                                          in a space that has one
+//                                                          member: the importer
+//   remindAt, remindBy                             DROP  - absolute time + identity
+//   id, listId                                     DROP  - regenerated on import
+//   createdBy, pubkey, updatedAt                   DROP  - identity / signing
+//   createdAt                                      DROP  - deliberately. It is the
+//                                                          tie-break for item order,
+//                                                          and the import writes in
+//                                                          file order with a stable
+//                                                          sort, so the original
+//                                                          order survives anyway
+//   deleted                                        DROP  - tombstones are not exported
+//
+// LIST ROW
+//   name, kind                                     CARRY
+//   notifyOnComplete                               CARRY - the user chose it
+//   assignee                                       DROP  - as above
+//   id, createdBy, createdAt, pubkey, updatedAt    DROP  - as above
+//   deleted                                        DROP  - not exported
+//
+// SPACE ROW
+//   name                                           CARRY - as the space's name
+//   owner                                          DROP  - the importer becomes owner
+//   evicted, revokeV1                              DROP  - membership and trust state
+//                                                          about people who are not
+//                                                          in the new space
+//
+// MEMBER ROWS are not exported at all: they are the household, not the lists.
+
 const KIND = 'pearlist-backup'
 // The one-space shape this replaced (`kind: 'pearlist-space'`) never shipped, but
 // reading it is a few lines and the format is meant to be forgiving.
@@ -56,6 +98,12 @@ function exportItem (row) {
   if (Number.isFinite(row.qty) && row.qty !== 1) out.qty = row.qty
   if (row.checked === true) out.checked = true
   if (clean(row.category)) out.category = clean(row.category)
+  // Marks an aisle the USER chose by hand rather than one the keyword pass
+  // guessed. It is a pin: the auto-categorizer skips catBy:'user' items. Carrying
+  // `category` without it restored the aisle but not the decision, so a later
+  // pass could quietly move an item the user had deliberately filed. (Audit,
+  // 2026-07-28. template:save has always carried it; the backup had not.)
+  if (clean(row.catBy)) out.catBy = clean(row.catBy)
   if (clean(row.ord)) out.ord = clean(row.ord)
   if (clean(row.note)) out.note = clean(row.note)
   if (clean(row.url)) out.url = clean(row.url)
@@ -96,7 +144,15 @@ function takeLists (lists, budget) {
       entries.push(exportItem({ ...it, text }))
       budget.left--
     }
-    out.push({ name: clean(l.name) || 'List', kind: clean(l.kind) || null, items: entries })
+    // notifyOnComplete ('off' | 'each' | 'done') is a setting the user chose for
+    // this list, not identity and not time-bound, so it belongs in a backup.
+    // Missed in the first cut; found by the 2026-07-28 field audit.
+    out.push({
+      name: clean(l.name) || 'List',
+      kind: clean(l.kind) || null,
+      ...(clean(l.notifyOnComplete) ? { notifyOnComplete: clean(l.notifyOnComplete) } : {}),
+      items: entries,
+    })
   }
   return out
 }

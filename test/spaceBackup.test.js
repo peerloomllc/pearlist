@@ -76,6 +76,25 @@ test('lastDoneAt is a record, not a scheduled instant, so it is safe to carry', 
   assert.equal(it.remindAt, undefined, 'reminders stay out')
 })
 
+test('a hand-chosen aisle stays pinned: catBy survives', () => {
+  // category without catBy restores the aisle but not the DECISION, so a later
+  // auto-categorize pass could quietly move an item the user had filed by hand.
+  const doc = buildBackup(snapshot({
+    spaces: [space('S', [{ name: 'G', kind: 'grocery', items: [row({ category: 'Baking', catBy: 'user' })] }])],
+  }))
+  const it = parseBackup(JSON.stringify(doc)).spaces[0].lists[0].items[0]
+  assert.equal(it.category, 'Baking')
+  assert.equal(it.catBy, 'user')
+})
+
+test("a list's completion-notification setting survives", () => {
+  const doc = buildBackup(snapshot({
+    spaces: [space('S', [{ name: 'Chores', kind: 'chore', notifyOnComplete: 'done', items: [row()] }])],
+  }))
+  const l = parseBackup(JSON.stringify(doc)).spaces[0].lists[0]
+  assert.equal(l.notifyOnComplete, 'done')
+})
+
 test('never carries the household: no identity, keys, assignee or reminder', () => {
   const doc = buildBackup(snapshot({
     spaces: [space('S', [{

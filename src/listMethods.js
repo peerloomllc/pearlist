@@ -576,7 +576,7 @@ const methods = {
           for await (const { value: it } of base.view.createReadStream(itemRange(l.id))) {
             if (it && !it.deleted) items.push(it)
           }
-          lists.push({ name: l.name, kind: l.kind, items })
+          lists.push({ name: l.name, kind: l.kind, notifyOnComplete: l.notifyOnComplete, items })
         }
         spaces.push({ name, lists })
       } catch { continue }
@@ -610,6 +610,9 @@ const methods = {
         await putRow(ctx, groupId, listKey(listId), {
           id: listId, name: l.name, kind: normalizeKind(l.kind), assignee: null,
           createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+          // A user's own setting for this list, so it is restored. Normalized
+          // here because the file may have been hand-edited.
+          ...(normalizeNotifyMode(l.notifyOnComplete) ? { notifyOnComplete: normalizeNotifyMode(l.notifyOnComplete) } : {}),
         })
         for (const e of l.items) {
           const itemId = newEntityId()
@@ -617,7 +620,7 @@ const methods = {
           await putRow(ctx, groupId, itemKey(listId, itemId), {
             id: itemId, listId, text: String(e.text ?? ''), qty: Number.isFinite(e.qty) ? e.qty : 1,
             checked: e.checked === true, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
-            ...(e.category ? { category: e.category } : {}),
+            ...(e.category ? { category: e.category, ...(e.catBy ? { catBy: String(e.catBy) } : {}) } : {}),
             ...(e.ord ? { ord: e.ord } : {}),
             ...(e.note ? { note: e.note } : {}),
             ...(e.url ? { url: e.url } : {}),

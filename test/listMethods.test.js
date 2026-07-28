@@ -499,6 +499,27 @@ test('a recurring chore comes back DONE, not due, after a restore', async () => 
   await engine.close()
 })
 
+test('a pinned aisle and a list notify setting survive a real restore', async () => {
+  // The two omissions the 2026-07-28 field audit found, end to end.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'Chores', kind: 'chore' })
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'done' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'Flour' })
+  await call('ai:setCategory', { groupId, listId, itemId, category: 'Baking', by: 'user' })
+
+  const exp = await call('backup:export', {})
+  const imp = await call('backup:import', { jsonString: exp.json })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  const [list] = await call('list:getAll', { groupId: restored.groupId })
+  assert.equal(list.notifyOnComplete, 'done', 'the list keeps the setting the user chose')
+  const [item] = await call('item:getAll', { groupId: restored.groupId, listId: list.id })
+  assert.equal(item.category, 'Baking')
+  assert.equal(item.catBy, 'user', 'and the aisle stays pinned as a hand-made choice')
+  await engine.close()
+})
+
 test('an item reminder is NOT carried into a restore', async () => {
   // Deliberate: remindAt is an absolute instant, so a month-old backup would hand
   // the OS a pile of past-dated reminders. The UI says so after every import.
