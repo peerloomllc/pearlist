@@ -1,148 +1,174 @@
-# Device linking (one person, several devices, one member)
+# Adopt @peerloom/device-link (one person, several devices, one identity)
 
 ## Goal
 
-Let one person's phones be one member of a household, instead of one member per
-device - so a second phone, or a replacement phone, does not arrive as a stranger.
+Let one person's phones be one person - so a second phone, or a replacement
+phone, is not a stranger to their own household.
 
 ## Tier
 
-T3. It changes what a signed row's `pubkey` MEANS, which every trust rule in the
-app is keyed on: `space.owner`, `space.evicted`, the member-row write rule,
-`assignee`, `reminderTargetOf`. Apply behaviour changes, so a peer on old code
-computes a different view and the space FORKS. Same hazard class as writer
-revocation, and it needs the same capability gate.
+T3. Identity is what every trust rule in the app is keyed on: `space.owner`,
+`space.evicted`, the member-row write rule, `assignee`, `reminderTargetOf`. How
+far this proposal goes decides whether apply behaviour changes at all (see
+"The decision that decides everything").
 
-## Where this came from
+## This replaces a from-scratch design, and that is the point
 
-2026-07-28, working the rejoin report. Ownership recovery was proposed, accepted,
-then dropped (DECISIONS.md, same day) once export/import made "recreate the space"
-cheap. What was left standing after that argument was the thing underneath it:
+The first version of this file designed two mechanisms from nothing. Both were
+worse than what the suite already has, and writing them was wasted effort that a
+few minutes of looking would have avoided. What actually exists:
 
-**Identity is per-DEVICE and nothing in the app says so.** Tim's Pixel and his
-iPhone are two members of his own household. A reinstall makes a new person. The
-memory note "device identity is not a person" has been true the whole time and
-this is the first proposal aimed at it rather than around it.
+- **`@peerloom/device-link`** - mnemonic identity, a personal multi-device
+  Autobase, the pairing handshake, and a linked-device roster. Extracted from
+  PearCal the way `@peerloom/core` was extracted from PearCircle.
+- **PearPetal has already adopted it** (`pearpetal/proposals/2026-07-12-adopt-device-link.md`),
+  so the integration shape is not hypothetical - there is a worked example with
+  decisions already argued.
+- **Core's seam is already cut.** device-link needs the app's `store` and `swarm`;
+  core exposes both on the engine object and in `methodCtx`, with a comment naming
+  device-link as the reason. **No core change is needed to adopt.**
 
-## What this DOES NOT fix, stated first
+## State of the parts, verified rather than read off a README
 
-**It does not fix the report that started all this.** That device was never
-ADMITTED as an Autobase writer. A fresh install has a NEW writer core whatever
-identity it holds - the writer core comes from the corestore namespace, not from
-the keypair - so it still has to be admitted by a writer that is online at the
-same time. Linking changes who the device claims to BE, not whether it may write.
+| | Status |
+| --- | --- |
+| device-link pure modules (pair-link, handshake, device-meta, identity) | `npm test` **21/21** |
+| device-link stateful engine (`personal.js`) | `npm run test:integration` - two-peer pairing **passes**, group-plugin fan-out **passes** (both run 2026-07-28) |
+| Core seam (`store` / `swarm` exposed) | already in `master` |
+| PearPetal adoption | proposal decided, `deviceLink.js` + `privateStore.js` wired |
 
-I said the opposite earlier in the session. It was wrong, and worth writing down
-here because it is the natural thing to assume about a feature called "linking".
+**And the thing that matters most: the donor never fully shipped.** PearCal's
+mnemonic and pairing code exists and reads as complete, but it is not in use
+(Tim, 2026-07-28). So this is NOT a battle-tested feature waiting to be consumed.
+PearList would be helping finish it, and should plan for engine bugs surfacing in
+`@peerloom/device-link` rather than in PearList. PearPetal's proposal already
+carries one such known defect: a **deferred B->A writer stall under connection
+churn**, with a hard gate that it must be proven fixed on hardware before their
+flag flips.
 
-**It does not rescue a phone that is already gone.** Both designs below need the
-two devices to meet, at least once, while both work. Like the successor mechanism
-this replaces, it protects the next household, not the one already broken.
+## The decision that decides everything
 
-## The finding that decides the design
+PearPetal chose **coexist**, and it is the low-risk option:
 
-`identity` currently does two unrelated jobs:
+> core's per-device keypair keeps signing rows exactly as today; device-link's
+> mnemonic is the recovery + pairing anchor for the personal base only.
 
-1. **It signs rows.** `signValue(..., ctx.identity.secretKey)`, and every trust
-   rule compares `value.pubkey` against it.
-2. **It is this node's DHT identity.** `swarm = makeSwarm({ keyPair: identity })`
-   in engine.js - the same object, handed to Hyperswarm as its keypair.
+**Read that carefully, because for PearList the low-risk option does not buy the
+headline.** PearList's spaces are core groups. Their rows are signed by the core
+per-device key. So under coexist:
 
-That coupling is the whole problem. "Who I am" wants to be shared across my
-devices; "which node this is" must not be - two peers announcing the same DHT
-keypair is two records for one public key, and anyone dialling it reaches either
-one. Discovery and holepunching are not built for that, and the failures would be
-intermittent, which is the worst kind.
+- Two linked phones are still **two members** of a space.
+- A reinstall is still a **new person**, even holding the recovery phrase.
+- `space.owner` still dies with the device.
 
-**So step one, whichever design wins: give the swarm its own per-device keypair
-and stop handing it the signing identity.** That is a small change in core, it is
-independently correct, and it can ship on its own with no wire change - a device's
-DHT key becoming a random per-device key breaks nothing, because nothing in the
-app derives meaning from it. Do this first and measure it before anything else.
+Coexist gives PearList a recovery phrase for a personal base it does not currently
+have, and a device roster - real, but not the wart anyone actually feels.
 
-## Two designs
+The version that fixes the wart is the one PearPetal explicitly deferred:
 
-### A. Share the identity (the same keypair on both devices)
+> **Mnemonic-root**: derive core's per-device key from the device-link mnemonic so
+> there is a single identity source. Touches core identity generation - a separate
+> T3, not this change.
 
-The second device receives the Ed25519 secret key and stores it as its own
-identity. Both devices then sign as the same pubkey.
+That is the slice PearList actually wants, and it is the dangerous one: it changes
+what a member IS, across every space already in the field, in an app where the
+member key is written into signed rows that other people's devices have already
+accepted.
 
-- **One member row**, automatically. No new rules: every existing check keyed on
-  pubkey keeps working, unchanged, because there genuinely is one identity.
-- **Ownership, assignment and reminders follow for free.** A new phone holding the
-  linked identity IS the owner.
-- Each device still has its own Autobase writer core, so each is admitted
-  separately - the pair channel already does exactly this.
+**Recommendation: plan for mnemonic-root as the goal, but land it last and behind
+its own gate.** Slices 1-3 are useful on their own and are how the engine gets
+exercised before it is trusted with identity.
 
-**The cost is that a secret key has to travel.** A QR or deep link carrying a
-secret is a screenshot away from handing someone your identity permanently, and
-unlike an invite it cannot be revoked - there is no way to un-know a private key.
-It would need to be one-shot, short-lived, shown only on an explicit "link a
-device" screen, and it should never be the same code path or visual language as an
-invite, because an invite is safe to forward and this is not.
+## What PearList must supply
 
-### B. Alias claim (each device keeps its own key)
+device-link is injected with the app's runtime and its app-specific pieces:
 
-Device B keeps its own keypair and publishes `member:{B}` carrying a claim to be
-the same person as A, countersigned by A. The roster merges them for display.
+1. **A keystore.** PearList has none today - the mnemonic must live in native
+   secure storage, not localDb, or a device wipe takes the recovery phrase with
+   it and the whole point is lost. PearCal does this through a native request;
+   PearList would need the equivalent module.
+2. **`records` + `mirror`** - what personal-scope records exist and where they
+   land locally. PearList has no personal-scope data today. Candidates that are
+   currently device-local and were lost on a wipe until this afternoon's backup:
+   Learned Aisles, custom aisle names, saved lists. Moving those onto the personal
+   base would make them follow the person rather than the phone.
+3. **A `groupPlugin` - unlike PearPetal.** PearPetal injects none, because partner
+   sharing stays on core. For PearList the groups ARE the product: a newly linked
+   device must be cross-granted writer access on every space the person is in, or
+   it links successfully and then cannot write to anything. device-link has this
+   leg (`group-plugin.integration.js`, passing) and PearList would be its first
+   real consumer.
 
-- **No secret ever moves.** That is the whole appeal.
-- But "one member" becomes a VIEW-level merge, not a cryptographic fact. Every
-  rule keyed on pubkey has to learn about alias sets: owner checks, the
-  member-row-write rule, evicted lookups, assignee rendering, reminder targeting.
-  Each one is a place to get it subtly wrong, and getting it wrong on the apply
-  side forks the space.
-- Revoking a link is possible here (A can retract), which A cannot offer.
+## UI (the question that prompted this)
 
-### Recommendation
+There is none today, because nothing is built. Where it goes, following PearCal:
 
-**A, after the swarm-key split.** Not because sharing a secret is comfortable -
-it is not - but because B pays for its safety with a permanent widening of every
-trust rule in the app, and this codebase has just spent a day discovering how much
-gets silently missed when one concept is spread across many places. A concentrates
-the risk into a single, auditable moment (the transfer) rather than dispersing it
-across the apply path forever.
+- **Onboarding becomes a two-level choice.** Today PearList asks one question
+  (create / join / open a saved copy). With identity separated from space, the
+  first question becomes *who are you* - "Start fresh" vs "I already use PearList"
+  (pair with a device you still have, or enter a recovery phrase) - and only then
+  the existing space question. PearCal's wording is worth stealing: *"Pair to
+  bring your identity, profile, and groups across from another device."*
+- **Settings -> Linked devices**: the roster from `listLinkedDevices()`, with
+  nickname editing and unlink, plus a "Pair another device" action.
+- **Settings -> Recovery phrase**: show and save, with a re-entry point for
+  restore. This is the user-visible payoff, and it is the first screen in PearList
+  where showing something on-screen is itself the risk - it deserves the scarier
+  confirmation, not the same styling as an invite.
 
-If the transfer risk is judged unacceptable, the honest answer is not B - it is to
-do the swarm-key split, fix nothing else, and leave people with two members and
-export/import, which is where we already are.
+## Slices
+
+1. **Dependency + keystore + personal base, dark.** No UI. `createDeviceLink`
+   beside the group engine, behind a flag. Exercises nothing user-facing.
+2. **Pairing + Linked devices in Settings.** The roster and the handshake, with
+   the group plugin so a linked device can actually write. This is where the
+   engine gets its real workout, and where the B->A stall would show up.
+3. **Recovery phrase surface + restore in onboarding.** Under coexist this
+   recovers the personal base, not space membership - the copy must not overstate
+   it, or the first person to lose a phone will be angrier than if we had said
+   nothing.
+4. **Mnemonic-root (separate T3, own gate).** Core's signing key derives from the
+   mnemonic. Only now do "same member across my phones" and "a reinstall is still
+   me" become true. Needs a migration story for identities already in the field
+   and its own fork test.
 
 ## Compat
 
-- The swarm-key split is invisible to peers: nothing reads another peer's DHT key.
-- Linking itself is dormant until used, but a linked device's writes are
-  indistinguishable from the original device's, so old peers need no new
-  understanding under design A. That is a real advantage over B, which needs the
-  capability gate before any alias claim is written.
+- Slices 1-3 are additive: a device that never pairs behaves exactly as today.
+- Slice 4 is not. Every space in the field has member rows and an owner keyed to
+  the current per-device keys. Changing how that key is derived either needs those
+  identities carried across (the old key keeps working, the mnemonic-derived one
+  is added) or it orphans people from their own spaces. That migration is the
+  hard part of slice 4 and should be designed before slice 4 is started, not
+  during.
 
 ## Verify
 
-1. Swarm split alone: two devices, same identity file, confirm discovery and
-   pairing still work and no intermittent dial failures over a long soak. This is
-   the step most likely to surface something unexpected, so it ships alone.
-2. Link a second device; confirm ONE member row, one avatar in the roster, and
-   that an item assigned to that person rings on the device that set the reminder
-   (reminderTargetOf already records the actor, so this should hold).
-3. Both linked devices online at once, writing concurrently: they are two writers
-   with one identity, so check no rule assumes one-writer-per-pubkey. The
-   writer-binding `_w` field in listWire is the first place to look.
-4. The old-peer fork test from the revocation proposal.
+- device-link's own gates green: `npm test` 21/21 AND `npm run test:integration`
+  (both files), since the second is where the engine actually lives.
+- PearList `npm run verify` green.
+- **On hardware, and the emulator counts**: today's swarm-key work was verified
+  with an Android emulator as a genuine second peer (NAT'd, so discovery and
+  holepunching are real). The same rig works for pairing.
+- **Hard gate, borrowed from PearPetal: B->A must be proven on hardware before any
+  flag flips.** An edit on the linked device must reach the founder device without
+  a restart.
+- Slice 4 additionally needs the old-peer fork test: a device on the previous
+  build must not diverge from one on the new.
 
 ## Rollback
 
-The swarm split is a straight revert. A link, once made, cannot be un-made in
-design A - the other device knows the secret forever. The UI must say that in
-those words before the transfer, not after.
+Slices 1-3 sit behind a flag and revert cleanly. Slice 4 does not: once a space
+has accepted rows signed by a mnemonic-derived key, reverting the derivation
+strands them. That is the reason it is last and separately gated.
 
 ## Open questions
 
-1. Should linking be restricted to the same person's devices in any enforceable
-   sense? It cannot be - possession of the key is the whole claim. So the question
-   is really what the copy says, and whether "link a device" needs a scarier
-   confirmation than anything else in the app.
-2. Does the roster show one entry or one-with-two-devices? Two devices behave
-   differently (an iPhone syncs only when open), so a household may genuinely want
-   to know which one they are looking at.
-3. Does this obsolete the per-device reminder targeting, or make it worse? If both
-   my phones are one member, "ring on the device that set it" is still right, but
-   `remindBy` now names a device that shares an identity with another.
+1. Does PearList want personal-scope records at all (slice 1's `records`/`mirror`),
+   or is the personal base only an identity anchor? Moving Learned Aisles and saved
+   lists onto it is the obvious win, but it is also a second migration.
+2. Under coexist, what exactly does the recovery-phrase screen promise? "Recovers
+   your identity" is false for spaces until slice 4.
+3. Is the swarm keypair (shipped today, core #17) enough of a per-device anchor, or
+   does device-link want its own notion of "this device" for the roster? The roster
+   keys on the Autobase writer key today, which is per-device already.
