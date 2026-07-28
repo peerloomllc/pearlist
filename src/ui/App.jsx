@@ -690,6 +690,27 @@ function rememberOverride (text, aisle) {
     localStorage.setItem(OVERRIDES_KEY, JSON.stringify(m))
   } catch {}
 }
+// Restore learned aisles from a backup. MERGE, and this device wins: an entry it
+// already holds is a correction the user made HERE, which is newer information
+// than a file that has been sitting in Downloads. Same 500 cap as rememberOverride,
+// oldest dropped first, so a big file cannot push out everything recent.
+function mergeOverrides (incoming) {
+  try {
+    if (!incoming || typeof incoming !== 'object') return 0
+    const m = loadOverrides()
+    let added = 0
+    for (const [text, aisle] of Object.entries(incoming)) {
+      const n = normItemText(text)
+      if (!n || !aisle || m[n]) continue
+      m[n] = String(aisle)
+      added++
+    }
+    const keys = Object.keys(m)
+    if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete m[k]
+    localStorage.setItem(OVERRIDES_KEY, JSON.stringify(m))
+    return added
+  } catch { return 0 }
+}
 function overrideFor (text) { try { return loadOverrides()[normItemText(text)] || null } catch { return null } }
 function overrideCount () { try { return Object.keys(loadOverrides()).length } catch { return 0 } }
 function clearOverrides () { try { localStorage.removeItem(OVERRIDES_KEY) } catch {} }
@@ -713,7 +734,10 @@ function ConfirmHost () {
           askConfirm (Remove, Stronger removal, Leave, Clear learned aisles...). */}
       <div style={{ display: 'flex', gap: sp.sm }}>
         <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
-        <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+        {/* `noCancel` makes this an acknowledgement rather than a choice. Offering
+            "Cancel" on a notice invites the question "cancel what?" about
+            something that has already happened. */}
+        {state?.noCancel ? null : <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>}
       </div>
     </BottomSheet>
   )
@@ -1674,7 +1698,15 @@ export default function App () {
   // the one somebody most needs a copy of.
   async function exportBackup () {
     try {
-      const { json, filename, counts } = await call('backup:export', {})
+      // The worklet cannot read these: Learned Aisles and the hand-made aisle
+      // names live in the WebView's localStorage. Collected per space by groupId,
+      // because the import mints new ids and only the worklet knows the mapping.
+      const customAisles = {}
+      for (const sp of spaces) {
+        const names = loadCustomAisles(sp.groupId)
+        if (names.length) customAisles[sp.groupId] = names
+      }
+      const { json, filename, counts } = await call('backup:export', { learnedAisles: loadOverrides(), customAisles })
       const saved = await call('shell:saveFile', { filename, content: json })
       if (saved && saved.canceled) return // they backed out of the folder picker
       const parts = [
@@ -1682,6 +1714,8 @@ export default function App () {
         `${counts.lists} list${counts.lists === 1 ? '' : 's'}`,
         `${counts.items} item${counts.items === 1 ? '' : 's'}`,
       ]
+      // Only mentioned when there are some, so the common case stays short.
+      if (counts.templates) parts.push(`${counts.templates} saved list${counts.templates === 1 ? '' : 's'}`)
       // Where it went matters as much as that it worked: a file nobody can find
       // again is not a backup.
       setBanner('Saved ' + parts.join(', ') + (saved && saved.where ? ` to ${saved.where}` : ''))
@@ -1696,13 +1730,42 @@ export default function App () {
       const picked = await call('shell:pickFile', {})
       if (!picked || picked.canceled) return
       if (!String(picked.content || '').trim()) throw new Error('that file is empty')
-      const { spaces, counts } = await call('backup:import', { jsonString: picked.content })
+      const { spaces, learnedAisles, counts } = await call('backup:import', { jsonString: picked.content })
+      // The localStorage half, which only the UI can write. MERGE for the learned
+      // aisles (an entry this device already has is a more recent correction than
+      // one from a file), and per space for the aisle names, keyed by the id the
+      // space was just given.
+      mergeOverrides(learnedAisles)
+      for (const sp of (spaces || [])) {
+        for (const name of (sp.customAisles || [])) rememberCustomAisle(sp.groupId, name)
+      }
       await loadSpaces()
+      // Saved lists are loaded once at mount, so without this the restored ones
+      // sit in localDb unseen until the next launch - which reads as "my saved
+      // lists did not come back". Caught on-device 2026-07-28.
+      await loadTemplates()
+      // A notice, not a banner, because it asks the user to go and DO something,
+      // and a banner they miss is the same as never having said it.
+      //
+      // Shown on every restore, not only when reminders were lost: we cannot tell
+      // whether they had any, precisely because remindAt is dropped at export
+      // time, so the file carries no trace of them. Saying it once to someone who
+      // had none beats silently losing them for someone who did.
+      //
+      // BEFORE the phase change, deliberately. ConfirmHost is rendered in both the
+      // onboarding and the home trees, so flipping phase mid-prompt would unmount
+      // and remount it - dropping the pending resolve and hanging this await. Ask
+      // while the screen is still whatever it already was, then move.
+      await askConfirm({
+        title: 'Your lists are back',
+        message: `${counts.spaces} space${counts.spaces === 1 ? '' : 's'} and ${counts.items} item${counts.items === 1 ? '' : 's'} restored. Reminders are not kept in a saved copy, so any you had set on individual items need setting again, and the daily reminder is worth checking in Settings. Repeating chores kept their schedule.`,
+        confirmLabel: 'Got it',
+        noCancel: true,
+      })
       // Land in the first restored space, so the import is visibly there rather
       // than something the user has to go looking for.
       const first = spaces && spaces[0]
       if (first) { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home'); setSheet(null) }
-      setBanner(`Restored ${counts.spaces} space${counts.spaces === 1 ? '' : 's'}, ${counts.items} item${counts.items === 1 ? '' : 's'}`)
     } catch (e) {
       alert('Could not open that file: ' + e.message)
     }
@@ -1977,6 +2040,9 @@ export default function App () {
           onRestore={() => { dismissTour(); importBackup() }} />
         <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
         <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
+        {/* Restoring can start from here (and from the tour), and its notice goes
+            through askConfirm - which is a no-op unless a ConfirmHost is mounted. */}
+        <ConfirmHost />
       </>
     )
   }

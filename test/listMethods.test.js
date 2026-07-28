@@ -410,7 +410,9 @@ test('backup covers every space on the device, not the one on screen', async () 
   await call('item:add', { groupId: b.groupId, listId: l2.listId, text: 'Bins' })
 
   const exp = await call('backup:export', {})
-  assert.deepEqual(exp.counts, { spaces: 2, lists: 2, items: 2 })
+  assert.equal(exp.counts.spaces, 2)
+  assert.equal(exp.counts.lists, 2)
+  assert.equal(exp.counts.items, 2)
   assert.match(exp.filename, /^pearlist-backup-\d{4}-\d{2}-\d{2}\.json$/)
   const doc = JSON.parse(exp.json)
   assert.deepEqual(doc.spaces.map((s) => s.name).sort(), ['family', 'Fresh'].sort())
@@ -471,6 +473,123 @@ test('backup:export includes a space we can only read', async () => {
   // The stuck space replicated nothing, so it has no lists and is dropped on the
   // way back IN - but exporting it must not throw, and must not lose the others.
   assert.equal(exp.counts.spaces >= 1, true)
+  await engine.close()
+})
+
+test('a recurring chore comes back DONE, not due, after a restore', async () => {
+  // End to end through the real IPC loop, because the interesting part is not the
+  // file - it is that item:getAll DERIVES a repeating item's checked state from
+  // lastDoneAt. Without it carried, a chore done a minute ago reads as due again.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'Chores', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'Bins' })
+  await call('item:setRepeat', { groupId, listId, itemId, repeat: 'weekly' })
+  await call('item:toggle', { groupId, listId, itemId, checked: true })
+  assert.equal((await call('item:getAll', { groupId, listId }))[0].checked, true, 'done before the backup')
+
+  const exp = await call('backup:export', {})
+  const imp = await call('backup:import', { jsonString: exp.json })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  const lid = (await call('list:getAll', { groupId: restored.groupId }))[0].id
+  const [item] = await call('item:getAll', { groupId: restored.groupId, listId: lid })
+
+  assert.equal(item.text, 'Bins')
+  assert.ok(item.repeat, 'still repeating')
+  assert.equal(item.checked, true, 'and still done for this period, not reset to due')
+  await engine.close()
+})
+
+test('a pinned aisle and a list notify setting survive a real restore', async () => {
+  // The two omissions the 2026-07-28 field audit found, end to end.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'Chores', kind: 'chore' })
+  await call('list:setNotifyOnComplete', { groupId, listId, mode: 'done' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'Flour' })
+  await call('ai:setCategory', { groupId, listId, itemId, category: 'Baking', by: 'user' })
+
+  const exp = await call('backup:export', {})
+  const imp = await call('backup:import', { jsonString: exp.json })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  const [list] = await call('list:getAll', { groupId: restored.groupId })
+  assert.equal(list.notifyOnComplete, 'done', 'the list keeps the setting the user chose')
+  const [item] = await call('item:getAll', { groupId: restored.groupId, listId: list.id })
+  assert.equal(item.category, 'Baking')
+  assert.equal(item.catBy, 'user', 'and the aisle stays pinned as a hand-made choice')
+  await engine.close()
+})
+
+test('an item reminder is NOT carried into a restore', async () => {
+  // Deliberate: remindAt is an absolute instant, so a month-old backup would hand
+  // the OS a pile of past-dated reminders. The UI says so after every import.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'L' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'Call the vet' })
+  await call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() + 86400000 })
+  assert.ok((await call('item:getAll', { groupId, listId }))[0].remindAt, 'set before the backup')
+
+  const exp = await call('backup:export', {})
+  assert.doesNotMatch(exp.json, /remindAt/, 'not even present in the file')
+  const imp = await call('backup:import', { jsonString: exp.json })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  const lid = (await call('list:getAll', { groupId: restored.groupId }))[0].id
+  assert.equal((await call('item:getAll', { groupId: restored.groupId, listId: lid }))[0].remindAt, undefined)
+  await engine.close()
+})
+
+test('saved lists survive a restore, and an existing one is never overwritten', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'Monthly shop', kind: 'grocery' })
+  await call('item:add', { groupId, listId, text: 'Rice' })
+  await call('template:save', { groupId, listId, name: 'Monthly shop' })
+
+  const exp = await call('backup:export', {})
+  assert.equal(exp.counts.templates, 1, 'the saved list is in the file')
+
+  // Importing onto the SAME device, which already holds that template by name.
+  const again = await call('backup:import', { jsonString: exp.json })
+  assert.equal(again.counts.templates, 0, 'nothing added: the name is already taken')
+  assert.equal((await call('template:list', {})).length, 1, 'and it was not duplicated')
+
+  // The one that matters is a fresh device, where nothing collides.
+  const fresh = driver()
+  await fresh.call('init', {})
+  const restored = await fresh.call('backup:import', { jsonString: exp.json })
+  assert.equal(restored.counts.templates, 1)
+  const [t] = await fresh.call('template:list', {})
+  assert.equal(t.name, 'Monthly shop')
+  assert.equal(t.count, 1)
+  await engine.close(); await fresh.engine.close()
+})
+
+test('learned aisles and hand-made aisle names ride through the worklet', async () => {
+  // Both live in the WebView's localStorage, so the worklet only ferries them:
+  // in as arguments to export, out as results from import. The custom aisles come
+  // back keyed by the id the space was JUST given, which only the worklet knows.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'G', kind: 'grocery' })
+  await call('item:add', { groupId, listId, text: 'Milk' })
+
+  const exp = await call('backup:export', {
+    learnedAisles: { parmesan: 'Baking' },
+    customAisles: { [groupId]: ['Deli counter'] },
+  })
+  assert.equal(exp.counts.learnedAisles, 1)
+
+  const imp = await call('backup:import', { jsonString: exp.json })
+  assert.deepEqual(imp.learnedAisles, { parmesan: 'Baking' })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  assert.deepEqual(restored.customAisles, ['Deli counter'])
+  assert.notEqual(restored.groupId, groupId, 'and they are attached to the NEW space id')
   await engine.close()
 })
 

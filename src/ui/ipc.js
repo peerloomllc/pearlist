@@ -236,6 +236,47 @@ const mockMethods = {
     } catch {}
     return { ok: true }
   },
+  // Backup: enough for the browser preview to exercise the flow. The real ones
+  // live in the worklet (src/listMethods.js); this only has to be shaped the same.
+  'backup:export': async ({ learnedAisles, customAisles } = {}) => {
+    const spaces = [...mock.groups.values()].map((g) => ({
+      name: g.name,
+      ...(customAisles && customAisles[g.groupId] ? { customAisles: customAisles[g.groupId] } : {}),
+      lists: [...g.lists.values()].filter((l) => !l.deleted).map((l) => ({
+        name: l.name, kind: l.kind, notifyOnComplete: l.notifyOnComplete,
+        items: [...g.items.values()].filter((i) => i.listId === l.id && !i.deleted),
+      })),
+    }))
+    const doc = { kind: 'pearlist-backup', version: 1, exportedAt: 0, spaces, ...(learnedAisles && Object.keys(learnedAisles).length ? { learnedAisles } : {}) }
+    const lists = spaces.reduce((n, s) => n + s.lists.length, 0)
+    const items = spaces.reduce((n, s) => n + s.lists.reduce((m, l) => m + l.items.length, 0), 0)
+    return { json: JSON.stringify(doc, null, 2), filename: 'pearlist-backup-preview.json', counts: { spaces: spaces.length, lists, items, templates: 0, learnedAisles: Object.keys(learnedAisles || {}).length } }
+  },
+  'backup:import': async ({ jsonString }) => {
+    let doc
+    try { doc = JSON.parse(jsonString) } catch { throw new Error('that file is not readable as JSON') }
+    if (!doc || doc.kind !== 'pearlist-backup') throw new Error('that file is not a PearList backup')
+    const created = []
+    let lists = 0, items = 0
+    for (const sp of (doc.spaces || [])) {
+      const groupId = rid(22)
+      const g = newGroup(groupId, sp.name || 'Space', 'mock-' + groupId, true)
+      for (const l of (sp.lists || [])) {
+        const id = rid()
+        g.lists.set(id, { id, name: l.name || 'List', kind: l.kind || 'list', assignee: null, deleted: false, notifyOnComplete: l.notifyOnComplete })
+        lists++
+        for (const it of (l.items || [])) {
+          const iid = rid()
+          g.items.set(iid, { id: iid, listId: id, text: it.text || '', qty: it.qty || 1, checked: it.checked === true, assignee: null, deleted: false, category: it.category, catBy: it.catBy })
+          items++
+        }
+      }
+      mock.groups.set(groupId, g)
+      created.push({ groupId, name: g.name, customAisles: sp.customAisles || [] })
+    }
+    if (!created.length) throw new Error('that backup has nothing in it')
+    return { spaces: created, learnedAisles: doc.learnedAisles || {}, counts: { spaces: created.length, lists, items, templates: 0, learnedAisles: Object.keys(doc.learnedAisles || {}).length } }
+  },
   'shell:pickFile': async () => {
     const content = window.prompt ? window.prompt('Paste an exported PearList space (JSON):') : null
     return content ? { canceled: false, content, name: 'pasted.json' } : { canceled: true }
