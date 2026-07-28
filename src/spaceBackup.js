@@ -1,4 +1,4 @@
-// Space export / import: the pure half.
+// Backup export / import: the pure half.
 //
 // WHY IT EXISTS. Everything in PearList lives in one place - the household's own
 // phones - and there is no server to fall back on. Two ways that bites:
@@ -8,26 +8,35 @@
 // A file is the escape hatch for both, and unlike everything else here it needs no
 // peer to be reachable.
 //
+// EVERY SPACE, not the one on screen. "Back up my lists" means the phone, not
+// whichever space happens to be selected - a one-space file silently leaves the
+// others unprotected, and the person who finds that out is the one whose phone has
+// already died. (Tim's call, 2026-07-28, correcting the first cut.)
+//
 // DELIBERATELY UNSIGNED, unlike PearGuard's device-backup. That file carries an
 // IDENTITY, so a signature is what stops someone restoring themselves as you.
-// This one carries no authority at all: importing writes a BRAND NEW space that
+// This one carries no authority at all: importing writes BRAND NEW spaces that
 // this device founds and signs, so a signature could only ever refuse an import,
 // never grant one. What it would cost is real - a rescue file you cannot open in a
 // text editor and fix by hand is a worse rescue file.
 //
 // WHAT IS AND IS NOT CARRIED. The shape and state of the lists, not the household:
-// no identities, no writer keys, no invite, no member roster. `assignee` is
+// no identities, no writer keys, no invites, no member rosters. `assignee` is
 // dropped on purpose - it names a pubkey that does not exist in the new space, so
 // carrying it would render as a permanently unknown person. Reminders are dropped
 // too: they are wall-clock times that would arrive in the past.
 
-const KIND = 'pearlist-space'
+const KIND = 'pearlist-backup'
+// The one-space shape this replaced (`kind: 'pearlist-space'`) never shipped, but
+// reading it is a few lines and the format is meant to be forgiving.
+const KIND_LEGACY_SINGLE = 'pearlist-space'
 const VERSION = 1
 
 // Bounds. An import writes one signed op per row into a live Autobase, so a
 // hand-edited or hostile file must not be able to ask for unbounded work.
-const MAX_LISTS = 200
-const MAX_ITEMS = 5000
+const MAX_SPACES = 50
+const MAX_LISTS = 200   // per space
+const MAX_ITEMS = 5000  // across the whole file
 
 const str = (v) => typeof v === 'string' ? v : ''
 const clean = (v) => str(v).trim()
@@ -46,31 +55,47 @@ function exportItem (row) {
   return out
 }
 
-// `lists` is [{ name, kind, items: [row] }] straight off the view.
-function buildBackup ({ spaceName, lists, exportedAt }) {
+// Shared by the writer and the reader, so a file we emit and a file someone
+// hand-edited go through exactly the same shaping and the same caps. `budget` is
+// the remaining whole-file item allowance, spent as it goes.
+function takeLists (lists, budget) {
   const out = []
-  let items = 0
   for (const l of (lists || [])) {
+    if (!l || typeof l !== 'object') continue
     if (out.length >= MAX_LISTS) break
     const entries = []
-    for (const it of (l.items || [])) {
-      if (items >= MAX_ITEMS) break
-      entries.push(exportItem(it || {}))
-      items++
+    for (const it of (Array.isArray(l.items) ? l.items : [])) {
+      if (!it || typeof it !== 'object') continue
+      if (budget.left <= 0) break
+      const text = str(it.text)
+      if (!text) continue // a row with no text is not an item
+      entries.push(exportItem({ ...it, text }))
+      budget.left--
     }
     out.push({ name: clean(l.name) || 'List', kind: clean(l.kind) || null, items: entries })
+  }
+  return out
+}
+
+// `spaces` is [{ name, lists: [{ name, kind, items: [row] }] }] straight off the
+// views.
+function buildBackup ({ spaces, exportedAt }) {
+  const budget = { left: MAX_ITEMS }
+  const out = []
+  for (const s of (spaces || [])) {
+    if (out.length >= MAX_SPACES) break
+    out.push({ name: clean(s && s.name) || 'Space', lists: takeLists(s && s.lists, budget) })
   }
   return {
     kind: KIND,
     version: VERSION,
     exportedAt: Number.isFinite(exportedAt) ? exportedAt : 0,
-    space: { name: clean(spaceName) || 'Space' },
-    lists: out,
+    spaces: out,
   }
 }
 
 // Parse + validate a file a human may have edited. Throws with a message meant
-// for a person, because it is shown to one: "that file is not a PearList export"
+// for a person, because it is shown to one: "that file is not a PearList backup"
 // is actionable, a JSON syntax error dump is not.
 function parseBackup (jsonString) {
   let doc
@@ -79,45 +104,38 @@ function parseBackup (jsonString) {
   } catch {
     throw new Error('that file is not readable as JSON')
   }
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error('that file is not a PearList export')
-  if (doc.kind !== KIND) throw new Error('that file is not a PearList export')
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error('that file is not a PearList backup')
+  const legacy = doc.kind === KIND_LEGACY_SINGLE
+  if (doc.kind !== KIND && !legacy) throw new Error('that file is not a PearList backup')
   // Forward-compatible on purpose: a NEWER file is refused with a clear reason
   // rather than half-imported, because we cannot know what we would be dropping.
-  if (!Number.isFinite(doc.version) || doc.version > VERSION) throw new Error('that export was made by a newer version of PearList')
-  if (!Array.isArray(doc.lists)) throw new Error('that export has no lists in it')
+  if (!Number.isFinite(doc.version) || doc.version > VERSION) throw new Error('that backup was made by a newer version of PearList')
 
-  const lists = []
-  let items = 0
-  for (const l of doc.lists) {
-    if (!l || typeof l !== 'object') continue
-    if (lists.length >= MAX_LISTS) break
-    const entries = []
-    for (const it of (Array.isArray(l.items) ? l.items : [])) {
-      if (!it || typeof it !== 'object') continue
-      if (items >= MAX_ITEMS) break
-      const text = str(it.text)
-      if (!text) continue // a row with no text is not an item
-      entries.push(exportItem({ ...it, text }))
-      items++
-    }
-    lists.push({ name: clean(l.name) || 'List', kind: clean(l.kind) || null, items: entries })
-  }
-  if (!lists.length) throw new Error('that export has no lists in it')
+  // A legacy one-space file is simply a backup with a single space in it.
+  const raw = legacy ? [{ name: doc.space && doc.space.name, lists: doc.lists }] : doc.spaces
+  if (!Array.isArray(raw)) throw new Error('that backup has nothing in it')
 
-  return {
-    name: clean(doc.space && doc.space.name) || 'Imported space',
-    lists,
-    counts: { lists: lists.length, items },
+  const budget = { left: MAX_ITEMS }
+  const spaces = []
+  for (const s of raw) {
+    if (!s || typeof s !== 'object') continue
+    if (spaces.length >= MAX_SPACES) break
+    const lists = takeLists(s.lists, budget)
+    if (!lists.length) continue // an empty space is not worth recreating
+    spaces.push({ name: clean(s.name) || 'Imported space', lists })
   }
+  if (!spaces.length) throw new Error('that backup has nothing in it')
+
+  const lists = spaces.reduce((n, s) => n + s.lists.length, 0)
+  const items = spaces.reduce((n, s) => n + s.lists.reduce((m, l) => m + l.items.length, 0), 0)
+  return { spaces, counts: { spaces: spaces.length, lists, items } }
 }
 
-// The filename the shell saves under. Dated, and carrying the space name so a
-// folder of these is readable without opening any of them.
-function backupFilename (spaceName, at) {
-  const safe = clean(spaceName).replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'space'
+// The filename the shell saves under. Dated, so a folder of these is readable
+// without opening any of them. No space name any more: it covers all of them.
+function backupFilename (at) {
   const d = new Date(Number.isFinite(at) ? at : 0)
-  const stamp = d.toISOString().slice(0, 10)
-  return `pearlist-${safe}-${stamp}.json`
+  return `pearlist-backup-${d.toISOString().slice(0, 10)}.json`
 }
 
-module.exports = { buildBackup, parseBackup, backupFilename, KIND, VERSION, MAX_LISTS, MAX_ITEMS }
+module.exports = { buildBackup, parseBackup, backupFilename, KIND, KIND_LEGACY_SINGLE, VERSION, MAX_SPACES, MAX_LISTS, MAX_ITEMS }
