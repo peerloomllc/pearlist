@@ -338,6 +338,62 @@ test('space:forget drops a space from spaces:list AND tears down its base + topi
   await engine.close()
 })
 
+// A joined-but-never-admitted device: mounted against a bootstrap nobody hosts,
+// so it can read nothing and write nothing. This is the state behind the
+// 2026-07-28 report - a rejoined phone showing a space name and nothing else - and
+// the two things it must still be able to do are SEE why, and LEAVE.
+function ghostInvite (name = 'Ghost') {
+  const hex = (n) => require('node:crypto').randomBytes(n).toString('hex')
+  return require('@peerloom/core/engine').defaultEncodeInvite({
+    groupId: hex(16), groupKey: hex(32), encryptionKey: hex(32), bootstrap: hex(32), name,
+  })
+}
+
+test('space:status reports an unadmitted space as not writable and empty', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:join', { inviteKey: ghostInvite() })
+
+  const st = await call('space:status', { groupId })
+  assert.equal(st.writable, false, 'never admitted, so not writable')
+  assert.equal(st.members, 0, 'no roster arrived')
+  assert.equal(st.lists, 0, 'no lists arrived')
+  await engine.close()
+})
+
+test('space:leave works on a space we were never admitted to', async () => {
+  // Regression: leave appended a `left` roster row unconditionally, so on an
+  // unadmitted base Autobase threw `Not writable` and the whole method failed -
+  // the user could not remove a dead space from their phone at all. There is
+  // nothing to retract there anyway: no peer ever saw us as a member.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:join', { inviteKey: ghostInvite() })
+  assert.equal(engine.bases.get(groupId).writable, false)
+
+  const res = await call('space:leave', { groupId })
+  assert.equal(res.ok, true)
+  assert.equal(res.retracted, false, 'nothing to retract when we were never a member')
+  assert.ok(!(await call('spaces:list', {})).some((s) => s.groupId === groupId), 'dropped locally')
+  await engine.close()
+})
+
+test('space:leave still retracts the roster row when we ARE a member', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Fam' })
+  await call('space:init', { groupId, name: 'Fam' })
+  await call('member:publish', { groupId })
+
+  const res = await call('space:leave', { groupId })
+  assert.equal(res.retracted, true)
+  const base = engine.bases.get(groupId)
+  await base.update()
+  const self = (await call('identity:get', {})).pubkey
+  assert.equal((await base.view.get('member:' + self)).value.left, true)
+  await engine.close()
+})
+
 test('destroyGroup unmounts a group but leaves other groups intact', async () => {
   const { engine, call } = driver()
   await call('init', {})
