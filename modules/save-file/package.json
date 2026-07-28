@@ -1,0 +1,8 @@
+{
+  "name": "save-file",
+  "version": "1.0.0",
+  "description": "Android \"save as\" (ACTION_CREATE_DOCUMENT), so a backup can be written anywhere including Downloads",
+  "main": "index.ts",
+  "license": "MIT",
+  "author": "PeerLoom"
+}

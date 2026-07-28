@@ -1660,13 +1660,16 @@ export default function App () {
   async function exportBackup () {
     try {
       const { json, filename, counts } = await call('backup:export', {})
-      await call('shell:saveFile', { filename, content: json })
+      const saved = await call('shell:saveFile', { filename, content: json })
+      if (saved && saved.canceled) return // they backed out of the folder picker
       const parts = [
         `${counts.spaces} space${counts.spaces === 1 ? '' : 's'}`,
         `${counts.lists} list${counts.lists === 1 ? '' : 's'}`,
         `${counts.items} item${counts.items === 1 ? '' : 's'}`,
       ]
-      setBanner('Saved ' + parts.join(', '))
+      // Where it went matters as much as that it worked: a file nobody can find
+      // again is not a backup.
+      setBanner('Saved ' + parts.join(', ') + (saved && saved.where ? ` to ${saved.where}` : ''))
     } catch (e) {
       alert('Could not save a copy: ' + e.message)
     }
@@ -2741,7 +2744,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
     'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
-    'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file you can keep, email to yourself or move to another phone. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
+    'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file. You choose where it goes: your phone offers Downloads first, and Documents or a cloud folder are a tap away. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
     'Open a saved copy': 'Reads a file saved by "Save a copy" and puts everything in it back as NEW spaces that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new spaces the usual way once they are there.',
   }
   async function commitAvatar (value) {
