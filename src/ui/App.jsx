@@ -283,7 +283,8 @@ function TimeOfDaySheet ({ open, hour, minute, onClose, onPick }) {
         </>
       ) : (
         <>
-          <div style={{ textAlign: 'center', color: c.text.primary, fontSize: 20, fontWeight: 300, margin: `0 0 ${sp.base}px` }}>{label(exact)}</div>
+          {/* No summary line here, unlike WhenSheet: there is only one stepper, so
+              a heading above it would just be the same value printed twice. */}
           <Stepper label='Time' value={label(exact)} onStep={(n) => setExact((v) => stepMinutes(v, n))} />
           <Button style={{ marginTop: sp.sm }} onClick={() => { const d = new Date(exact); onPick(d.getHours(), d.getMinutes()); onClose() }}>Set time</Button>
           <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={() => setExact(null)}>Back</Button>
@@ -2594,9 +2595,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     try { const r = await call('shell:bgsync:set', { enabled: v }); setBgSync(!!r?.enabled) } catch { setBgSync(false) }
   }
   // Daily reminder: a once-a-day nudge about lists with open items. Off by
-  // default. The time is stored as hour + minute and edited through a native
-  // <input type='time'>, which is the one picker guaranteed to be present in the
-  // WebView on both platforms.
+  // default. The time is stored as hour + minute and edited through
+  // TimeOfDaySheet - ours, not the OS one, so it matches the item picker and
+  // looks the same on both platforms.
   const [reminder, setReminder] = useState({ enabled: false, hour: 18, minute: 0 })
   useEffect(() => { call('shell:reminder:get', {}).then((r) => { if (r) setReminder({ enabled: !!r.enabled, hour: r.hour ?? 18, minute: r.minute ?? 0 }) }).catch(() => {}) }, [])
   async function saveReminder (next) {
@@ -2609,7 +2610,11 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       }
     } catch { setReminder((p) => ({ ...p, enabled: false })) }
   }
-  const reminderTime = `${String(reminder.hour).padStart(2, '0')}:${String(reminder.minute).padStart(2, '0')}`
+  const [pickTime, setPickTime] = useState(false)
+  // Rendered for a person, not stored: the picker owns hour + minute. The old
+  // native <input type='time'> displayed a 24h value in local format, which is
+  // why "18:00" looked like "6:00 PM" and hid the fact this was still the OS one.
+  const reminderTime = new Date(2026, 0, 1, reminder.hour, reminder.minute).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   // "Connect Anywhere" - the off-LAN relay backstop. Default on, so an unanswered
   // read shows on rather than flickering off and back.
   const [relayOn, setRelayOn] = useState(true)
@@ -2714,13 +2719,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           extra={reminder.enabled
             // No "Every day at" label: the title already says daily, so the time
             // on its own is unambiguous (Tim's call).
-            ? <input type='time' value={reminderTime} aria-label='Daily reminder time'
-                onChange={(e) => {
-                  const [h, m] = String(e.target.value || '').split(':')
-                  if (h === undefined || m === undefined) return
-                  saveReminder({ ...reminder, hour: Number(h), minute: Number(m) })
-                }}
-                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '4px 8px', fontSize: 13, outline: 'none' }} />
+            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
             : null}
           control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
         {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
@@ -2730,6 +2730,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
       </Group>
+      <TimeOfDaySheet open={pickTime} hour={reminder.hour} minute={reminder.minute}
+        onClose={() => setPickTime(false)}
+        onPick={(h, m) => saveReminder({ ...reminder, hour: h, minute: m })} />
       <Group title='Help'>
         <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
           control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
