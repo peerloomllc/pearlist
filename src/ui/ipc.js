@@ -213,6 +213,7 @@ const mockMethods = {
   'shell:notifications:set': async ({ enabled }) => ({ enabled: !!enabled }),
   // Daily reminder. Preview-only: remembered in mock state, never scheduled.
   // Per-item reminders. Preview-only: remembered in mock state, never scheduled.
+  'item:setRepeat': async ({ repeat }) => ({ repeat: repeat || null }),
   'item:setReminder': async ({ remindAt }) => ({ remindAt: remindAt ?? null }),
   'reminder:pending': async () => ({ reminders: [], dropped: 0 }),
   'shell:reminder:get': async () => ({ ...(mock.reminder || { enabled: false, hour: 18, minute: 0 }) }),

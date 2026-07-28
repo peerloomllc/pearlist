@@ -25,17 +25,38 @@ import { terminateWebViewRenderer } from '../modules/webview-recovery'
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
 // default (permission requested on first run; user can turn it off in Profile).
 // The worklet emits notify:* when it applies a fresh peer change; the shell
-// raises an OS notification if the user has it enabled. Suppress the OS banner
-// while the
-// app is foreground (the WebView shows its own in-app banner); the OS still
-// shows it when we are backgrounded. No background sync yet, so this fires while
-// the app is running (foreground + its brief background window).
+// raises an OS notification if the user has it enabled.
+//
+// This handler decides what a notification does WHILE THE APP IS FOREGROUND. The
+// two kinds need opposite answers:
+//
+// - Peer notifications (assigned / joined / completed) suppress the OS banner,
+//   because the WebView draws its own in-app banner for them. Two banners for one
+//   event is worse than one.
+// - REMINDERS must show. Nothing draws an in-app banner for them, so suppressing
+//   the OS one means the reminder is filed silently into Notification Center and
+//   the user sees NOTHING. That is exactly what happened on the iPhone
+//   (2026-07-27): the reminder fired correctly and was invisible because the app
+//   happened to be open. It looked like "reminders do not work on iOS" and was
+//   really this line. It passed on Android only because that test backgrounded
+//   the app first.
+//
+// `data.reminder` is set by refreshDailyReminder and refreshItemReminders.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: false, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false,
-  }),
+  handleNotification: async (n) => {
+    const isReminder = (n?.request?.content?.data as any)?.reminder === true
+    return {
+      shouldShowBanner: isReminder,
+      shouldShowList: true,
+      shouldPlaySound: isReminder,
+      shouldSetBadge: false,
+    }
+  },
 })
 
+// Bumped from 'reminder' when the importance went DEFAULT -> HIGH; see
+// ensureNotifPermission for why that needs a new id rather than an edit.
+const REMINDER_CHANNEL = 'reminders'
 const NOTIF_KEY = 'pearlist:notifications'
 let _notifEnabled = false
 async function loadNotifEnabled () {
@@ -53,6 +74,13 @@ async function loadNotifEnabled () {
   } else {
     _notifEnabled = stored === '1'
   }
+  // The single most useful line when "reminders do not work": everything else in
+  // the feature is gated on this, and a stored '0' from some long-past first run
+  // is invisible and never re-prompts.
+  try {
+    const os = (await Notifications.getPermissionsAsync()).status
+    remindLog(`notifications enabled=${_notifEnabled} (stored=${stored ?? 'unset'}, OS=${os})`)
+  } catch {}
   return _notifEnabled
 }
 async function ensureNotifPermission () {
@@ -72,8 +100,18 @@ async function ensureNotifPermission () {
     // Its own channel so reminders can be muted without muting the alerts that
     // follow something a person actually did. Carries both the daily nudge and
     // per-item reminders: they are the same kind of interruption to a user.
-    await Notifications.setNotificationChannelAsync('reminder', {
-      name: 'Reminders', importance: Notifications.AndroidImportance.DEFAULT,
+    //
+    // HIGH, not DEFAULT, and on a NEW id. A DEFAULT-importance channel posts to
+    // the shade with no heads-up banner, so a reminder the user explicitly asked
+    // for at 4:44 arrived silently and looked like it had not fired at all
+    // (measured on the Pixel 2026-07-27: it posted, importance=3, no banner). A
+    // reminder is a time-critical alert the user set themselves; it should
+    // interrupt. The id changes because Android channels are IMMUTABLE once
+    // created - setNotificationChannelAsync can LOWER an importance but never
+    // raise it - so the old one is deleted and replaced rather than edited.
+    await Notifications.deleteNotificationChannelAsync('reminder').catch(() => {})
+    await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL, {
+      name: 'Reminders', importance: Notifications.AndroidImportance.HIGH,
       description: 'The daily nudge, and reminders you set on individual items',
     })
   }
@@ -93,6 +131,25 @@ function fireNotify (channelId: string, title: string, body: string, data?: any)
     content: { title, body, data: data || {}, ...(Platform.OS === 'android' ? { channelId } : {}) },
     trigger: null, // deliver now
   }).catch(() => {})
+}
+
+// Everything the reminder paths decide, on one greppable tag. These run rarely
+// (launch, foreground, background, after a write), so the noise is negligible and
+// the payoff is real: the whole feature is invisible when it misbehaves, and
+// "scheduled / not scheduled / refused" is the only question worth answering.
+// Reachable on a RELEASE build via `adb logcat` and
+// `xcrun simctl spawn <udid> log stream`, which is the point.
+const _remindLines: string[] = []
+function remindLog (msg: string) {
+  const line = new Date().toISOString() + ' ' + msg
+  console.warn('[reminders] ' + msg)
+  // ALSO to a file. RN's console.warn does NOT reach os_log on a Release iOS
+  // build, so on the one platform where this feature is hardest to observe the
+  // console is useless. Same trick the pairing trace already uses; pull it with
+  // scripts/pull-reminder-log.sh. Bounded, so it can never grow without limit.
+  _remindLines.push(line)
+  if (_remindLines.length > 200) _remindLines.splice(0, _remindLines.length - 200)
+  FileSystem.writeAsStringAsync(FileSystem.documentDirectory + 'reminder-log.txt', _remindLines.join('\n') + '\n').catch(() => {})
 }
 
 // --- daily reminder (P1 of proposals/2026-07-27-reminder-notifications.md) ---
@@ -136,9 +193,10 @@ async function refreshDailyReminder () {
     const pref = await loadReminderPref()
     if (!pref.enabled || !_notifEnabled) {
       await Notifications.cancelScheduledNotificationAsync(REMINDER_ID).catch(() => {})
+      remindLog(`daily off (enabled=${pref.enabled} notifEnabled=${_notifEnabled})`)
       return
     }
-    if (!_workletStarted) return // too early to know the counts
+    if (!_workletStarted) { remindLog('daily skipped: worklet not started'); return }
     // callRaw never rejects and never times out, so a wedged worklet would hang
     // here forever - and shell:reminder:set awaits this before replying, which
     // would freeze the Settings toggle. Bound it and keep the existing schedule.
@@ -161,17 +219,19 @@ async function refreshDailyReminder () {
       identifier: REMINDER_ID,
       content: {
         title: digest.title, body: digest.body,
-        data: { groupId: digest.groupId, listId: digest.listId }, // tap -> open the top list
-        ...(Platform.OS === 'android' ? { channelId: 'reminder' } : {}),
+        // `reminder: true` tells the foreground handler above to SHOW this one.
+        data: { groupId: digest.groupId, listId: digest.listId, reminder: true }, // tap -> open the top list
+        ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL } : {}),
       },
       // channelId belongs on the TRIGGER for a scheduled notification. Android
       // ignores the one in `content` here and drops it on expo's fallback
       // channel instead, which silently breaks "mute reminders on their own".
       // Caught on the Pixel: the first one that fired landed on
       // expo_notifications_fallback_notification_channel.
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: pref.hour, minute: pref.minute, channelId: 'reminder' },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: pref.hour, minute: pref.minute, channelId: REMINDER_CHANNEL },
     })
-  } catch {}
+    remindLog(`daily scheduled ${pref.hour}:${String(pref.minute).padStart(2, '0')}`)
+  } catch (e: any) { remindLog('daily FAILED: ' + (e?.message ?? String(e))) }
 }
 
 // --- per-item reminders (P2 of the reminders proposal) ----------------------
@@ -188,9 +248,9 @@ const REMINDER_PREFIX = 'item:' // an identifier we own; anything else is left a
 
 async function refreshItemReminders () {
   try {
-    if (!_workletStarted) return
+    if (!_workletStarted) { remindLog('items skipped: worklet not started'); return }
     const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(() => null)
-    if (!scheduled) return
+    if (!scheduled) { remindLog('items skipped: could not read the OS schedule'); return }
     const have = new Map<string, any>()
     for (const n of scheduled) {
       if (typeof n.identifier === 'string' && n.identifier.startsWith(REMINDER_PREFIX)) have.set(n.identifier, n)
@@ -200,6 +260,7 @@ async function refreshItemReminders () {
     // before the worklet read so turning them off takes effect even if it is slow.
     if (!_notifEnabled) {
       for (const id of have.keys()) await Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+      remindLog(`items cleared: notifications are OFF (dropped ${have.size})`)
       return
     }
 
@@ -231,14 +292,25 @@ async function refreshItemReminders () {
         content: {
           title: 'Reminder',
           body: `"${r.text}" on ${r.listName}`,
-          data: { groupId: r.groupId, listId: r.listId }, // tap -> open the list
-          ...(Platform.OS === 'android' ? { channelId: 'reminder' } : {}),
+          // `reminder: true` tells the foreground handler to SHOW this one.
+          data: { groupId: r.groupId, listId: r.listId, reminder: true }, // tap -> open the list
+          ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL } : {}),
         },
         // channelId on the TRIGGER, not just the content - see refreshDailyReminder.
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.remindAt, channelId: 'reminder' },
-      }).catch(() => {})
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.remindAt, channelId: REMINDER_CHANNEL },
+      }).then(() => remindLog(`scheduled ${r.key} for ${new Date(r.remindAt).toISOString()}`))
+        .catch((e: any) => remindLog(`FAILED to schedule ${r.key}: ${e?.message ?? String(e)}`))
     }
-  } catch {}
+    if (!want.length) {
+      const elsewhere = Number(wm.result.elsewhere) || 0
+      // Name the difference explicitly: "nothing exists" and "they all belong to
+      // another member" look identical from here, and confusing the two is what
+      // made the iPhone look broken when it was behaving correctly.
+      remindLog(elsewhere > 0
+        ? `items: nothing for THIS device (${elsewhere} future reminder(s) target another member)`
+        : 'items: nothing to schedule')
+    }
+  } catch (e: any) { remindLog('items FAILED: ' + (e?.message ?? String(e))) }
 }
 
 // Both reminder surfaces refresh together: they share the same triggers, the same
@@ -461,20 +533,24 @@ export default function Shell () {
       // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
       // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
       requestLocalNetworkPermission()
-      // Notifications are ON by default: this requests the OS permission on first
-      // run (and gates fireNotify from boot). Awaited before bgsync so the two
-      // paths do not race on the permission prompt.
-      await loadNotifEnabled()
-      // Keep-syncing-in-background (Android, default ON): start the foreground
-      // service so the worklet stays connected while backgrounded. Ensure the
-      // notification permission first (the service needs a visible notification).
-      bgSyncEnabled().then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) })
+      // Notifications are ON by default, so this can raise an OS permission
+      // prompt on first run. NOT AWAITED, and that matters: requestPermissionsAsync
+      // does not resolve until the user answers, and everything below used to sit
+      // behind it - no worklet, no setHtml, so a prompt left unanswered meant a
+      // PERMANENT BLACK SCREEN with no error anywhere. Found on the iOS Simulator,
+      // where the prompt cannot be tapped from a headless session and the app
+      // never loaded behind it.
+      //
+      // bgsync still chains off it rather than racing it, because the foreground
+      // service needs the notification permission to show its own notification.
+      const notifReady = loadNotifEnabled().catch(() => false)
+      notifReady.then(() => bgSyncEnabled()).then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) }).catch(() => {})
       await startWorklet() // init the worklet (with dataDir) before the WebView can call it
-      // Now that the worklet can answer list:openSummary, re-derive the daily
-      // reminder from the current open counts. Its body was frozen whenever it
-      // was last scheduled, so a launch is the cheapest moment to refresh it.
-      refreshReminders()
       if (!cancelled) setHtml(await loadUiHtml())
+      // Re-derive both reminder surfaces from the current state. Waits on the
+      // permission answer, because _notifEnabled gates them, but the UI is already
+      // up by now either way.
+      notifReady.then(() => refreshReminders()).catch(() => {})
     })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
     return () => { cancelled = true }
   }, [])

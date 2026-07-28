@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const relay = require('./relay')
@@ -718,6 +718,7 @@ const methods = {
   // phone, not one per household.
   'list:openSummary': async (_args, ctx) => {
     const lists = []
+    const now = Date.now()
     let total = 0
     for (const [groupId, base] of ctx.bases) {
       // One bad base must not silently zero the whole digest, so failures are
@@ -731,7 +732,9 @@ const methods = {
         for (const list of rows) {
           let open = 0
           for await (const { value: it } of base.view.createReadStream(itemRange(list.id))) {
-            if (it && !it.deleted && !it.checked) open++
+            // effectiveChecked: a weekly chore already done this week is not open
+            // work and must not inflate the nudge.
+            if (it && !it.deleted && !effectiveChecked(it, now)) open++
           }
           if (open > 0) {
             lists.push({ groupId, listId: list.id, name: String(list.name || ''), kind: list.kind || 'list', open })
@@ -819,8 +822,27 @@ const methods = {
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))
     if (!existing || existing.deleted) throw new Error('item not found')
-    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, checked: !!checked })
+    const patch = { checked: !!checked }
+    // Recurring chores: checking one records WHEN it was done, which is the only
+    // write the whole feature needs - open-ness is derived from it at read time,
+    // so nothing ever writes a reset (proposals/2026-07-27-recurring-chores.md).
+    // Unchecking clears the stamp, which is what "I ticked that by mistake" means.
+    if (normalizeRepeat(existing.repeat)) patch.lastDoneAt = checked ? Date.now() : null
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, ...patch })
     return { ok: true }
+  },
+
+  // Make an item recur, or stop it recurring. Signed read-modify-write like
+  // item:assign. Setting a repeat leaves lastDoneAt alone: an item checked off
+  // BEFORE it was ever recurring has no stamp, so it reads as open immediately,
+  // which is the right default when you are declaring it a chore going forward.
+  'item:setRepeat': async ({ groupId, listId, itemId, repeat }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, itemKey(listId, itemId))
+    if (!existing || existing.deleted) throw new Error('item not found')
+    const next = normalizeRepeat(repeat)
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, repeat: next })
+    return { repeat: next }
   },
 
   'item:edit': async ({ groupId, listId, itemId, text, qty, note, url }, ctx) => {
@@ -864,8 +886,12 @@ const methods = {
       if (t <= Date.now()) throw new Error('that time has already passed')
       next = Math.trunc(t)
     }
-    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, remindAt: next })
-    return { remindAt: next }
+    // Record WHO asked. reminderTargetOf uses it so the reminder rings on the
+    // device that set it, rather than falling through to the list's creator -
+    // which is a DEVICE identity and sent it to the wrong phone.
+    const remindBy = next === null ? null : pubkeyHex(ctx)
+    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, remindAt: next, remindBy })
+    return { remindAt: next, remindBy }
   },
 
   // Every reminder THIS device should have scheduled, across every joined space.
@@ -879,6 +905,7 @@ const methods = {
     const selfKey = pubkeyHex(ctx)
     const now = Date.now()
     const out = []
+    let elsewhere = 0
     for (const [groupId, base] of ctx.bases) {
       try {
         await base.update()
@@ -888,7 +915,11 @@ const methods = {
         }
         for (const [listId, list] of lists) {
           for await (const { value: it } of base.view.createReadStream(itemRange(listId))) {
-            if (!isReminderPending(it, list, selfKey, now)) continue
+            if (!isReminderPending(it, list, selfKey, now)) {
+              // Would have been pending for SOMEONE, just not us.
+              if (it && !it.deleted && !effectiveChecked(it, now) && typeof it.remindAt === 'number' && it.remindAt > now && reminderTargetOf(it, list)) elsewhere++
+              continue
+            }
             out.push({
               key: itemKey(listId, it.id), groupId, listId, itemId: it.id,
               text: String(it.text || 'an item'), listName: String(list.name || 'a list'),
@@ -899,7 +930,15 @@ const methods = {
       } catch { continue }
     }
     out.sort((a, b) => a.remindAt - b.remindAt) // soonest first, so the cap keeps the urgent ones
-    return { reminders: out.slice(0, MAX_SCHEDULED_REMINDERS), dropped: Math.max(0, out.length - MAX_SCHEDULED_REMINDERS) }
+    // `elsewhere` is a diagnostic, not a feature: future reminders that resolve to
+    // a DIFFERENT member. Some is normal (a parent setting one for a kid), but it
+    // is also exactly what a targeting bug looks like from this side - "nothing to
+    // schedule" and "nothing exists" are indistinguishable without it.
+    return {
+      reminders: out.slice(0, MAX_SCHEDULED_REMINDERS),
+      dropped: Math.max(0, out.length - MAX_SCHEDULED_REMINDERS),
+      elsewhere,
+    }
   },
 
   'item:delete': async ({ groupId, listId, itemId }, ctx) => {
@@ -910,12 +949,22 @@ const methods = {
     return { ok: true }
   },
 
+  // THE SEAM (proposals/2026-07-27-recurring-chores.md). `checked` returned here
+  // is the EFFECTIVE one: for a recurring chore that means "done in the current
+  // period", not "was ever ticked". Deriving it at this single point is what keeps
+  // the UI, the strike-through and the auto-collapse right without each of them
+  // having to know about recurrence. `nextDueAt` rides along so a closed chore can
+  // say when it comes back.
   'item:getAll': async ({ groupId, listId }, ctx) => {
     const base = viewFor(ctx, groupId)
     await base.update()
+    const now = Date.now()
     const out = []
     for await (const { value } of base.view.createReadStream(itemRange(listId))) {
-      if (value && !value.deleted) out.push(value)
+      if (!value || value.deleted) continue
+      out.push(normalizeRepeat(value.repeat)
+        ? { ...value, checked: effectiveChecked(value, now), nextDueAt: nextDueAt(value, now) }
+        : value)
     }
     return out
   },
