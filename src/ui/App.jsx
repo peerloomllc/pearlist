@@ -1654,28 +1654,37 @@ export default function App () {
   }
   // Export reads only, so it works on a space this device cannot write to - which
   // is exactly the space someone most needs to get their lists out of.
-  async function exportSpace () {
-    if (!gid) return
+  // EVERY space on the phone, not the one on screen: "back up my lists" means the
+  // phone. Reads only, so a space this device cannot sync is saved too - which is
+  // the one somebody most needs a copy of.
+  async function exportBackup () {
     try {
-      const { json, filename, counts } = await call('space:export', { groupId: gid })
+      const { json, filename, counts } = await call('backup:export', {})
       await call('shell:saveFile', { filename, content: json })
-      setBanner(`Saved ${counts.items} item${counts.items === 1 ? '' : 's'} from ${counts.lists} list${counts.lists === 1 ? '' : 's'}`)
+      const parts = [
+        `${counts.spaces} space${counts.spaces === 1 ? '' : 's'}`,
+        `${counts.lists} list${counts.lists === 1 ? '' : 's'}`,
+        `${counts.items} item${counts.items === 1 ? '' : 's'}`,
+      ]
+      setBanner('Saved ' + parts.join(', '))
     } catch (e) {
       alert('Could not save a copy: ' + e.message)
     }
   }
-  // Always a NEW space, never a merge (see space:import). So the worst case of a
-  // wrong file is a space you delete again, not a household list that has been
-  // silently doubled.
-  async function importSpace () {
+  // Always NEW spaces, never a merge (see backup:import). So the worst case of a
+  // wrong file is a space you delete again, not a household list silently doubled.
+  async function importBackup () {
     try {
       const picked = await call('shell:pickFile', {})
       if (!picked || picked.canceled) return
       if (!String(picked.content || '').trim()) throw new Error('that file is empty')
-      const { groupId, name, counts } = await call('space:import', { jsonString: picked.content })
+      const { spaces, counts } = await call('backup:import', { jsonString: picked.content })
       await loadSpaces()
-      setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
-      setBanner(`Opened ${name}: ${counts.lists} list${counts.lists === 1 ? '' : 's'}, ${counts.items} item${counts.items === 1 ? '' : 's'}`)
+      // Land in the first restored space, so the import is visibly there rather
+      // than something the user has to go looking for.
+      const first = spaces && spaces[0]
+      if (first) { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home'); setSheet(null) }
+      setBanner(`Restored ${counts.spaces} space${counts.spaces === 1 ? '' : 's'}, ${counts.items} item${counts.items === 1 ? '' : 's'}`)
     } catch (e) {
       alert('Could not open that file: ' + e.message)
     }
@@ -2001,7 +2010,7 @@ export default function App () {
         </>
       ) : view === 'profile' ? (
         <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
-          spaceName={activeSpace?.name} onExport={exportSpace} onImport={importSpace} />
+          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2653,7 +2662,7 @@ function Group ({ title, children }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceName, onExport, onImport }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2732,8 +2741,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
     'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
-    'Save a copy': "Writes everything in this space - every list and everything on it - to a file you can keep, email to yourself or move to another phone. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your space and not the invite, so it cannot let anyone into your space.",
-    'Open a saved copy': 'Reads a file saved by "Save a copy" and puts it back as a NEW space that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new space the usual way once it is there.',
+    'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file you can keep, email to yourself or move to another phone. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
+    'Open a saved copy': 'Reads a file saved by "Save a copy" and puts everything in it back as NEW spaces that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new spaces the usual way once they are there.',
   }
   async function commitAvatar (value) {
     setBusy(true)
@@ -2799,10 +2808,12 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           device cannot sync (see SyncBanner). */}
       <Group title='Backup'>
         <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
-          extra={spaceName ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Saves everything in {spaceName} to a file.</span> : null}
-          control={<button onClick={onExport} disabled={!spaceName} style={{ ...BACKUP_BTN, border: `1px solid ${spaceName ? c.text.muted : c.border}`, color: spaceName ? c.text.primary : c.text.muted, cursor: spaceName ? 'pointer' : 'default' }}>Save</button>} />
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
+            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
+            : 'Nothing to save yet.'}</span>}
+          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
         <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it back as a new space you own.</span>}
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
           control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
       </Group>
       <Group title='Notifications'>
