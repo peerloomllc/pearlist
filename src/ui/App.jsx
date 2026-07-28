@@ -1169,6 +1169,20 @@ function MembersBar ({ members, onOpen }) {
   )
 }
 
+// Save / Open sit one above the other in the same column, so a fixed width keeps
+// their right edges aligned. Padding alone does not: it sizes to the label, and
+// two four-letter words still render a few pixels apart.
+const BACKUP_BTN = {
+  width: 92,
+  padding: '8px 0',
+  flexShrink: 0,
+  textAlign: 'center',
+  borderRadius: r.md,
+  background: c.surface.input,
+  fontSize: 14,
+  fontFamily: FONT,
+}
+
 // The banner that explains an empty space. Copy + rule live in ../syncStatus.js
 // so they are unit-tested rather than eyeballed.
 function SyncBanner ({ status }) {
@@ -2786,10 +2800,10 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       <Group title='Backup'>
         <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
           extra={spaceName ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Saves everything in {spaceName} to a file.</span> : null}
-          control={<button onClick={onExport} disabled={!spaceName} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${spaceName ? c.text.muted : c.border}`, background: c.surface.input, color: spaceName ? c.text.primary : c.text.muted, fontSize: 14, cursor: spaceName ? 'pointer' : 'default' }}>Save</button>} />
+          control={<button onClick={onExport} disabled={!spaceName} style={{ ...BACKUP_BTN, border: `1px solid ${spaceName ? c.text.muted : c.border}`, color: spaceName ? c.text.primary : c.text.muted, cursor: spaceName ? 'pointer' : 'default' }}>Save</button>} />
         <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it back as a new space you own.</span>}
-          control={<button onClick={onImport} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Open</button>} />
+          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
       </Group>
       <Group title='Notifications'>
         <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
