@@ -1103,7 +1103,7 @@ const TOUR_STEPS = [
   { Icon: BellRinging, title: 'Know when things get done', body: 'PearList alerts you when someone assigns you an item, joins your space or checks items off a list you created. Every list has its own alert setting in its options menu.' },
   { Icon: ShareNetwork, title: 'Invite your people', body: 'Tap the share icon to invite others. Everyone syncs peer-to-peer, with no account and no server.' },
 ]
-function GuidedTour ({ open, onDone, onCreate, onJoin }) {
+function GuidedTour ({ open, onDone, onCreate, onJoin, onRestore }) {
   const [i, setI] = useState(0)
   useEffect(() => { if (open) setI(0) }, [open])
   if (!open) return null
@@ -1116,10 +1116,11 @@ function GuidedTour ({ open, onDone, onCreate, onJoin }) {
   // First run only: the tour ends by handing off to create/join, so the space is
   // made with the tour's context behind it rather than before any of it.
   const handoff = onCreate && onJoin
-  // Mentions the third door without growing a third handoff button: someone
-  // restoring a phone is not reading a tour, but the copy should not imply that
-  // create and join are the only ways in.
-  const spaceStep = { Icon: UsersThree, title: 'Create or join a space', body: 'Start a space for your household, or join one with an invite someone sent you. You can be in more than one, so a family space and a roommate space can live side by side. Replacing a phone? Open a saved copy instead.' }
+  // The handoff offers the SAME three doors as the screen behind it. A tour that
+  // ends on two of them quietly narrows the choice: someone who sat through it is
+  // the least likely to go hunting for a third option they were never shown, and
+  // the one arriving with a backup file is usually the one replacing a dead phone.
+  const spaceStep = { Icon: UsersThree, title: 'Create or join a space', body: 'Start a space for your household, or join one with an invite someone sent you. You can be in more than one, so a family space and a roommate space can live side by side. Replacing a phone? Open a copy you saved from the old one.' }
   const steps = [...TOUR_STEPS, bgStep, ...(handoff ? [spaceStep] : [])]
   const step = steps[i]
   const last = i === steps.length - 1
@@ -1139,6 +1140,7 @@ function GuidedTour ({ open, onDone, onCreate, onJoin }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
             <Button variant='primary' onClick={onCreate}>Create a space</Button>
             <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
+            {onRestore ? <Button variant='secondary' onClick={onRestore}>Open a saved copy</Button> : null}
           </div>
         ) : (
           <Button onClick={() => last ? onDone() : setI(i + 1)}>{last ? 'Get started' : 'Next'}</Button>
@@ -1971,7 +1973,8 @@ export default function App () {
         <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} onRestore={importBackup} />
         <GuidedTour open={showTour} onDone={dismissTour}
           onCreate={() => { dismissTour(); setSheet('start') }}
-          onJoin={() => { dismissTour(); setSheet('join') }} />
+          onJoin={() => { dismissTour(); setSheet('join') }}
+          onRestore={() => { dismissTour(); importBackup() }} />
         <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
         <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       </>
