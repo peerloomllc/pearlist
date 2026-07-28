@@ -1014,7 +1014,16 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
   )
 }
 
-function Onboarding ({ onStart, onJoin }) {
+// Three doors, not two, and they are peers on purpose. Restoring is not an
+// advanced case: a replacement phone is one of the ordinary ways to arrive here,
+// and it is the ONLY one of the three that needs no other device and no network -
+// joining needs the other person's phone awake and connected at that moment.
+//
+// It also has to live here rather than in Settings, because during onboarding
+// there IS no Settings: this screen returns before the tab bar renders. Without
+// this button a backup file cannot be opened on a phone with no spaces, which is
+// most of the point of having one. (Tim, 2026-07-28.)
+function Onboarding ({ onStart, onJoin, onRestore }) {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: sp.xl, gap: sp.base, maxWidth: 460, margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
@@ -1024,6 +1033,7 @@ function Onboarding ({ onStart, onJoin }) {
       </div>
       <Button variant='primary' onClick={onStart}>Create a space</Button>
       <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
+      <Button variant='secondary' onClick={onRestore}>Open a saved copy</Button>
       {isMock ? <p style={{ textAlign: 'center', color: c.text.muted, fontSize: 12, marginTop: sp.base }}>preview mode (no peer sync)</p> : null}
     </div>
   )
@@ -1106,7 +1116,10 @@ function GuidedTour ({ open, onDone, onCreate, onJoin }) {
   // First run only: the tour ends by handing off to create/join, so the space is
   // made with the tour's context behind it rather than before any of it.
   const handoff = onCreate && onJoin
-  const spaceStep = { Icon: UsersThree, title: 'Create or join a space', body: 'Start a space for your household, or join one with an invite someone sent you. You can be in more than one, so a family space and a roommate space can live side by side.' }
+  // Mentions the third door without growing a third handoff button: someone
+  // restoring a phone is not reading a tour, but the copy should not imply that
+  // create and join are the only ways in.
+  const spaceStep = { Icon: UsersThree, title: 'Create or join a space', body: 'Start a space for your household, or join one with an invite someone sent you. You can be in more than one, so a family space and a roommate space can live side by side. Replacing a phone? Open a saved copy instead.' }
   const steps = [...TOUR_STEPS, bgStep, ...(handoff ? [spaceStep] : [])]
   const step = steps[i]
   const last = i === steps.length - 1
@@ -1955,7 +1968,7 @@ export default function App () {
     // offers the same two choices, so there is no dead end.
     return (
       <>
-        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} />
+        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} onRestore={importBackup} />
         <GuidedTour open={showTour} onDone={dismissTour}
           onCreate={() => { dismissTour(); setSheet('start') }}
           onJoin={() => { dismissTour(); setSheet('join') }} />
