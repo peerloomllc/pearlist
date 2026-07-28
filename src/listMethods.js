@@ -293,6 +293,39 @@ const methods = {
     return out
   },
 
+  // Why a space is showing nothing. Three states that look IDENTICAL in the UI
+  // today - an empty space - and need completely different things from the user:
+  //
+  //   no connection    nothing can arrive. The other member's phone is asleep, or
+  //                    the two are on networks that cannot reach each other.
+  //   not writable     we joined and replicated, but no existing writer has
+  //                    admitted this device yet, so our writes go nowhere and our
+  //                    roster row is never published (publishMember skips it).
+  //   writable         normal.
+  //
+  // Reported 2026-07-28: a user who reinstalled and rejoined saw the space NAME
+  // and nothing else - no members, no lists - with no way to tell which of these
+  // it was. The name rides the invite, so it proves only that the invite parsed.
+  //
+  // `conns` is swarm-wide, not per-group: Hyperswarm gives one connection per peer
+  // and every mounted group shares it, so a group cannot count its own. It answers
+  // "is this device talking to anyone at all", which is the question that matters
+  // when the answer is zero.
+  'space:status': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    try { await base.update() } catch {}
+    let members = 0
+    for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) members++
+    let lists = 0
+    for await (const { value } of base.view.createReadStream(LIST_RANGE)) if (value) lists++
+    return {
+      writable: !!base.writable,
+      conns: (ctx.swarm && ctx.swarm.connections && ctx.swarm.connections.size) || 0,
+      members,
+      lists,
+    }
+  },
+
   // Establish ownership of a freshly created space: the founder writes the signed
   // `space` owner record before anyone else can join (first-writer claims owner).
   // Idempotent: a no-op if a `space` record already exists.
@@ -488,13 +521,26 @@ const methods = {
   // Best-effort ordering: the flag has to replicate to a peer BEFORE we tear the
   // group down, else we vanish locally while staying in everyone else's roster.
   // Same grace the owner's space:delete uses for its tombstone.
+  // A device that was never admitted CANNOT append, so the retract throws
+  // `Not writable` and, before this, the whole method threw with it - leaving the
+  // user trapped in a dead space they could not remove. Found on the TCL
+  // 2026-07-28 trying to leave a space joined from an invite nobody hosts, which
+  // is the exact state the 2026-07-28 user report describes.
+  //
+  // There is nothing to retract in that case: an unadmitted device never published
+  // a roster row, so no peer has ever seen it as a member. Dropping it locally IS
+  // the complete departure. `retracted` says which of the two happened.
   'space:leave': async ({ groupId }, ctx) => {
     const base = viewFor(ctx, groupId)
-    const mine = await readRow(base, memberKey(pubkeyHex(ctx)))
-    await putRow(ctx, groupId, memberKey(pubkeyHex(ctx)), { ...(mine || {}), left: true })
+    let retracted = false
+    if (base.writable) {
+      const mine = await readRow(base, memberKey(pubkeyHex(ctx)))
+      await putRow(ctx, groupId, memberKey(pubkeyHex(ctx)), { ...(mine || {}), left: true })
+      retracted = true
+    }
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
     setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
-    return { ok: true }
+    return { ok: true, retracted }
   },
 
   // --- donation reminder (device-local) ----------------------------------

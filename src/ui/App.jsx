@@ -8,6 +8,7 @@ import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
+import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
 
@@ -1168,6 +1169,19 @@ function MembersBar ({ members, onOpen }) {
   )
 }
 
+// The banner that explains an empty space. Copy + rule live in ../syncStatus.js
+// so they are unit-tested rather than eyeballed.
+function SyncBanner ({ status }) {
+  const trouble = syncTrouble(status)
+  if (!trouble) return null
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}`, background: c.surface.input }}>
+      <span style={{ color: c.warn, fontSize: 14, fontWeight: 400 }}>{trouble.title}</span>
+      <span style={{ color: c.text.secondary, fontSize: 13, lineHeight: 1.45 }}>{trouble.body}</span>
+    </div>
+  )
+}
+
 export default function App () {
   const [phase, setPhase] = useState('loading')
   const [spaces, setSpaces] = useState([])
@@ -1183,6 +1197,10 @@ export default function App () {
   const [lnDetected, setLnDetected] = useState(false) // does the device have a Lightning wallet (drives the donation sheet)
   const [members, setMembers] = useState([])
   const [removedMembers, setRemovedMembers] = useState([]) // evicted; the owner can add them back
+  // { writable, conns, members, lists } from space:status, or null before the
+  // first read. Drives SyncBanner and the write block; see the method's comment
+  // for why an empty space needs three different explanations.
+  const [syncStatus, setSyncStatus] = useState(null)
   const [revoke, setRevoke] = useState(null)               // hard-revocation status for the active space
   const [selfPubkey, setSelfPubkey] = useState(null)
   const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
@@ -1262,6 +1280,15 @@ export default function App () {
     }
     prevMembersRef.current[groupId] = new Set(ms.map((m) => m.pubkey))
     return ms
+  }, [])
+
+  // Whether this space is actually working, so an empty one can say WHY it is
+  // empty. Rides the same refresh cycle as the roster (group:updated,
+  // peer:connected, 15s backstop), because the two answers change together: a
+  // device that has just been admitted becomes writable and gains a roster in the
+  // same tick.
+  const loadSyncStatus = useCallback(async (groupId) => {
+    setSyncStatus(await call('space:status', { groupId }).catch(() => null))
   }, [])
 
   // Boot.
@@ -1346,13 +1373,13 @@ export default function App () {
   // catch-up on (re)connect, and a slow backstop covers any missed event.
   useEffect(() => {
     if (phase !== 'home' || !gid) return
-    const refresh = () => { loadLists(gid); loadItems(gid, openListId); loadMembers(gid, selfPubkey) }
+    const refresh = () => { loadLists(gid); loadItems(gid, openListId); loadMembers(gid, selfPubkey); loadSyncStatus(gid) }
     refresh()
     const offUpdated = on('group:updated', (d) => { if (!d || d.groupId === gid) refresh() })
     const offPeer = on('peer:connected', () => refresh())
     const backstop = setInterval(refresh, 15000)
     return () => { offUpdated(); offPeer(); clearInterval(backstop) }
-  }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers])
+  }, [phase, gid, openListId, selfPubkey, loadItems, loadLists, loadMembers, loadSyncStatus])
 
   // In-app banner when a peer assigns me an item (foreground case). The OS
   // notification, if enabled, is raised separately by the shell.
@@ -1891,6 +1918,9 @@ export default function App () {
         // ===== List detail: the items of the open list + add-item bar =====
         <>
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
+          {/* Also here, not just on the overview: inside a list is where someone
+              meets the dead composer, so the reason has to be on the same screen. */}
+          <SyncBanner status={syncStatus} />
           {isNoteList ? (
             // A note is free text, not a checklist: the whole body is one editor,
             // so there is no item list, no add-item composer and no aisle UI.
@@ -1922,7 +1952,7 @@ export default function App () {
               120, toasts/banners 130). The composer must beat headers + lifted rows
               but stay under every overlay, so overlays live in the 100+ band. */}
           <div style={{ position: 'sticky', bottom: 0, zIndex: 60, background: c.surface.base }}>
-            <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' />
+            <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' disabled={!!syncTrouble(syncStatus)} />
           </div>
           </>
           )}
@@ -1939,6 +1969,7 @@ export default function App () {
             right={<IconButton label='Invite' onClick={() => setSheet('invite')}><ShareIcon /></IconButton>}
           />
           <MembersBar members={members} onOpen={() => setSheet('members')} />
+          <SyncBanner status={syncStatus} />
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
@@ -1949,7 +1980,7 @@ export default function App () {
               Start from a saved list
             </button>
           ) : null}
-          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' />
+          <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' disabled={!!syncTrouble(syncStatus)} />
         </>
       )}
       {openListId === null ? <TabBar active={view === 'profile' ? 'settings' : view === 'about' ? 'about' : 'lists'} onChange={goTab} /> : null}
@@ -2288,11 +2319,16 @@ function SuggestionBar ({ items, onPick }) {
 
 // Sticky bottom input + add button, reused for the add-list (overview) and
 // add-item (list detail) bars.
-function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef }) {
+// `disabled` is the write block for a space this device cannot write to (see
+// SyncBanner, which is on screen saying why whenever this is set). Typing a
+// shopping list into a space that will never send it is worse than being stopped:
+// the entry is lost with no error, which is precisely how the 2026-07-28 report
+// read from the user's side.
+function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef, disabled }) {
   return (
     <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base }}>
-      <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onSubmit() }} placeholder={placeholder} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-      <button onClick={onSubmit} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={22} weight='bold' /></button>
+      <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) onSubmit() }} placeholder={placeholder} disabled={!!disabled} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: disabled ? c.text.muted : c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
+      <button onClick={onSubmit} disabled={!!disabled} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: disabled ? c.surface.input : c.primary, color: disabled ? c.text.muted : c.text.onPrimary, cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={22} weight='bold' /></button>
     </div>
   )
 }
