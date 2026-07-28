@@ -600,6 +600,62 @@ test('backup:import refuses a file that is not a PearList backup', async () => {
   await engine.close()
 })
 
+// --- device-link (SLICE 1, dark) -------------------------------------------
+// proposals/2026-07-28-device-linking.md. The engine is constructed beside the
+// group engine on the SAME runtime; these assert it comes up and that an ordinary
+// build is untouched by its presence.
+const deviceLink = require('../src/deviceLink')
+
+test('device:status reports disabled on an ordinary build', async () => {
+  // The flag is off in a normal build, and the method must answer rather than
+  // throw - the UI asks unconditionally.
+  const { engine, call } = driver()
+  await call('init', {})
+  assert.deepEqual(await call('device:status', {}), { enabled: false })
+  await engine.close()
+})
+
+test('device-link starts on the shared runtime and derives a stable identity', async (t) => {
+  // Drives the factory directly rather than flipping the constant, so the test
+  // says what it means and does not depend on build config.
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  t.after(() => deviceLink._resetForTest())
+
+  const ctx = { store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {} }
+  const dl = await deviceLink.getDeviceLink(ctx)
+
+  assert.match(dl.identityPublicKeyHex, /^[0-9a-f]{64}$/, 'an identity is derived from the mnemonic')
+  // The mnemonic is persisted, so the identity is stable rather than minted per
+  // launch - the whole point of it being a RECOVERY phrase.
+  const stored = (await engine.localDb.get(deviceLink.MNEMONIC_KEY)).value.mnemonic
+  assert.equal(stored.split(' ').length, 12)
+
+  deviceLink._resetForTest()
+  const again = await deviceLink.getDeviceLink(ctx)
+  assert.equal(again.identityPublicKeyHex, dl.identityPublicKeyHex, 'same phrase, same identity')
+
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
+test('device-link identity is NOT the signing identity (coexist, slice 1)', async (t) => {
+  // The thing most likely to be assumed wrong: adopting device-link does not
+  // change who signs a row. Space rows stay on core's per-device keypair, which
+  // is why two phones are still two members until the mnemonic-root slice.
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  t.after(() => deviceLink._resetForTest())
+
+  const dl = await deviceLink.getDeviceLink({ store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {} })
+  const signing = Buffer.from(engine.identity.publicKey).toString('hex')
+  assert.notEqual(dl.identityPublicKeyHex, signing)
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
 test('destroyGroup unmounts a group but leaves other groups intact', async () => {
   const { engine, call } = driver()
   await call('init', {})

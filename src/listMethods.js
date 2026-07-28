@@ -15,6 +15,7 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
+const { getDeviceLink, DEVICE_LINK_ENABLED } = require('./deviceLink')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -542,6 +543,31 @@ const methods = {
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
     setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
     return { ok: true, retracted }
+  },
+
+  // --- device linking (SLICE 1, dark) --------------------------------------
+  // The only device-link surface for now: does the engine come up, and what
+  // identity does it derive. Read-only, and returns `{ enabled: false }` on an
+  // ordinary build so the UI can ask without caring whether the flag is on.
+  //
+  // Everything user-facing - pairing, the roster, the recovery phrase - is slices
+  // 2 and 3. See proposals/2026-07-28-device-linking.md.
+  'device:status': async (_args, ctx) => {
+    if (!DEVICE_LINK_ENABLED) return { enabled: false }
+    try {
+      const dl = await getDeviceLink(ctx)
+      return {
+        enabled: true,
+        identityPublicKey: dl.identityPublicKeyHex,
+        personalBaseOpen: dl.isEnabled,
+        // The roster is device-link's own; empty until a second device pairs.
+        devices: await dl.listLinkedDevices().catch(() => []),
+      }
+    } catch (e) {
+      // Never throw from a diagnostic: a broken device-link must not be able to
+      // take down a method table the rest of the app depends on.
+      return { enabled: true, error: e?.message ?? String(e) }
+    }
   },
 
   // --- backup export / import ----------------------------------------------
