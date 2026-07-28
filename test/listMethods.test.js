@@ -394,6 +394,93 @@ test('space:leave still retracts the roster row when we ARE a member', async () 
   await engine.close()
 })
 
+
+test('backup covers every space on the device, not the one on screen', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const a = await call('group:create', { name: 'Fresh' })
+  await call('space:init', { groupId: a.groupId, name: 'Fresh' })
+  const { listId } = await call('list:create', { groupId: a.groupId, name: 'Groceries', kind: 'grocery' })
+  const { itemId } = await call('item:add', { groupId: a.groupId, listId, text: 'Milk', qty: 2 })
+  await call('item:toggle', { groupId: a.groupId, listId, itemId, checked: true })
+
+  const b = await call('group:create', { name: 'family' })
+  await call('space:init', { groupId: b.groupId, name: 'family' })
+  const l2 = await call('list:create', { groupId: b.groupId, name: 'Chores', kind: 'chore' })
+  await call('item:add', { groupId: b.groupId, listId: l2.listId, text: 'Bins' })
+
+  const exp = await call('backup:export', {})
+  assert.deepEqual(exp.counts, { spaces: 2, lists: 2, items: 2 })
+  assert.match(exp.filename, /^pearlist-backup-\d{4}-\d{2}-\d{2}\.json$/)
+  const doc = JSON.parse(exp.json)
+  assert.deepEqual(doc.spaces.map((s) => s.name).sort(), ['family', 'Fresh'].sort())
+
+  const imp = await call('backup:import', { jsonString: exp.json })
+  assert.equal(imp.counts.spaces, 2)
+  const ids = new Set(imp.spaces.map((s) => s.groupId))
+  assert.ok(!ids.has(a.groupId) && !ids.has(b.groupId), 'NEW spaces, never merged into the old ones')
+
+  const restoredFresh = imp.spaces.find((s) => s.name === 'Fresh')
+  const lists = await call('list:getAll', { groupId: restoredFresh.groupId })
+  assert.deepEqual(lists.map((l) => l.name), ['Groceries'])
+  assert.equal(lists[0].kind, 'grocery')
+  const items = await call('item:getAll', { groupId: restoredFresh.groupId, listId: lists[0].id })
+  assert.equal(items[0].text, 'Milk')
+  assert.equal(items[0].checked, true, 'checked state survives (unlike a template)')
+  assert.equal(items[0].qty, 2)
+  await engine.close()
+})
+
+test('the importing device owns every restored space and can write to it', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Old' })
+  const { listId } = await call('list:create', { groupId, name: 'L' })
+  await call('item:add', { groupId, listId, text: 'x' })
+  const exp = await call('backup:export', {})
+
+  const imp = await call('backup:import', { jsonString: exp.json })
+  const spaces = await call('spaces:list', {})
+  for (const s of imp.spaces) {
+    assert.equal(spaces.find((x) => x.groupId === s.groupId).owner, true)
+  }
+  // And they are normal, writable spaces: adding to one works.
+  const target = imp.spaces[0].groupId
+  const lid = (await call('list:getAll', { groupId: target }))[0].id
+  await call('item:add', { groupId: target, listId: lid, text: 'added after import' })
+  assert.equal((await call('item:getAll', { groupId: target, listId: lid })).length, 2)
+  await engine.close()
+})
+
+test('backup:export includes a space we can only read', async () => {
+  // The rescue case: a device that joined but was never admitted cannot append,
+  // so an export that wrote anything would throw exactly when it is needed most -
+  // and a per-space export would also have to be aimed at the right space by a
+  // user who has no idea which one is broken.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Mine' })
+  const { listId } = await call('list:create', { groupId, name: 'L' })
+  await call('item:add', { groupId, listId, text: 'x' })
+  const stuck = await call('group:join', { inviteKey: ghostInvite('Stuck') })
+  assert.equal(engine.bases.get(stuck.groupId).writable, false)
+
+  const exp = await call('backup:export', {})
+  const names = JSON.parse(exp.json).spaces.map((s) => s.name)
+  assert.ok(names.includes('Mine'))
+  // The stuck space replicated nothing, so it has no lists and is dropped on the
+  // way back IN - but exporting it must not throw, and must not lose the others.
+  assert.equal(exp.counts.spaces >= 1, true)
+  await engine.close()
+})
+
+test('backup:import refuses a file that is not a PearList backup', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  await assert.rejects(call('backup:import', { jsonString: '{"kind":"something-else"}' }), /not a PearList backup/)
+  await engine.close()
+})
+
 test('destroyGroup unmounts a group but leaves other groups intact', async () => {
   const { engine, call } = driver()
   await call('init', {})

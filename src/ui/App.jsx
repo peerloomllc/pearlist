@@ -1014,7 +1014,16 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
   )
 }
 
-function Onboarding ({ onStart, onJoin }) {
+// Three doors, not two, and they are peers on purpose. Restoring is not an
+// advanced case: a replacement phone is one of the ordinary ways to arrive here,
+// and it is the ONLY one of the three that needs no other device and no network -
+// joining needs the other person's phone awake and connected at that moment.
+//
+// It also has to live here rather than in Settings, because during onboarding
+// there IS no Settings: this screen returns before the tab bar renders. Without
+// this button a backup file cannot be opened on a phone with no spaces, which is
+// most of the point of having one. (Tim, 2026-07-28.)
+function Onboarding ({ onStart, onJoin, onRestore }) {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: sp.xl, gap: sp.base, maxWidth: 460, margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
@@ -1024,6 +1033,7 @@ function Onboarding ({ onStart, onJoin }) {
       </div>
       <Button variant='primary' onClick={onStart}>Create a space</Button>
       <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
+      <Button variant='secondary' onClick={onRestore}>Open a saved copy</Button>
       {isMock ? <p style={{ textAlign: 'center', color: c.text.muted, fontSize: 12, marginTop: sp.base }}>preview mode (no peer sync)</p> : null}
     </div>
   )
@@ -1093,7 +1103,7 @@ const TOUR_STEPS = [
   { Icon: BellRinging, title: 'Know when things get done', body: 'PearList alerts you when someone assigns you an item, joins your space or checks items off a list you created. Every list has its own alert setting in its options menu.' },
   { Icon: ShareNetwork, title: 'Invite your people', body: 'Tap the share icon to invite others. Everyone syncs peer-to-peer, with no account and no server.' },
 ]
-function GuidedTour ({ open, onDone, onCreate, onJoin }) {
+function GuidedTour ({ open, onDone, onCreate, onJoin, onRestore }) {
   const [i, setI] = useState(0)
   useEffect(() => { if (open) setI(0) }, [open])
   if (!open) return null
@@ -1106,7 +1116,11 @@ function GuidedTour ({ open, onDone, onCreate, onJoin }) {
   // First run only: the tour ends by handing off to create/join, so the space is
   // made with the tour's context behind it rather than before any of it.
   const handoff = onCreate && onJoin
-  const spaceStep = { Icon: UsersThree, title: 'Create or join a space', body: 'Start a space for your household, or join one with an invite someone sent you. You can be in more than one, so a family space and a roommate space can live side by side.' }
+  // The handoff offers the SAME three doors as the screen behind it. A tour that
+  // ends on two of them quietly narrows the choice: someone who sat through it is
+  // the least likely to go hunting for a third option they were never shown, and
+  // the one arriving with a backup file is usually the one replacing a dead phone.
+  const spaceStep = { Icon: UsersThree, title: 'Create or join a space', body: 'Start a space for your household, or join one with an invite someone sent you. You can be in more than one, so a family space and a roommate space can live side by side. Replacing a phone? Open a copy you saved from the old one.' }
   const steps = [...TOUR_STEPS, bgStep, ...(handoff ? [spaceStep] : [])]
   const step = steps[i]
   const last = i === steps.length - 1
@@ -1126,6 +1140,7 @@ function GuidedTour ({ open, onDone, onCreate, onJoin }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
             <Button variant='primary' onClick={onCreate}>Create a space</Button>
             <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
+            {onRestore ? <Button variant='secondary' onClick={onRestore}>Open a saved copy</Button> : null}
           </div>
         ) : (
           <Button onClick={() => last ? onDone() : setI(i + 1)}>{last ? 'Get started' : 'Next'}</Button>
@@ -1167,6 +1182,20 @@ function MembersBar ({ members, onOpen }) {
       <CaretRight size={16} color={c.text.muted} weight='regular' />
     </button>
   )
+}
+
+// Save / Open sit one above the other in the same column, so a fixed width keeps
+// their right edges aligned. Padding alone does not: it sizes to the label, and
+// two four-letter words still render a few pixels apart.
+const BACKUP_BTN = {
+  width: 92,
+  padding: '8px 0',
+  flexShrink: 0,
+  textAlign: 'center',
+  borderRadius: r.md,
+  background: c.surface.input,
+  fontSize: 14,
+  fontFamily: FONT,
 }
 
 // The banner that explains an empty space. Copy + rule live in ../syncStatus.js
@@ -1638,6 +1667,46 @@ export default function App () {
     setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
     call('member:publish', { groupId }).catch(() => {}) // retried on each refresh until writable
   }
+  // Export reads only, so it works on a space this device cannot write to - which
+  // is exactly the space someone most needs to get their lists out of.
+  // EVERY space on the phone, not the one on screen: "back up my lists" means the
+  // phone. Reads only, so a space this device cannot sync is saved too - which is
+  // the one somebody most needs a copy of.
+  async function exportBackup () {
+    try {
+      const { json, filename, counts } = await call('backup:export', {})
+      const saved = await call('shell:saveFile', { filename, content: json })
+      if (saved && saved.canceled) return // they backed out of the folder picker
+      const parts = [
+        `${counts.spaces} space${counts.spaces === 1 ? '' : 's'}`,
+        `${counts.lists} list${counts.lists === 1 ? '' : 's'}`,
+        `${counts.items} item${counts.items === 1 ? '' : 's'}`,
+      ]
+      // Where it went matters as much as that it worked: a file nobody can find
+      // again is not a backup.
+      setBanner('Saved ' + parts.join(', ') + (saved && saved.where ? ` to ${saved.where}` : ''))
+    } catch (e) {
+      alert('Could not save a copy: ' + e.message)
+    }
+  }
+  // Always NEW spaces, never a merge (see backup:import). So the worst case of a
+  // wrong file is a space you delete again, not a household list silently doubled.
+  async function importBackup () {
+    try {
+      const picked = await call('shell:pickFile', {})
+      if (!picked || picked.canceled) return
+      if (!String(picked.content || '').trim()) throw new Error('that file is empty')
+      const { spaces, counts } = await call('backup:import', { jsonString: picked.content })
+      await loadSpaces()
+      // Land in the first restored space, so the import is visibly there rather
+      // than something the user has to go looking for.
+      const first = spaces && spaces[0]
+      if (first) { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home'); setSheet(null) }
+      setBanner(`Restored ${counts.spaces} space${counts.spaces === 1 ? '' : 's'}, ${counts.items} item${counts.items === 1 ? '' : 's'}`)
+    } catch (e) {
+      alert('Could not open that file: ' + e.message)
+    }
+  }
   function switchSpace (groupId) {
     setActiveSpaceId(groupId); setOpenListId(null); setSheet(null)
   }
@@ -1901,10 +1970,11 @@ export default function App () {
     // offers the same two choices, so there is no dead end.
     return (
       <>
-        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} />
+        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} onRestore={importBackup} />
         <GuidedTour open={showTour} onDone={dismissTour}
           onCreate={() => { dismissTour(); setSheet('start') }}
-          onJoin={() => { dismissTour(); setSheet('join') }} />
+          onJoin={() => { dismissTour(); setSheet('join') }}
+          onRestore={() => { dismissTour(); importBackup() }} />
         <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
         <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       </>
@@ -1958,7 +2028,8 @@ export default function App () {
           )}
         </>
       ) : view === 'profile' ? (
-        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
+          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2610,7 +2681,7 @@ function Group ({ title, children }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport }) {
   const fileRef = useRef(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2689,6 +2760,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
     'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
+    'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file. You choose where it goes: your phone offers Downloads first, and Documents or a cloud folder are a tap away. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
+    'Open a saved copy': 'Reads a file saved by "Save a copy" and puts everything in it back as NEW spaces that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new spaces the usual way once they are there.',
   }
   async function commitAvatar (value) {
     setBusy(true)
@@ -2748,6 +2821,19 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
         <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
           extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
           control={<Toggle on={relayOn} onChange={toggleRelay} />} />
+      </Group>
+      {/* Everything here lives only on the household's phones, so a file is the
+          only copy that survives all of them. Also the one way out of a space a
+          device cannot sync (see SyncBanner). */}
+      <Group title='Backup'>
+        <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
+            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
+            : 'Nothing to save yet.'}</span>}
+          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
+        <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
+          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
       </Group>
       <Group title='Notifications'>
         <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />

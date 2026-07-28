@@ -13,6 +13,7 @@ const sodium = require('sodium-universal')
 const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
+const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
@@ -541,6 +542,94 @@ const methods = {
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
     setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
     return { ok: true, retracted }
+  },
+
+  // --- backup export / import ----------------------------------------------
+  // A file is the one way out that needs no peer. See src/spaceBackup.js for the
+  // format and for why it is deliberately unsigned.
+
+  // EVERY space on this device, as one JSON document. Not just the one on screen:
+  // "back up my lists" means the phone, and a one-space file silently leaves the
+  // others unprotected (Tim, 2026-07-28).
+  //
+  // Reads only; appends nothing, so a space this device cannot WRITE to is still
+  // exported - which is exactly the space someone most needs to get lists out of.
+  // One failing space must not take the whole backup down with it either: a
+  // half-mounted or unreadable space is skipped, and the rest still saves.
+  'backup:export': async (_args, ctx) => {
+    const spaces = []
+    for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
+      if (!value || !value.groupId) continue
+      const base = ctx.bases.get(value.groupId)
+      if (!base) continue
+      try {
+        await base.update()
+        const meta = await readRow(base, 'space')
+        // The signed `space` row is the household's name for it; groups:joined is
+        // what the invite said. Prefer the shared one, fall back to the local one -
+        // an unadmitted device has only ever seen the second.
+        const name = (meta && meta.name) || value.name || 'Space'
+        const lists = []
+        for await (const { value: l } of base.view.createReadStream(LIST_RANGE)) {
+          if (!l || l.deleted) continue
+          const items = []
+          for await (const { value: it } of base.view.createReadStream(itemRange(l.id))) {
+            if (it && !it.deleted) items.push(it)
+          }
+          lists.push({ name: l.name, kind: l.kind, items })
+        }
+        spaces.push({ name, lists })
+      } catch { continue }
+    }
+
+    const at = Date.now()
+    const doc = buildBackup({ spaces, exportedAt: at })
+    const lists = doc.spaces.reduce((n, sp) => n + sp.lists.length, 0)
+    const items = doc.spaces.reduce((n, sp) => n + sp.lists.reduce((m, l) => m + l.items.length, 0), 0)
+    // Pretty-printed on purpose: the file is meant to be openable, and readable,
+    // by the person whose groceries are in it.
+    return { json: JSON.stringify(doc, null, 2), filename: backupFilename(at), counts: { spaces: doc.spaces.length, lists, items } }
+  },
+
+  // Import into BRAND NEW spaces that this device founds, never into existing
+  // ones. That is a deliberate limit, not an oversight: merging a file into a live
+  // shared space is a sync problem (which rows are the same row?), and getting it
+  // wrong would duplicate a household's whole list rather than fail visibly. New
+  // spaces are always safe, and re-inviting the household is two taps.
+  'backup:import': async ({ jsonString }, ctx) => {
+    const parsed = parseBackup(jsonString) // throws a human-readable reason
+    const created = []
+    for (const sp of parsed.spaces) {
+      const { groupId } = await ctx.createGroup({ name: sp.name })
+      // Claim ownership immediately, same as the UI does after group:create: the
+      // first signed `space` write wins, and this device is the only one here.
+      await putRow(ctx, groupId, 'space', { owner: pubkeyHex(ctx), name: sp.name, createdAt: Date.now() })
+
+      for (const l of sp.lists) {
+        const listId = newEntityId()
+        await putRow(ctx, groupId, listKey(listId), {
+          id: listId, name: l.name, kind: normalizeKind(l.kind), assignee: null,
+          createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+        })
+        for (const e of l.items) {
+          const itemId = newEntityId()
+          await putRow(ctx, groupId, itemKey(listId, itemId), {
+            id: itemId, listId, text: String(e.text ?? ''), qty: Number.isFinite(e.qty) ? e.qty : 1,
+            checked: e.checked === true, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
+            ...(e.category ? { category: e.category } : {}),
+            ...(e.ord ? { ord: e.ord } : {}),
+            ...(e.note ? { note: e.note } : {}),
+            ...(e.url ? { url: e.url } : {}),
+            ...(e.repeat ? { repeat: normalizeRepeat(e.repeat) || undefined } : {}),
+          })
+        }
+      }
+      created.push({ groupId, name: sp.name })
+    }
+    // Deliberately NOT recordRecent'd, for the same reason template:apply is not:
+    // the autosuggest corpus learns what you TYPE, and an import would dump a
+    // whole household's history into it at once.
+    return { spaces: created, counts: parsed.counts }
   },
 
   // --- donation reminder (device-local) ----------------------------------
