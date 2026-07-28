@@ -494,6 +494,31 @@ for x in d.get('data', d if isinstance(d, list) else []):
 # reports CFBundleVersion in `version` (NOT the marketing version), and build
 # numbers are unique per app, so this is an exact match rather than a guess.
 # ---------------------------------------------------------------------------
+# The newest build App Store Connect knows about, as "id STATE version". Used
+# when the build number could not be read back from the Mac.
+_asc_newest_build() {
+  asc builds list --app "$ASC_APP_ID" --limit 20 --output json 2>/dev/null \
+    | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+items = d.get('data', d if isinstance(d, list) else [])
+best = None
+for x in items:
+    a = x.get('attributes', x)
+    try:
+        n = int(str(a.get('version', '')).strip())
+    except ValueError:
+        continue
+    if best is None or n > best[0]:
+        best = (n, x.get('id', ''), a.get('processingState', 'UNKNOWN'))
+if best:
+    print('%s %s %s' % (best[1], best[2], best[0]))
+"
+}
+
 _asc_build_id() {
   asc builds list --app "$ASC_APP_ID" --limit 20 --output json 2>/dev/null \
     | python3 -c "
@@ -2323,6 +2348,15 @@ else
   if $USE_ASC_REMOTE; then
     _asc_team="${ASC_TEAM_ID:-G79ALD29NA}"
 
+    # Tee the Mac's output so the build number it CHOSE can be read back. The Mac
+    # asks App Store Connect for the next free number and writes it into ITS OWN
+    # plist/pbxproj/app.json - and rsync only runs Linux -> Mac, so that number
+    # never returns here. app.json on this box therefore still holds a stale one,
+    # which is documented at the app.json bump above and was STILL being trusted
+    # by the submit step below: 1.0.5 looked up build 9 (a real build from a
+    # previous release), tried to attach it, and Apple refused the submission with
+    # "The build associated with appStoreVersions ... was not found".
+    _IOS_ARCHIVE_LOG=$(mktemp -t pearlist-ios-archive.XXXXXX)
     ssh "$MAC_MINI" "
       export PATH='/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin' LANG=en_US.UTF-8
       export ASC_KEY_ID='${ASC_KEY_ID}'
@@ -2331,7 +2365,20 @@ else
       export ASC_TEAM_ID='${_asc_team}'
       cd ${MAC_MINI_REPO_PATH}
       /bin/bash scripts/ios-appstore.sh
-    "
+    " 2>&1 | tee "$_IOS_ARCHIVE_LOG"
+    # ios-appstore.sh prints "Build number: N (...)" whichever branch it takes.
+    # sed, NOT `tr -dc '0-9'`: the line carries other numbers ("next=12, local
+    # floor=10"), and stripping non-digits from the whole line yields 121210.
+    _shipped=$(sed -n -E 's/^Build number: ([0-9]+).*/\1/p' "$_IOS_ARCHIVE_LOG" | head -1)
+    if [ -n "$_shipped" ]; then
+      _ios_build_number="$_shipped"
+      echo "    iOS build shipped: ${_ios_build_number} (read back from the Mac)"
+    else
+      echo "    WARNING: could not read the build number back from the Mac."
+      echo "    The submit step will fall back to the newest VALID build on App Store Connect."
+      _ios_build_number=""
+    fi
+    rm -f "$_IOS_ARCHIVE_LOG"
   else
     # Legacy altool path
     _asc_id="${ASC_APPLE_ID//\'/\'\\\'\'}"
@@ -2582,9 +2629,18 @@ if priors:
       # Attach the build. `asc builds list` needs a few minutes after upload
       # before the record appears, so say which is which rather than failing
       # with a bare 404.
-      _BUILD_INFO=$(_asc_build_id "${_ios_build_number:-}")
+      # Empty when the read-back above failed. Falling back to the app-wide NEWEST
+      # build is safe because ios-appstore.sh takes its number from
+      # `asc builds next-build-number`, which is the app-wide max + 1 - so the
+      # build this run just uploaded IS the newest one.
+      if [ -n "${_ios_build_number:-}" ]; then
+        _BUILD_INFO=$(_asc_build_id "$_ios_build_number")
+      else
+        _BUILD_INFO=$(_asc_newest_build)
+        [ -n "$_BUILD_INFO" ] && echo "    Using the newest build on App Store Connect: ${_BUILD_INFO##* } (${_BUILD_INFO%% *})"
+      fi
       _BUILD_ID="${_BUILD_INFO%% *}"
-      _BUILD_STATE="${_BUILD_INFO##* }"
+      _BUILD_STATE=$(printf '%s' "$_BUILD_INFO" | cut -d' ' -f2)
 
       if [ -z "$_BUILD_ID" ]; then
         echo "    Build ${_ios_build_number} is not registered on App Store Connect yet."
@@ -2595,71 +2651,94 @@ if priors:
         echo "    Build ${_ios_build_number} is still ${_BUILD_STATE}, not VALID."
         echo "    Wait for processing to finish, then re-run. Skipping submission."
       else
-        echo "    Attaching build ${_ios_build_number} (${_BUILD_ID})..."
-        asc versions attach-build --version-id "$ASC_VERSION_ID" --build "$_BUILD_ID" >/dev/null \
-          || echo "    WARNING: attach-build failed (it may already be attached)."
-
-        # Export compliance. Apple blocks submission until every build answers
-        # this, and it is set per BUILD, so a new build always starts unset.
-        # It is a legal declaration, so ask rather than assume.
-        # `asc validate` exits non-zero when it finds blocking errors, which is
-        # exactly the case we care about, so capture first rather than piping
-        # into grep under `set -o pipefail`.
-        _VALIDATE_JSON=$(asc validate --app "$ASC_APP_ID" --version "$APP_VERSION" \
-          --output json 2>/dev/null || true)
-        if printf '%s' "$_VALIDATE_JSON" | grep -q 'build.encryption.missing'; then
-          _PRIOR_ENC=$(_asc_prior_encryption)
-          echo ""
-          echo "    Apple needs an export-compliance answer for build ${_ios_build_number}."
-          echo "    It is set per build, so a new build always starts unset, and it is a"
-          echo "    legal declaration - so this asks rather than assuming."
-          if [ -n "$_PRIOR_ENC" ]; then
-            echo "    Most recent answered build of this app declared:"
-            echo "      uses non-exempt encryption = ${_PRIOR_ENC}"
+        echo "    Attaching build ${_ios_build_number:-${_BUILD_INFO##* }} (${_BUILD_ID})..."
+        # FATAL, not a warning. This used to be `|| echo WARNING (it may already be
+        # attached)`, so a genuine failure carried on into submission and surfaced
+        # as "The build associated with appStoreVersions ... was not found" - a
+        # message that points nowhere near the real cause. If the build will not
+        # attach there is nothing to submit, so stop here and say so.
+        if ! asc versions attach-build --version-id "$ASC_VERSION_ID" --build "$_BUILD_ID" >/dev/null 2>&1; then
+          # Already-attached is the one benign failure, so check before giving up.
+          if asc versions get --version-id "$ASC_VERSION_ID" --output json 2>/dev/null | grep -q "$_BUILD_ID"; then
+            echo "    Build is already attached to ${APP_VERSION}."
           else
-            echo "    No prior build of this app has answered, so there is no precedent."
+            echo "    ERROR: could not attach build ${_BUILD_ID} to ${APP_VERSION}." >&2
+            echo "    NOT submitting - a submission without a build fails with a" >&2
+            echo "    misleading 'build not found'. Attach it in App Store Connect" >&2
+            echo "    (version page -> Build -> +) and submit from there." >&2
+            PUBLISH_FAILED=true
+            _SKIP_SUBMIT=true
           fi
-          _confirm "Declare build ${_ios_build_number} as NOT using non-exempt encryption?"
-          asc builds update --build-id "$_BUILD_ID" --uses-non-exempt-encryption=false >/dev/null \
-            || echo "    WARNING: could not set export compliance."
         fi
 
-        echo "    Readiness check:"
-        asc validate --app "$ASC_APP_ID" --version "$APP_VERSION" || true
-        echo ""
-        echo "    Note: submission fails if the build is still processing."
-        _confirm "Submit version ${APP_VERSION} for App Store review?"
-
-        echo "    Submitting ${APP_VERSION} for review..."
-        _SUBMISSION_ID=$(asc review submissions-create --app "$ASC_APP_ID" --platform IOS --output json 2>/dev/null \
-          | python3 -c "
-import json, sys
-try:
-    print(json.load(sys.stdin).get('data', {}).get('id', ''))
-except Exception:
-    pass
-" 2>/dev/null)
-
-        if [ -z "$_SUBMISSION_ID" ]; then
-          echo "    WARNING: could not create a review submission."
-          echo "    Submit manually: https://appstoreconnect.apple.com/apps/${ASC_APP_ID}"
-        elif ! asc review items-add --submission "$_SUBMISSION_ID" \
-                --item-type appStoreVersions --item-id "$ASC_VERSION_ID" >/dev/null; then
-          echo "    WARNING: could not add version ${APP_VERSION} to the submission."
-          echo "    Cancel the empty submission: asc submit cancel --app ${ASC_APP_ID} --id ${_SUBMISSION_ID} --confirm"
-        elif asc review submissions-submit --id "$_SUBMISSION_ID" --confirm >/dev/null; then
-          echo "    Submitted for review."
-
-          # ── Step 5: Check review status ──
-          echo ""
-          echo "==> Checking review status..."
-          asc review status --app "$ASC_APP_ID" || true
-          echo ""
-          echo "    Monitor status:    asc review status --app $ASC_APP_ID"
-          echo "    Diagnose issues:   asc review doctor --app $ASC_APP_ID"
+        # Nothing to submit if the build never attached. Guarding the whole
+        # chain rather than each step, so there is exactly one place that
+        # decides whether a submission should happen at all.
+        if [ "${_SKIP_SUBMIT:-false}" = true ]; then
+          echo "    Skipping submission (see the attach error above)."
         else
-          echo "    WARNING: Submission failed - build may still be processing."
-          echo "    Retry: asc review submissions-submit --id ${_SUBMISSION_ID} --confirm"
+          # Export compliance. Apple blocks submission until every build answers
+          # this, and it is set per BUILD, so a new build always starts unset.
+          # It is a legal declaration, so ask rather than assume.
+          # `asc validate` exits non-zero when it finds blocking errors, which is
+          # exactly the case we care about, so capture first rather than piping
+          # into grep under `set -o pipefail`.
+          _VALIDATE_JSON=$(asc validate --app "$ASC_APP_ID" --version "$APP_VERSION" \
+            --output json 2>/dev/null || true)
+          if printf '%s' "$_VALIDATE_JSON" | grep -q 'build.encryption.missing'; then
+            _PRIOR_ENC=$(_asc_prior_encryption)
+            echo ""
+            echo "    Apple needs an export-compliance answer for build ${_ios_build_number}."
+            echo "    It is set per build, so a new build always starts unset, and it is a"
+            echo "    legal declaration - so this asks rather than assuming."
+            if [ -n "$_PRIOR_ENC" ]; then
+              echo "    Most recent answered build of this app declared:"
+              echo "      uses non-exempt encryption = ${_PRIOR_ENC}"
+            else
+              echo "    No prior build of this app has answered, so there is no precedent."
+            fi
+            _confirm "Declare build ${_ios_build_number} as NOT using non-exempt encryption?"
+            asc builds update --build-id "$_BUILD_ID" --uses-non-exempt-encryption=false >/dev/null \
+              || echo "    WARNING: could not set export compliance."
+          fi
+
+          echo "    Readiness check:"
+          asc validate --app "$ASC_APP_ID" --version "$APP_VERSION" || true
+          echo ""
+          echo "    Note: submission fails if the build is still processing."
+          _confirm "Submit version ${APP_VERSION} for App Store review?"
+
+          echo "    Submitting ${APP_VERSION} for review..."
+          _SUBMISSION_ID=$(asc review submissions-create --app "$ASC_APP_ID" --platform IOS --output json 2>/dev/null \
+            | python3 -c "
+  import json, sys
+  try:
+      print(json.load(sys.stdin).get('data', {}).get('id', ''))
+  except Exception:
+      pass
+  " 2>/dev/null)
+
+          if [ -z "$_SUBMISSION_ID" ]; then
+            echo "    WARNING: could not create a review submission."
+            echo "    Submit manually: https://appstoreconnect.apple.com/apps/${ASC_APP_ID}"
+          elif ! asc review items-add --submission "$_SUBMISSION_ID" \
+                  --item-type appStoreVersions --item-id "$ASC_VERSION_ID" >/dev/null; then
+            echo "    WARNING: could not add version ${APP_VERSION} to the submission."
+            echo "    Cancel the empty submission: asc submit cancel --app ${ASC_APP_ID} --id ${_SUBMISSION_ID} --confirm"
+          elif asc review submissions-submit --id "$_SUBMISSION_ID" --confirm >/dev/null; then
+            echo "    Submitted for review."
+
+            # ── Step 5: Check review status ──
+            echo ""
+            echo "==> Checking review status..."
+            asc review status --app "$ASC_APP_ID" || true
+            echo ""
+            echo "    Monitor status:    asc review status --app $ASC_APP_ID"
+            echo "    Diagnose issues:   asc review doctor --app $ASC_APP_ID"
+          else
+            echo "    WARNING: Submission failed - build may still be processing."
+            echo "    Retry: asc review submissions-submit --id ${_SUBMISSION_ID} --confirm"
+          fi
         fi
       fi
     fi
