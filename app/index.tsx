@@ -384,9 +384,19 @@ const AI_PURGED_KEY = 'pearlist:aiPurged'
 async function purgeRemovedAiModel () {
   try {
     if ((await AsyncStorage.getItem(AI_PURGED_KEY)) === '1') return
-    await FileSystem.deleteAsync(FileSystem.documentDirectory + '.qvac', { idempotent: true }).catch(() => {})
-    await AsyncStorage.multiRemove(['qvac:consent', 'qvac:modelReady']).catch(() => {})
+    // FLAG FIRST, DELETE SECOND. The old order wrote the flag only after the
+    // delete finished, and the delete is up to ~0.8 GB. If the user force-quits
+    // part way - which is exactly what someone does when the app looks hung -
+    // nothing is recorded, so the next launch starts the whole delete again.
+    // Black screen on every launch, forever, self-perpetuating. That is the best
+    // fit we have for the Android 12 report of "1.0.4 opens to a black screen and
+    // never loads": 1.0.4 is the version that added this.
+    //
+    // The cost of this order is leaked disk if the delete is interrupted. The cost
+    // of the other order was an unusable app. Easy trade.
     await AsyncStorage.setItem(AI_PURGED_KEY, '1')
+    await AsyncStorage.multiRemove(['qvac:consent', 'qvac:modelReady']).catch(() => {})
+    await FileSystem.deleteAsync(FileSystem.documentDirectory + '.qvac', { idempotent: true }).catch(() => {})
   } catch {}
 }
 
@@ -550,7 +560,6 @@ export default function Shell () {
         if (!cancelled) setHtml(await loadUiHtml(scene))
         return
       }
-      purgeRemovedAiModel() // reclaim the old model's ~0.8 GB, once
       // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
       // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
       requestLocalNetworkPermission()
@@ -581,6 +590,12 @@ export default function Shell () {
       // permission answer, because _notifEnabled gates them, but the UI is already
       // up by now either way.
       notifReady.then(() => refreshReminders()).catch(() => {})
+      // AFTER the UI is up, never before. This deletes up to ~0.8 GB and used to
+      // run at the top of boot, competing with worklet init for the same storage
+      // on the same slow device - so the app showed nothing while it ground away.
+      // Nothing depends on it, so there is no reason for it to be in front of
+      // anything the user can see.
+      purgeRemovedAiModel() // reclaim the removed AI model's bytes, once
     })().catch((e) => {
       bootLog('boot failed: ' + (e?.message ?? String(e)))
       // LAST RESORT. Whatever went wrong above, render something. A user staring
