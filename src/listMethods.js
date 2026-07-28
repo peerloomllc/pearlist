@@ -613,6 +613,7 @@ const methods = {
         })
         for (const e of l.items) {
           const itemId = newEntityId()
+          const repeat = normalizeRepeat(e.repeat)
           await putRow(ctx, groupId, itemKey(listId, itemId), {
             id: itemId, listId, text: String(e.text ?? ''), qty: Number.isFinite(e.qty) ? e.qty : 1,
             checked: e.checked === true, createdBy: pubkeyHex(ctx), createdAt: Date.now(), deleted: false,
@@ -620,7 +621,13 @@ const methods = {
             ...(e.ord ? { ord: e.ord } : {}),
             ...(e.note ? { note: e.note } : {}),
             ...(e.url ? { url: e.url } : {}),
-            ...(e.repeat ? { repeat: normalizeRepeat(e.repeat) || undefined } : {}),
+            // normalizeRepeat is the one gate on an unknown value from the file,
+            // and it returns null rather than throwing. lastDoneAt only means
+            // anything alongside a repeat, and that is the only case that reads
+            // it: effectiveChecked derives a recurring item's done-state from it,
+            // ignoring `checked` entirely.
+            ...(repeat ? { repeat } : {}),
+            ...(repeat && Number.isFinite(e.lastDoneAt) ? { lastDoneAt: e.lastDoneAt } : {}),
           })
         }
       }

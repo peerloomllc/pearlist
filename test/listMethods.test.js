@@ -474,6 +474,51 @@ test('backup:export includes a space we can only read', async () => {
   await engine.close()
 })
 
+test('a recurring chore comes back DONE, not due, after a restore', async () => {
+  // End to end through the real IPC loop, because the interesting part is not the
+  // file - it is that item:getAll DERIVES a repeating item's checked state from
+  // lastDoneAt. Without it carried, a chore done a minute ago reads as due again.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'Chores', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'Bins' })
+  await call('item:setRepeat', { groupId, listId, itemId, repeat: 'weekly' })
+  await call('item:toggle', { groupId, listId, itemId, checked: true })
+  assert.equal((await call('item:getAll', { groupId, listId }))[0].checked, true, 'done before the backup')
+
+  const exp = await call('backup:export', {})
+  const imp = await call('backup:import', { jsonString: exp.json })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  const lid = (await call('list:getAll', { groupId: restored.groupId }))[0].id
+  const [item] = await call('item:getAll', { groupId: restored.groupId, listId: lid })
+
+  assert.equal(item.text, 'Bins')
+  assert.ok(item.repeat, 'still repeating')
+  assert.equal(item.checked, true, 'and still done for this period, not reset to due')
+  await engine.close()
+})
+
+test('an item reminder is NOT carried into a restore', async () => {
+  // Deliberate: remindAt is an absolute instant, so a month-old backup would hand
+  // the OS a pile of past-dated reminders. The UI says so after every import.
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'Home' })
+  const { listId } = await call('list:create', { groupId, name: 'L' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'Call the vet' })
+  await call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() + 86400000 })
+  assert.ok((await call('item:getAll', { groupId, listId }))[0].remindAt, 'set before the backup')
+
+  const exp = await call('backup:export', {})
+  assert.doesNotMatch(exp.json, /remindAt/, 'not even present in the file')
+  const imp = await call('backup:import', { jsonString: exp.json })
+  const restored = imp.spaces.find((s) => s.name === 'Home')
+  const lid = (await call('list:getAll', { groupId: restored.groupId }))[0].id
+  assert.equal((await call('item:getAll', { groupId: restored.groupId, listId: lid }))[0].remindAt, undefined)
+  await engine.close()
+})
+
 test('backup:import refuses a file that is not a PearList backup', async () => {
   const { engine, call } = driver()
   await call('init', {})

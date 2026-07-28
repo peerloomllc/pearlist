@@ -51,6 +51,31 @@ test('carries item state a template deliberately drops', () => {
   assert.equal(it.ord, 'a1')
 })
 
+test('a recurring chore keeps its cycle: lastDoneAt survives', () => {
+  // For a repeating item `checked` is IGNORED - effectiveChecked derives the
+  // done-state from lastDoneAt - so dropping this made every chore come back due
+  // however recently it was done. Found 2026-07-28.
+  const done = 1753700000000
+  const doc = buildBackup(snapshot({
+    spaces: [space('S', [{ name: 'Chores', kind: 'chore', items: [row({ text: 'Bins', repeat: 'weekly', checked: true, lastDoneAt: done })] }])],
+  }))
+  const it = parseBackup(JSON.stringify(doc)).spaces[0].lists[0].items[0]
+  assert.equal(it.repeat, 'weekly')
+  assert.equal(it.lastDoneAt, done)
+})
+
+test('lastDoneAt is a record, not a scheduled instant, so it is safe to carry', () => {
+  // The distinction that decides what a backup may keep: remindAt would FIRE at an
+  // absolute time (so a stale one is noise); lastDoneAt only says when something
+  // WAS done, so a stale one simply reads as "that period has passed".
+  const doc = buildBackup(snapshot({
+    spaces: [space('S', [{ name: 'L', kind: null, items: [row({ repeat: 'daily', lastDoneAt: 1, remindAt: 1753700000000 })] }])],
+  }))
+  const it = doc.spaces[0].lists[0].items[0]
+  assert.equal(it.lastDoneAt, 1)
+  assert.equal(it.remindAt, undefined, 'reminders stay out')
+})
+
 test('never carries the household: no identity, keys, assignee or reminder', () => {
   const doc = buildBackup(snapshot({
     spaces: [space('S', [{

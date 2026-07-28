@@ -23,8 +23,16 @@
 // WHAT IS AND IS NOT CARRIED. The shape and state of the lists, not the household:
 // no identities, no writer keys, no invites, no member rosters. `assignee` is
 // dropped on purpose - it names a pubkey that does not exist in the new space, so
-// carrying it would render as a permanently unknown person. Reminders are dropped
-// too: they are wall-clock times that would arrive in the past.
+// carrying it would render as a permanently unknown person.
+//
+// REMINDERS ARE DROPPED, all three kinds and each for its own reason. An item's
+// `remindAt` is an absolute instant, so restoring a month-old file would hand the
+// OS a pile of past-dated reminders to fire in a burst or discard - re-setting one
+// you still want is a tap. The daily nudge and the notification toggles were never
+// in here to drop: they are device-local shell settings, not space data.
+//
+// A recurring chore's CYCLE is not a reminder and is carried: see lastDoneAt in
+// exportItem.
 
 const KIND = 'pearlist-backup'
 // The one-space shape this replaced (`kind: 'pearlist-space'`) never shipped, but
@@ -51,7 +59,23 @@ function exportItem (row) {
   if (clean(row.ord)) out.ord = clean(row.ord)
   if (clean(row.note)) out.note = clean(row.note)
   if (clean(row.url)) out.url = clean(row.url)
-  if (row.repeat && typeof row.repeat === 'object') out.repeat = row.repeat
+  // A STRING - 'daily' | 'weekly' | 'monthly' (listWire REPEAT_KINDS), not an
+  // object. The first cut guarded on `typeof === 'object'`, so recurring chores
+  // were silently never carried; the round-trip test added 2026-07-28 is what
+  // caught it. Left permissive here on purpose: the import side already runs
+  // normalizeRepeat, so an unknown value is rejected in exactly one place.
+  if (clean(row.repeat)) out.repeat = clean(row.repeat)
+  // The done-state of a RECURRING item, and the one field that decides it. For a
+  // repeating item `checked` is ignored entirely - effectiveChecked derives it
+  // from lastDoneAt against the current period - so carrying `checked` without
+  // this made every chore come back due, however recently it was done. Dropping
+  // it was accidental, not a decision (found 2026-07-28 when Tim asked whether
+  // reminders were in the backup).
+  //
+  // Unlike remindAt this is safe to carry across time: it is a record of when
+  // something WAS done, not an instruction to fire at an absolute moment, so a
+  // stale one simply reads as "that period has passed" and the chore is due again.
+  if (Number.isFinite(row.lastDoneAt)) out.lastDoneAt = row.lastDoneAt
   return out
 }
 

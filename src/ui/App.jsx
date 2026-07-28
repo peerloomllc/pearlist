@@ -713,7 +713,10 @@ function ConfirmHost () {
           askConfirm (Remove, Stronger removal, Leave, Clear learned aisles...). */}
       <div style={{ display: 'flex', gap: sp.sm }}>
         <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
-        <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+        {/* `noCancel` makes this an acknowledgement rather than a choice. Offering
+            "Cancel" on a notice invites the question "cancel what?" about
+            something that has already happened. */}
+        {state?.noCancel ? null : <button onClick={() => done(false)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: 'transparent', color: c.text.secondary, fontSize: 14, cursor: 'pointer' }}>Cancel</button>}
       </div>
     </BottomSheet>
   )
@@ -1698,11 +1701,28 @@ export default function App () {
       if (!String(picked.content || '').trim()) throw new Error('that file is empty')
       const { spaces, counts } = await call('backup:import', { jsonString: picked.content })
       await loadSpaces()
+      // A notice, not a banner, because it asks the user to go and DO something,
+      // and a banner they miss is the same as never having said it.
+      //
+      // Shown on every restore, not only when reminders were lost: we cannot tell
+      // whether they had any, precisely because remindAt is dropped at export
+      // time, so the file carries no trace of them. Saying it once to someone who
+      // had none beats silently losing them for someone who did.
+      //
+      // BEFORE the phase change, deliberately. ConfirmHost is rendered in both the
+      // onboarding and the home trees, so flipping phase mid-prompt would unmount
+      // and remount it - dropping the pending resolve and hanging this await. Ask
+      // while the screen is still whatever it already was, then move.
+      await askConfirm({
+        title: 'Your lists are back',
+        message: `${counts.spaces} space${counts.spaces === 1 ? '' : 's'} and ${counts.items} item${counts.items === 1 ? '' : 's'} restored. Reminders are not kept in a saved copy, so any you had set on individual items need setting again, and the daily reminder is worth checking in Settings. Repeating chores kept their schedule.`,
+        confirmLabel: 'Got it',
+        noCancel: true,
+      })
       // Land in the first restored space, so the import is visibly there rather
       // than something the user has to go looking for.
       const first = spaces && spaces[0]
       if (first) { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home'); setSheet(null) }
-      setBanner(`Restored ${counts.spaces} space${counts.spaces === 1 ? '' : 's'}, ${counts.items} item${counts.items === 1 ? '' : 's'}`)
     } catch (e) {
       alert('Could not open that file: ' + e.message)
     }
@@ -1977,6 +1997,9 @@ export default function App () {
           onRestore={() => { dismissTour(); importBackup() }} />
         <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
         <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
+        {/* Restoring can start from here (and from the tour), and its notice goes
+            through askConfirm - which is a no-op unless a ConfirmHost is mounted. */}
+        <ConfirmHost />
       </>
     )
   }
