@@ -140,6 +140,11 @@ function fireNotify (channelId: string, title: string, body: string, data?: any)
 // Reachable on a RELEASE build via `adb logcat` and
 // `xcrun simctl spawn <udid> log stream`, which is the point.
 const _remindLines: string[] = []
+// Boot-path problems share the reminder log's file, because the question they
+// answer is the same one: the app did something invisible and nobody can tell
+// what. Pullable with scripts/pull-reminder-log.sh.
+function bootLog (msg: string) { remindLog('BOOT ' + msg) }
+
 function remindLog (msg: string) {
   const line = new Date().toISOString() + ' ' + msg
   console.warn('[reminders] ' + msg)
@@ -341,6 +346,12 @@ const REMINDER_DIRTYING = /^(item|list|note):/
 // starts feeling too eager.
 const WEBVIEW_RECOVERY_MIN_BG_MS = 20_000
 
+// How long to wait for the worklet's init reply before giving up and rendering
+// the UI anyway. Generous: a cold start on a slow device with a large Corestore
+// is legitimately slow, and a false timeout costs a degraded session. What it
+// buys is that "the backend is broken" can never again present as a blank screen.
+const WORKLET_INIT_TIMEOUT_MS = 25_000
+
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
 let _workletStarted = false
@@ -373,9 +384,19 @@ const AI_PURGED_KEY = 'pearlist:aiPurged'
 async function purgeRemovedAiModel () {
   try {
     if ((await AsyncStorage.getItem(AI_PURGED_KEY)) === '1') return
-    await FileSystem.deleteAsync(FileSystem.documentDirectory + '.qvac', { idempotent: true }).catch(() => {})
-    await AsyncStorage.multiRemove(['qvac:consent', 'qvac:modelReady']).catch(() => {})
+    // FLAG FIRST, DELETE SECOND. The old order wrote the flag only after the
+    // delete finished, and the delete is up to ~0.8 GB. If the user force-quits
+    // part way - which is exactly what someone does when the app looks hung -
+    // nothing is recorded, so the next launch starts the whole delete again.
+    // Black screen on every launch, forever, self-perpetuating. That is the best
+    // fit we have for the Android 12 report of "1.0.4 opens to a black screen and
+    // never loads": 1.0.4 is the version that added this.
+    //
+    // The cost of this order is leaked disk if the delete is interrupted. The cost
+    // of the other order was an unusable app. Easy trade.
     await AsyncStorage.setItem(AI_PURGED_KEY, '1')
+    await AsyncStorage.multiRemove(['qvac:consent', 'qvac:modelReady']).catch(() => {})
+    await FileSystem.deleteAsync(FileSystem.documentDirectory + '.qvac', { idempotent: true }).catch(() => {})
   } catch {}
 }
 
@@ -446,7 +467,17 @@ async function startWorklet () {
 
   // Corestore lives under the app's document directory (file:// stripped).
   const dataDir = FileSystem.documentDirectory!.replace(/^file:\/\//, '').replace(/\/$/, '')
-  await callRaw('init', { dataDir })
+  // BOUNDED. callRaw neither rejects nor times out, so if the worklet fails to
+  // come up on some device - a native addon that will not load, storage it cannot
+  // write - this await never returns and the caller never renders anything. That
+  // is a permanent black screen with nothing in any log. Time it out and let the
+  // caller decide, rather than hanging the app on a backend that is not coming.
+  const TIMED_OUT = Symbol('init timeout')
+  const res = await Promise.race([
+    callRaw('init', { dataDir }),
+    new Promise((r) => setTimeout(() => r(TIMED_OUT), WORKLET_INIT_TIMEOUT_MS)),
+  ])
+  if (res === TIMED_OUT) throw new Error(`worklet init did not reply within ${WORKLET_INIT_TIMEOUT_MS}ms`)
 }
 export async function ensureBackendStarted () { await startWorklet() }
 
@@ -529,7 +560,6 @@ export default function Shell () {
         if (!cancelled) setHtml(await loadUiHtml(scene))
         return
       }
-      purgeRemovedAiModel() // reclaim the old model's ~0.8 GB, once
       // Nudge iOS to show the Local Network prompt so same-WiFi peers connect
       // directly (see modules/local-network). Fire-and-forget; no-op off iOS.
       requestLocalNetworkPermission()
@@ -545,13 +575,34 @@ export default function Shell () {
       // service needs the notification permission to show its own notification.
       const notifReady = loadNotifEnabled().catch(() => false)
       notifReady.then(() => bgSyncEnabled()).then((on) => { if (on) ensureNotifPermission().finally(startBackgroundSync) }).catch(() => {})
-      await startWorklet() // init the worklet (with dataDir) before the WebView can call it
+      // The worklet starts BEFORE the WebView so the UI's first calls have
+      // somewhere to land. But a failure here must never stop the UI rendering:
+      // this used to be a bare await, so anything that hung or threw left a black
+      // screen with no error at all. Better a visible app whose data is missing
+      // than nothing on screen.
+      try {
+        await startWorklet()
+      } catch (e: any) {
+        bootLog('worklet did not start: ' + (e?.message ?? String(e)))
+      }
       if (!cancelled) setHtml(await loadUiHtml())
       // Re-derive both reminder surfaces from the current state. Waits on the
       // permission answer, because _notifEnabled gates them, but the UI is already
       // up by now either way.
       notifReady.then(() => refreshReminders()).catch(() => {})
-    })().catch((e) => console.warn('shell boot failed', e?.message ?? String(e)))
+      // AFTER the UI is up, never before. This deletes up to ~0.8 GB and used to
+      // run at the top of boot, competing with worklet init for the same storage
+      // on the same slow device - so the app showed nothing while it ground away.
+      // Nothing depends on it, so there is no reason for it to be in front of
+      // anything the user can see.
+      purgeRemovedAiModel() // reclaim the removed AI model's bytes, once
+    })().catch((e) => {
+      bootLog('boot failed: ' + (e?.message ?? String(e)))
+      // LAST RESORT. Whatever went wrong above, render something. A user staring
+      // at a black screen cannot report anything useful and cannot even reach
+      // Settings; a rendered app can at least fail visibly.
+      loadUiHtml().then((h) => { if (!cancelled) setHtml(h) }).catch(() => {})
+    })
     return () => { cancelled = true }
   }, [])
 
