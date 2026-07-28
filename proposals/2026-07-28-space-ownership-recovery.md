@@ -1,5 +1,17 @@
 # Space ownership recovery (when the owner's device is gone)
 
+> **STATUS: WON'T BUILD (2026-07-28).** Superseded by space export / import (PR
+> #116), which shipped the same afternoon this was written. See DECISIONS.md
+> 2026-07-28. Kept because the reasoning is still the useful part - in particular
+> the n=2 finding below, which applies to any future "recover the space" feature.
+>
+> The short version: ownership gates rename, delete, evict and arm-revocation.
+> Eviction only HIDES a member and revocation stops writes but not reads, so the
+> real answer to "get them out" was always a new space - and export/import makes
+> that cheap while carrying the household's lists across. What ownership recovery
+> would still have bought is keeping the same space id and not re-sending invites,
+> which is not worth a T3 trust change and a seizure button in a couples app.
+
 ## Goal
 
 Let a household keep running a space whose owner identity no longer exists on any
