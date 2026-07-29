@@ -95,7 +95,8 @@
       "./plugins/with-android-standalone-debug",
       "./plugins/with-android-release-signing",
       "./plugins/with-strip-aps",
-      "./plugins/with-compressed-debug-libs"
+      "./plugins/with-compressed-debug-libs",
+      "expo-secure-store"
     ],
     "assets": [
       "./assets/bare-universal.bundle",
