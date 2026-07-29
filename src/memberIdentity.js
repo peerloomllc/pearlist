@@ -76,18 +76,30 @@ async function collapseMembers (members) {
 
     const seen = byRoot.get(root)
     if (!seen) {
-      const entry = { row: strip(m), at: stamp(m), index: out.length }
+      const row = strip(m)
+      // Every device key this person signs with. NOT for display - Tim's call is
+      // that the members list shows people, never hardware - but an assignment
+      // stores a DEVICE key, so without this a chore assigned to their other
+      // phone cannot be resolved back to them and renders as "?".
+      // Caught on hardware 2026-07-29, after collapse dropped the row whose
+      // pubkey an existing assignment pointed at.
+      row.keys = [m.pubkey]
+      const entry = { row, at: stamp(m), index: out.length }
       byRoot.set(root, entry)
-      out.push(entry.row)
+      out.push(row)
       continue
     }
+    const keys = seen.row.keys
+    if (m.pubkey && !keys.includes(m.pubkey)) keys.push(m.pubkey)
     // Same person, second device. Name and avatar come from the most recently
     // updated row, so renaming on your newer phone is what the household sees -
     // rather than whichever row happened to sort first.
     if (stamp(m) > seen.at) {
       seen.at = stamp(m)
-      seen.row = strip(m)
-      out[seen.index] = seen.row
+      const row = strip(m)
+      row.keys = keys // carry the accumulated set across the swap
+      seen.row = row
+      out[seen.index] = row
     }
   }
   return out
@@ -116,6 +128,10 @@ async function sameIdentityKeys (members, selfKey) {
 // The member row minus anything device-shaped. Keeping `identityProof` out of the
 // UI's copy is not just tidiness: it is what stops a later change from rendering
 // a device count that Tim explicitly decided against.
+// Drops the proof (large, and nothing downstream should re-verify) and updatedAt
+// (an ordering detail). `keys` is added by the caller where a row is a collapsed
+// person - see the comment there for why it is not device information in the
+// sense Tim ruled out.
 function strip (m) {
   if (!m || typeof m !== 'object') return m
   const { identityProof, updatedAt, ...rest } = m

@@ -331,16 +331,25 @@ function Avatar ({ name, avatar, size = 40 }) {
 
 // Resolve an assignee pubkey to that member's avatar (or a neutral ? if the
 // roster hasn't synced them yet).
+// Resolve a stored assignee to the person it belongs to. `assignee` is a DEVICE
+// key, and a person with two phones is one row covering both - so matching on the
+// row's pubkey alone renders their other phone as "?".
+function memberFor (members, pubkey) {
+  return members.find((x) => x.pubkey === pubkey || (x.keys && x.keys.includes(pubkey)))
+}
 function AssigneeAvatar ({ pubkey, members, size = 22 }) {
   if (!pubkey) return null
-  const m = members.find((x) => x.pubkey === pubkey)
+  const m = memberFor(members, pubkey)
   return <Avatar name={m?.displayName || '?'} avatar={m?.avatar} size={size} />
 }
 function memberLabel (members, pubkey, selfPubkey) {
   if (!pubkey) return 'Nobody'
-  const m = members.find((x) => x.pubkey === pubkey)
+  const m = memberFor(members, pubkey)
   const base = m?.displayName || 'Unknown'
-  return pubkey === selfPubkey ? base + ' (You)' : base
+  // "(You)" must follow the PERSON, not the device: a list assigned to your other
+  // phone is still assigned to you.
+  const mine = m && (m.pubkey === selfPubkey || (m.keys && m.keys.includes(selfPubkey)))
+  return (pubkey === selfPubkey || mine) ? base + ' (You)' : base
 }
 
 // Pick a household member (or nobody) to assign an item or list to.

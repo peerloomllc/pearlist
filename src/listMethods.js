@@ -147,6 +147,7 @@ async function deviceIdentityProof (ctx) {
   if (_identityProofHex !== null) return _identityProofHex || null
   try {
     const hex = await attestSelf(pubkeyHex(ctx))
+    _dlTrace('dl:attest', { got: !!hex })
     if (!hex) { _identityProofHex = ''; return null }
     _identityProofHex = hex
     return _identityProofHex
@@ -156,6 +157,35 @@ async function deviceIdentityProof (ctx) {
     _identityProofHex = ''
     return null
   }
+}
+
+
+// Republish our member row for ONE space when it has no identity proof and we can
+// now produce one. AT MOST ONCE PER SPACE PER SESSION.
+//
+// WHY THIS HANGS OFF member:getAll RATHER THAN BOOT. publishMember does not run
+// on launch for a row that already exists - only on a profile change or a first
+// join - so a device that was already a member before this feature existed would
+// never publish a proof, and the collapse would never happen for anyone already
+// in a space. Which is everyone.
+//
+// WHY THE ONCE-PER-SESSION GUARD, which is the whole point of this function's
+// shape. The first version re-checked the stored row each time and republished if
+// it still lacked a proof. An append is not visible in `base.view` until apply
+// catches up, and member:getAll runs on a refresh interval - so it republished
+// every ~2.5s, forever. Measured on hardware 2026-07-29 before it was caught:
+// eight appends in twenty seconds and still going. A self-healing check that
+// re-fires on stale state is a write-amplification bug, not a fix.
+//
+// Trying once per session is sufficient: if the append lands, later sessions see
+// the proof and skip. If it does not, the next launch tries again.
+const _proofBackfilled = new Set()
+function backfillIdentityProof (ctx, groupId, mineHasProof) {
+  if (mineHasProof || _proofBackfilled.has(groupId)) return
+  _proofBackfilled.add(groupId)
+  deviceIdentityProof(ctx).then((proof) => {
+    if (proof) return publishMember(ctx, groupId)
+  }).catch(() => {})
 }
 
 async function publishMember (ctx, onlyGroupId) {
@@ -181,6 +211,7 @@ async function publishMember (ctx, onlyGroupId) {
   // is not evidence that two people are the same person.
   const proof = await deviceIdentityProof(ctx)
   if (proof) value.identityProof = proof
+  _dlTrace('dl:publishMember', { proof: !!proof })
 
   const key = memberKey(pubkeyHex(ctx))
   let published = false
@@ -471,7 +502,10 @@ const methods = {
     const base = viewFor(ctx, groupId)
     const meta = await readRow(base, 'space')
     const out = []
+    const self = pubkeyHex(ctx)
+    let mineHasProof = false
     for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
+      if (value && value.pubkey === self && value.identityProof) mineHasProof = true
       if (!isMemberVisible(value, meta)) continue
       // identityProof + updatedAt are carried only so collapseMembers can verify
       // and order; it strips both before the UI sees the row. Tim's call: the
@@ -484,6 +518,9 @@ const methods = {
         updatedAt: value.updatedAt,
       })
     }
+    // If our own row predates this feature it carries no proof, and nothing else
+    // would ever add one. Cheap because the stream above already told us.
+    backfillIdentityProof(ctx, groupId, mineHasProof)
     // Two phones of one person become one row. Rows with no verified proof are
     // never merged - see src/memberIdentity.js for why that rule has no exception.
     return await collapseMembers(out)

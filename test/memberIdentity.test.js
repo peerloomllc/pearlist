@@ -94,6 +94,27 @@ test('rows without a proof are NEVER merged with each other', async () => {
   assert.equal(out.length, 3, 'absence of proof is not evidence of sameness')
 })
 
+// A collapsed person must resolve for EVERY key they sign with, or an assignment
+// to their other phone renders as "?" - which is what happened on hardware before
+// `keys` existed.
+test('a collapsed person carries every device key they sign with', async () => {
+  const p = await person()
+  const a1 = { ...(await p.device()), displayName: 'Tim', updatedAt: 100 }
+  const a2 = { ...(await p.device()), displayName: 'Tim', updatedAt: 200 }
+  const [row] = await collapseMembers([a1, a2])
+  assert.equal(row.keys.length, 2)
+  assert.ok(row.keys.includes(a1.pubkey) && row.keys.includes(a2.pubkey))
+  // Including when the newer row wins and replaces the representative.
+  assert.equal(row.pubkey, a2.pubkey)
+})
+
+test('an uncollapsed member still resolves by its own key', async () => {
+  const p = await person()
+  const solo = { ...(await p.device()), displayName: 'Solo', updatedAt: 1 }
+  const [row] = await collapseMembers([solo])
+  assert.deepEqual(row.keys, [solo.pubkey])
+})
+
 test('the UI copy carries nothing device-shaped', async () => {
   const p = await person()
   const a = { ...(await p.device()), displayName: 'Tim', updatedAt: 5 }
@@ -103,6 +124,8 @@ test('the UI copy carries nothing device-shaped', async () => {
   assert.equal(row.updatedAt, undefined)
   assert.equal(row.deviceCount, undefined)
   assert.equal(row.displayName, 'Tim')
+  // `keys` IS present - it is what resolves an assignment back to a person. It is
+  // never rendered, and nothing may derive a visible device count from it.
 })
 
 test('collapse is safe on empty and malformed input', async () => {
