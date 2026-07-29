@@ -207,6 +207,107 @@ function backfillIdentityProof (ctx, groupId, publishedProof) {
   }).catch(() => {})
 }
 
+// STOPGAP, and labelled as one. A phone you just linked should already be you -
+// same name, same picture - because that is what "this is my other phone" means.
+// The real fix is to store the profile on the PERSON, in device-link's personal
+// base: see proposals/2026-07-29-profile-belongs-to-the-person.md, which rejects
+// this copy as a *fix* precisely because it does not keep the two in step
+// afterwards. It is here because Tim decided linking ships FIRST (2026-07-29), and
+// without it every freshly paired phone keeps its own default name and the
+// household sees the wrong one - turning a rare annoyance into the common case.
+//
+// WHAT MAKES IT SAFE TO COPY: we only ever adopt from a member row that PROVES the
+// same identity root as ours, which is the same verified check the collapse uses.
+// A row that merely claims a name is never a source. So the worst case is that we
+// adopt nothing.
+//
+// ONLY OVER AN UNTOUCHED PROFILE. If this device has a real name of its own, the
+// user chose it and we must not overwrite it - that is the ambiguous case the
+// proposal says to ask about, and asking is not this stopgap's job.
+const DEFAULT_DISPLAY_NAME = 'Member'
+function isUntouchedProfile (prof) {
+  if (!prof) return true
+  const n = String(prof.displayName || '').trim()
+  if (n && n !== DEFAULT_DISPLAY_NAME) return false
+  return !prof.avatarBlob && !prof.avatar
+}
+
+// Guarded per session AND per source, the same shape as backfillIdentityProof: the
+// source row's proof is stable, so a failed adoption retries on the next refresh
+// tick only if what we are adopting from has changed. Without this, member:getAll
+// runs every ~2.5 s and this would be a write loop - the bug dcdb22b fixed.
+const _profileAdopted = new Set()
+function adoptProfileFromMyOtherDevice (ctx, rows) {
+  const self = pubkeyHex(ctx)
+  const mine = rows.find((r) => r && r.pubkey === self)
+  if (!mine || !mine.identityProof) return // no proof of our own = no claim about anyone
+  const candidates = rows.filter((r) => r && r.pubkey !== self && r.identityProof && String(r.displayName || '').trim())
+  if (!candidates.length) return
+
+  ;(async () => {
+    const myRoot = await identityRootOf(mine.identityProof)
+    if (!myRoot) return
+    // Newest first, so linking a third phone adopts the name you most recently set
+    // rather than whichever row happens to sort first.
+    candidates.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    for (const row of candidates) {
+      if (await identityRootOf(row.identityProof) !== myRoot) continue // not us
+      const guard = self + ':' + row.identityProof
+      if (_profileAdopted.has(guard)) return
+      _profileAdopted.add(guard)
+
+      const prof = (await ctx.localDb.get('profile'))?.value
+      if (!isUntouchedProfile(prof)) return // the user named this phone; leave it
+
+      const adopted = { displayName: String(row.displayName).slice(0, 64), updatedAt: Date.now(), v: 1 }
+      // Carry the avatar REFERENCE, not bytes. The blob lives in a content store
+      // and is fetched on render; the proposal's eager-fetch-at-pairing step is
+      // separate work, so until it lands this may render initials until the bytes
+      // arrive. Better than the wrong name.
+      if (row.avatarBlob && row.avatarHash) {
+        adopted.avatarBlob = row.avatarBlob
+        adopted.avatarHash = row.avatarHash
+        adopted.avatarType = row.avatarType || 'image/png'
+      }
+      await ctx.localDb.put('profile', adopted)
+
+      // PULL THE IMAGE NOW, not on first render.
+      //
+      // Tim's point, 2026-07-29: the phone we are adopting from is online BY
+      // CONSTRUCTION at this moment - it generated the pair link and held the
+      // session open - so this is the one window where both devices are certainly
+      // connected. `resolveAvatarCached` is lazy and would fetch whenever something
+      // first renders a roster, which may be long after the other phone was
+      // pocketed, closed or swiped away (the TCL reaps the worklet on swipe-away).
+      // So the cheapest guaranteed opportunity is the one the lazy path skips.
+      //
+      // `ctx.blobs.get` downloads the blocks into this device's own copy, so once
+      // this resolves the picture survives the other phone going away. It also
+      // warms avatarCache, so the UI shows it immediately rather than a beat later.
+      //
+      // NOT fatal if it fails: the lazy path still runs on every roster render, so
+      // a missed fetch heals the next time both devices are connected. The name is
+      // the part that matters most and it is already saved above.
+      let gotAvatar = false
+      if (adopted.avatarBlob) {
+        try {
+          gotAvatar = !!(await resolveAvatarAwait(ctx, adopted))
+          // Record the content hash the way profile:set does, so if this person
+          // later re-saves the same image it dedupes instead of appending it again.
+          if (gotAvatar) {
+            await ctx.localDb.put('blobref:' + adopted.avatarHash,
+              { key: adopted.avatarBlob.key, id: adopted.avatarBlob.id, type: adopted.avatarType }).catch(() => {})
+          }
+        } catch { gotAvatar = false }
+      }
+      _dlTrace('dl:adoptedProfile', { from: row.pubkey.slice(0, 8), avatar: !!adopted.avatarBlob, gotBytes: gotAvatar })
+      await publishMember(ctx) // every space, so the household stops seeing two names
+      try { ctx.emit('profile:changed', { displayName: adopted.displayName }) } catch {}
+      return
+    }
+  })().catch(() => {})
+}
+
 async function publishMember (ctx, onlyGroupId) {
   const prof = (await ctx.localDb.get('profile'))?.value
   // `caps` advertises what this build understands. It is the capability gate for
@@ -526,9 +627,13 @@ const methods = {
     // than a boolean: "is there a proof" cannot tell a correct one from one this
     // device published under a previous identity, before it was paired.
     let minePublishedProof = null
+    // Raw rows for adoptProfileFromMyOtherDevice: it needs the avatar REFERENCE
+    // fields, and `out` carries a resolved data URL instead. Cheap - same pass.
+    const raw = []
     for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
       if (value && value.pubkey === self && value.identityProof) minePublishedProof = value.identityProof
       if (!isMemberVisible(value, meta)) continue
+      raw.push(value)
       // identityProof + updatedAt are carried only so collapseMembers can verify
       // and order; it strips both before the UI sees the row. Tim's call: the
       // members list shows people, never hardware.
@@ -544,6 +649,9 @@ const methods = {
     // would ever add one - and if it carries one from before this phone was paired,
     // that is worse than none. Cheap because the stream above already told us.
     backfillIdentityProof(ctx, groupId, minePublishedProof)
+    // A phone you just linked should already be you. STOPGAP until the profile
+    // moves to personal scope - see the comment on the function.
+    adoptProfileFromMyOtherDevice(ctx, raw)
     // Two phones of one person become one row. Rows with no verified proof are
     // never merged - see src/memberIdentity.js for why that rule has no exception.
     return await collapseMembers(out)
@@ -1472,3 +1580,7 @@ const methods = {
 }
 
 module.exports = methods
+// Exported for tests only. isUntouchedProfile decides whether the linked-device
+// profile copy is allowed to overwrite - i.e. whether the user has named this phone
+// themselves - so it is the part worth pinning down.
+module.exports._isUntouchedProfile = isUntouchedProfile

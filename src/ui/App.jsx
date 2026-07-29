@@ -1100,7 +1100,15 @@ function Onboarding ({ onStart, onJoin, onRestore, onLink }) {
 
 // First-run: set a display name (required) + optional photo before create/join,
 // so peers can resolve who's who instead of a bare "Member".
-function NameSetup ({ profile, onDone }) {
+//
+// EXCEPT when you are linking an existing phone, which is what `onLink` is for.
+// Naming yourself here is redundant then - your name is about to arrive from the
+// other phone - and worse, it was BLOCKING: this screen gates the four doors, so a
+// phone could not reach "I already use PearList on another phone" without first
+// inventing a name, and that typed name then counted as a deliberate choice the
+// linked profile was not allowed to overwrite. Which made the fresh-install case,
+// the common one, come out wrong. Found on hardware 2026-07-29.
+function NameSetup ({ profile, onDone, onLink }) {
   const fileRef = useRef(null)
   const [name, setName] = useState(profile?.displayName || '')
   const [avatar, setAvatar] = useState(profile?.avatar || null)
@@ -1143,6 +1151,13 @@ function NameSetup ({ profile, onDone }) {
       <input value={name} maxLength={64} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') cont() }} placeholder='Your name'
         style={{ padding: '14px 16px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none', textAlign: 'center' }} />
       <Button variant='primary' disabled={busy || !name.trim()} style={{ opacity: busy || !name.trim() ? 0.6 : 1 }} onClick={cont}>Continue</Button>
+      {/* Deliberately quieter than Continue: naming yourself is still the normal
+          path, and this is the one case where it is the wrong question. */}
+      {onLink
+        ? <button onClick={onLink} style={{ background: 'none', border: 'none', color: c.text.secondary, fontSize: 14, cursor: 'pointer', padding: sp.sm, textDecoration: 'underline' }}>
+            I already use PearList on another phone
+          </button>
+        : null}
     </div>
   )
 }
@@ -1521,6 +1536,12 @@ export default function App () {
   // Replay from Settings: back to Lists so the tour lands over the screen it
   // describes, not over the Settings panel.
   function replayTour () { setOpenListId(null); setView(null); setShowTour(true) }
+
+  // The worklet can change our profile without the UI asking: a freshly linked
+  // phone adopts the name and avatar of the phone it linked to. Without this the
+  // screen keeps showing the old (or empty) name until something else happens to
+  // re-read it, which on the onboarding path is never.
+  useEffect(() => on('profile:changed', () => { call('profile:get', {}).then(setProfile).catch(() => {}) }), [])
 
   // Notification tap -> open the related space (and list, if any). Requested by
   // the shell (notify:open); applied once we are home and that space has loaded
@@ -2112,7 +2133,17 @@ export default function App () {
   if (phase === 'onboarding') {
     // First run: require a display name (+ optional photo) before create/join.
     if (!profile?.displayName) {
-      return <NameSetup profile={profile} onDone={() => call('profile:get', {}).then(setProfile).catch(() => {})} />
+      // The link sheet has to be mounted HERE too, not only on the doors screen
+      // below: this branch returns early, so a phone that has not been named yet
+      // would otherwise have nowhere for "I already use PearList" to open.
+      return (
+        <>
+          <NameSetup profile={profile} onDone={() => call('profile:get', {}).then(setProfile).catch(() => {})}
+            onLink={deviceLinkOn ? () => setSheet('link') : null} />
+          <LinkDeviceSheet open={sheet === 'link'} onClose={() => setSheet(null)} onLink={linkThisDevice} />
+          <ConfirmHost />
+        </>
+      )
     }
     // The tour runs over this screen and ends on its create/join step, so those
     // buttons close the tour (it has been seen) and open the same sheets the
