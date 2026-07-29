@@ -21,7 +21,8 @@
 const { createDeviceLink } = require('@peerloom/device-link/personal')
 const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const { createPairLinks } = require('@peerloom/device-link/pair-link')
-const { validateMnemonic } = require('@peerloom/device-link/identity')
+const { validateMnemonic, attestDeviceKey } = require('@peerloom/device-link/identity')
+const b4a = require('b4a')
 
 // The pair link's own scheme. NOT the invite path: pear://pearlist/join is a
 // space invite, safe to forward to anyone, and this is the opposite - a link that
@@ -258,4 +259,18 @@ function _resetForTest () { _dlPromise = null }
 // drive it directly because its three legs are PearList's code, not the engine's.
 function _groupPluginForTest (ctx) { return makeGroupPlugin(ctx) }
 
-module.exports = { getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }
+
+// Attest this device's GROUP signing key (core's per-device key) with the
+// identity behind the recovery phrase, so peers can tell two phones are one
+// person. Returns hex, or null when there is no mnemonic yet.
+//
+// The mnemonic never leaves this module. listMethods.js needs a proof, not a
+// phrase, and handing it the phrase so it could derive one itself would put the
+// most sensitive value in the app into a second place for no gain.
+async function attestSelf (devicePubkeyHex) {
+  if (!_mnemonic || !devicePubkeyHex) return null
+  const proof = await attestDeviceKey(_mnemonic, devicePubkeyHex)
+  return b4a.toString(proof, 'hex')
+}
+
+module.exports = { attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }

@@ -15,7 +15,8 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
-const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, _trace: _dlTrace } = require('./deviceLink')
+const { collapseMembers, sameIdentityKeys } = require('./memberIdentity')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, _trace: _dlTrace } = require('./deviceLink')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -135,6 +136,28 @@ async function recordRecent (ctx, text) {
 
 // Publish this device's profile as its member:{pubkey} roster row to every group
 // it can write to, so peers can resolve assignee pubkeys to a name + avatar.
+// This device's attestation proof, hex, or null if it has no mnemonic to derive
+// one from (i.e. device-link is off, or on but never linked).
+//
+// Cached for the life of the worklet: the proof is a pure function of the
+// mnemonic and this device's key, neither of which changes while running, and
+// publishMember is called on every space refresh.
+let _identityProofHex = null
+async function deviceIdentityProof (ctx) {
+  if (_identityProofHex !== null) return _identityProofHex || null
+  try {
+    const hex = await attestSelf(pubkeyHex(ctx))
+    if (!hex) { _identityProofHex = ''; return null }
+    _identityProofHex = hex
+    return _identityProofHex
+  } catch {
+    // Never fatal. A member row without a proof is the pre-existing behaviour,
+    // and publishing the row matters far more than proving who owns it.
+    _identityProofHex = ''
+    return null
+  }
+}
+
 async function publishMember (ctx, onlyGroupId) {
   const prof = (await ctx.localDb.get('profile'))?.value
   // `caps` advertises what this build understands. It is the capability gate for
@@ -145,6 +168,20 @@ async function publishMember (ctx, onlyGroupId) {
   const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP] }
   if (prof?.avatarBlob) { value.avatarBlob = prof.avatarBlob; value.avatarHash = prof.avatarHash; value.avatarType = prof.avatarType || 'image/png' }
   else if (prof?.avatar) value.avatar = prof.avatar // legacy inline (pre-blob profiles)
+
+  // `identityProof` proves this device key belongs to a person, so two phones can
+  // be shown as one member and an assignment can reach both. Additive optional
+  // field, exactly like `caps`: an old peer stores it verbatim, ignores it, shows
+  // two rows and routes to one device - i.e. today's behaviour, which is the right
+  // degradation. See proposals/2026-07-29-one-person-many-devices.md.
+  //
+  // Only present once this device has a mnemonic, which means only after linking.
+  // A phone that never links publishes nothing here and is unaffected - and
+  // src/memberIdentity.js will not merge it with anything, because an ABSENT proof
+  // is not evidence that two people are the same person.
+  const proof = await deviceIdentityProof(ctx)
+  if (proof) value.identityProof = proof
+
   const key = memberKey(pubkeyHex(ctx))
   let published = false
   for (const [groupId, base] of ctx.bases) {
@@ -435,9 +472,21 @@ const methods = {
     const meta = await readRow(base, 'space')
     const out = []
     for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
-      if (isMemberVisible(value, meta)) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: resolveAvatarCached(ctx, value) })
+      if (!isMemberVisible(value, meta)) continue
+      // identityProof + updatedAt are carried only so collapseMembers can verify
+      // and order; it strips both before the UI sees the row. Tim's call: the
+      // members list shows people, never hardware.
+      out.push({
+        pubkey: value.pubkey,
+        displayName: value.displayName || 'Member',
+        avatar: resolveAvatarCached(ctx, value),
+        identityProof: value.identityProof,
+        updatedAt: value.updatedAt,
+      })
     }
-    return out
+    // Two phones of one person become one row. Rows with no verified proof are
+    // never merged - see src/memberIdentity.js for why that rule has no exception.
+    return await collapseMembers(out)
   },
 
   // Remove a member from the space, or put one back. Owner only, and enforced

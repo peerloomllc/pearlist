@@ -54,6 +54,7 @@ function itemKey (listId, itemId) { return 'item:' + listId + ':' + itemId }
 function memberKey (pubkey) { return 'member:' + pubkey }
 const LIST_RANGE = { gt: 'list:', lt: 'list:~' }
 const MEMBER_RANGE = { gt: 'member:', lt: 'member:~' }
+const { sameIdentityKeys } = require('./memberIdentity')
 function itemRange (listId) { return { gt: 'item:' + listId + ':', lt: 'item:' + listId + ':~' } }
 
 const NAMESPACES = ['list:', 'item:', 'member:']
@@ -213,6 +214,39 @@ async function applyListOp (op, ctx) {
 // whether to raise an OS notification (respecting the user's opt-in). A freshness
 // window skips the burst of historical rows applied during an initial catch-up
 // sync, so joining/reopening a space does not replay old assignments as alerts.
+
+// Device keys proven to be the same person as `selfKey`, from this space's member
+// rows. Memoised per space for a short window: apply runs per op, a catch-up sync
+// applies many at once, and re-verifying proofs on each would turn a burst of
+// rows into a burst of signature checks.
+//
+// Deliberately NOT cached forever - a second phone that links later must start
+// receiving assignments without a restart, which is the case that made linking
+// worth building.
+const MY_KEYS_TTL_MS = 30 * 1000
+const _myKeys = new Map() // groupId -> { keys:Set, at:number }
+async function myDeviceKeys (ctx) {
+  const { view, groupId, selfKey } = ctx
+  const only = new Set(selfKey ? [selfKey] : [])
+  if (!view || !selfKey) return only
+
+  const hit = _myKeys.get(groupId)
+  if (hit && (Date.now() - hit.at) < MY_KEYS_TTL_MS) return hit.keys
+
+  try {
+    const rows = []
+    for await (const { value } of view.createReadStream(MEMBER_RANGE)) {
+      if (value && value.pubkey) rows.push({ pubkey: value.pubkey, identityProof: value.identityProof })
+    }
+    const keys = await sameIdentityKeys(rows, selfKey)
+    _myKeys.set(groupId, { keys, at: Date.now() })
+    return keys
+  } catch {
+    // A failed read must not stop the notification we would have sent anyway.
+    return only
+  }
+}
+
 const NOTIFY_FRESH_MS = 60 * 1000
 async function maybeNotify (ctx, key, value, existing) {
   const { emit, selfKey, view, groupId } = ctx
@@ -230,8 +264,18 @@ async function maybeNotify (ctx, key, value, existing) {
   // let a notification tap deep-link straight to the related list.
   const isItem = key.startsWith('item:')
   const isList = key.startsWith('list:')
-  if ((isItem || isList) && value.assignee === selfKey) {
-    const wasMine = !!existing && existing.assignee === selfKey
+  // MY DEVICES, not my device. `assignee` is a device key, so before this a chore
+  // assigned to someone with two phones notified exactly one of them - whichever
+  // key happened to be picked - and the other stayed silent for the same person.
+  // That is the failure this whole change exists to fix; see
+  // proposals/2026-07-29-one-person-many-devices.md.
+  //
+  // Resolved by reading member rows and comparing verified identity roots, NOT by
+  // trusting a claim on the item. Falls back to exactly `selfKey` when nothing can
+  // be proven, so an unlinked device behaves precisely as it did before.
+  const mine = await myDeviceKeys(ctx)
+  if ((isItem || isList) && mine.has(value.assignee)) {
+    const wasMine = !!existing && mine.has(existing.assignee)
     if (!wasMine) {
       const kind = isItem ? 'item' : 'list'
       const text = String((isItem ? value.text : value.name) || (isItem ? 'an item' : 'a list'))
