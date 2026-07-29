@@ -270,7 +270,37 @@ function adoptProfileFromMyOtherDevice (ctx, rows) {
         adopted.avatarType = row.avatarType || 'image/png'
       }
       await ctx.localDb.put('profile', adopted)
-      _dlTrace('dl:adoptedProfile', { from: row.pubkey.slice(0, 8), avatar: !!adopted.avatarBlob })
+
+      // PULL THE IMAGE NOW, not on first render.
+      //
+      // Tim's point, 2026-07-29: the phone we are adopting from is online BY
+      // CONSTRUCTION at this moment - it generated the pair link and held the
+      // session open - so this is the one window where both devices are certainly
+      // connected. `resolveAvatarCached` is lazy and would fetch whenever something
+      // first renders a roster, which may be long after the other phone was
+      // pocketed, closed or swiped away (the TCL reaps the worklet on swipe-away).
+      // So the cheapest guaranteed opportunity is the one the lazy path skips.
+      //
+      // `ctx.blobs.get` downloads the blocks into this device's own copy, so once
+      // this resolves the picture survives the other phone going away. It also
+      // warms avatarCache, so the UI shows it immediately rather than a beat later.
+      //
+      // NOT fatal if it fails: the lazy path still runs on every roster render, so
+      // a missed fetch heals the next time both devices are connected. The name is
+      // the part that matters most and it is already saved above.
+      let gotAvatar = false
+      if (adopted.avatarBlob) {
+        try {
+          gotAvatar = !!(await resolveAvatarAwait(ctx, adopted))
+          // Record the content hash the way profile:set does, so if this person
+          // later re-saves the same image it dedupes instead of appending it again.
+          if (gotAvatar) {
+            await ctx.localDb.put('blobref:' + adopted.avatarHash,
+              { key: adopted.avatarBlob.key, id: adopted.avatarBlob.id, type: adopted.avatarType }).catch(() => {})
+          }
+        } catch { gotAvatar = false }
+      }
+      _dlTrace('dl:adoptedProfile', { from: row.pubkey.slice(0, 8), avatar: !!adopted.avatarBlob, gotBytes: gotAvatar })
       await publishMember(ctx) // every space, so the household stops seeing two names
       try { ctx.emit('profile:changed', { displayName: adopted.displayName }) } catch {}
       return
