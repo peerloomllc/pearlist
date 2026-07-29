@@ -9,8 +9,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
-    "build:bare": "bare-pack --linked --defer fs --defer path src/bare.js -o assets/bare-universal.bundle",
-    "build:bare:ios": "bare-pack --preset ios --defer fs --defer path src/bare.js -o assets/bare-ios.bundle",
+    "build:bare": "bare-pack --linked --imports scripts/bare-imports.js --defer fs --defer path src/bare.js -o assets/bare-universal.bundle",
+    "build:bare:ios": "bare-pack --preset ios --imports scripts/bare-imports.js --defer fs --defer path src/bare.js -o assets/bare-ios.bundle",
     "build:ui": "node scripts/build-ui.mjs",
     "test": "node --test test/*.test.js",
     "verify": "node --test test/*.test.js && npm run build:bare && npm run build:bare:ios && npm run build:ui"
