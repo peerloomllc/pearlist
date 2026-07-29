@@ -3080,7 +3080,13 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     const label = deviceLabel(d)
     const ok = await askConfirm({
       title: `Remove ${label}?`,
-      message: `It stops showing in this list. It does NOT lock that phone out - it still has your recovery phrase and your spaces, and can still edit them. To take it off for real you would need to move your spaces to a new one.`,
+      // Precise on purpose, and it changed when the personal-base revocation
+      // landed. It is now MORE than "hides a row" and still LESS than a lockout,
+      // and the middle is the honest place: it can no longer write to your own
+      // account, it CAN still edit shared lists, and it still holds the phrase.
+      // Rounding either way is the failure mode - a lost phone is the one case
+      // where a person acts on this sentence.
+      message: `It stops showing in this list and can no longer change your own account. It does NOT lock that phone out of your shared lists - it still has your recovery phrase and your spaces, and can still edit them. To take it off those for real you would need to move them to a new space.`,
       confirmLabel: 'Remove',
       danger: true,
     })
