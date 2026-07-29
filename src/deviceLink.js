@@ -21,6 +21,7 @@
 const { createDeviceLink } = require('@peerloom/device-link/personal')
 const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const { createPairLinks } = require('@peerloom/device-link/pair-link')
+const { validateMnemonic } = require('@peerloom/device-link/identity')
 
 // The pair link's own scheme. NOT the invite path: pear://pearlist/join is a
 // space invite, safe to forward to anyone, and this is the opposite - a link that
@@ -61,31 +62,78 @@ function safeEventData (data) {
 // setting until the pairing UI exists (slice 2).
 const DEVICE_LINK_ENABLED = false
 
-// Where the mnemonic lives, and the one judgement call in this slice.
+// Where the mnemonic lives: the SHELL's secure storage (Android Keystore / iOS
+// Keychain), never localDb.
 //
-// PearPetal keeps it in localDb, and this follows that for now so the suite does
-// not grow two answers before either is proven. But localDb is a Hyperbee in the
-// app's Corestore - a BIP39 seed phrase sits there in PLAINTEXT ON DISK, and a
-// seed phrase is the whole identity, not a cache of it. The Android Keystore /
-// iOS Keychain is where this belongs.
+// Slice 1 followed PearPetal and kept it in localDb, which put a BIP39 seed
+// phrase in PLAINTEXT ON DISK. A seed phrase is the whole identity, not a cache
+// of it, so that was always a debt rather than a decision - written down at the
+// time and paid here, before slice 3 ever shows a phrase to a user.
 //
-// Why not fix it here: the worklet cannot reach secure storage. It is a shell
-// capability, and PearList's IPC only runs shell -> worklet; there is no
-// worklet -> shell request path to build on (PearCal has one, `nativeRequest`).
-// Adding that direction is real plumbing and does not belong in a slice whose job
-// is "does the engine start".
+// THE AWKWARD PART, and why this looks indirect: the worklet cannot reach secure
+// storage. It is a shell capability, and PearList's IPC only runs shell ->
+// worklet - there is no worklet -> shell request path. Rather than invent one
+// (a whole RPC direction, for one string), this uses the two directions that
+// already exist:
 //
-// Why it is safe to defer: nothing generates a mnemonic unless the flag is on,
-// and no user is ever SHOWN a phrase until slice 3. The hardening has to land
-// before that slice, not before this one. Tracked in TODO.
-const MNEMONIC_KEY = 'deviceLink:mnemonic'
-function makeKeystore (localDb) {
+//   shell -> worklet   `device:provisionMnemonic` at boot, handing in whatever
+//                      secure storage held (or null on a fresh device).
+//   worklet -> shell   a `deviceLink:mnemonic` EVENT when device-link mints a new
+//                      one, which the shell writes to secure storage.
+//
+// So the phrase lives in memory here for the life of the worklet and on disk only
+// inside the OS keystore. Nothing writes it to localDb.
+let _mnemonic = null          // provisioned by the shell, or minted below
+let _emitMnemonic = () => {}  // set when the engine ctx is available
+
+function makeKeystore () {
   return {
-    hasMnemonic: async () => !!((await localDb.get(MNEMONIC_KEY).catch(() => null))?.value?.mnemonic),
-    getMnemonic: async () => (await localDb.get(MNEMONIC_KEY).catch(() => null))?.value?.mnemonic ?? null,
-    setMnemonic: async (m) => { await localDb.put(MNEMONIC_KEY, { mnemonic: m, createdAt: Date.now() }) },
+    hasMnemonic: async () => !!_mnemonic,
+    getMnemonic: async () => _mnemonic,
+    setMnemonic: async (m) => {
+      // device-link minted a fresh phrase. Hold it for this session and hand it
+      // to the shell to persist - this is the ONLY path that writes it anywhere.
+      _mnemonic = m
+      _emitMnemonic(m)
+    },
   }
 }
+
+// Called by the shell at boot through device:provisionMnemonic. `null` on a
+// device that has never had one; device-link mints it on first enable and the
+// event carries it back out.
+function provisionMnemonic (m) { _mnemonic = (typeof m === 'string' && m.trim()) ? m.trim() : null; return !!_mnemonic }
+
+// A device that ran the slice-1 build has its phrase sitting in localDb, in
+// plaintext. Adopt it, hand it to the shell to put in the keystore, and DELETE
+// the row - otherwise fixing where new phrases go would leave the existing ones
+// exactly where they should not be. Runs once; a no-op on every device that never
+// enabled the flag, which is all of them outside testing.
+const LEGACY_MNEMONIC_KEY = 'deviceLink:mnemonic'
+async function migrateLegacyMnemonic (ctx) {
+  try {
+    const row = await ctx.localDb.get(LEGACY_MNEMONIC_KEY).catch(() => null)
+    const legacy = row?.value?.mnemonic
+    if (typeof legacy !== 'string' || !legacy.trim()) return false
+    // VALIDATE before adopting. A corrupt row would otherwise be handed to
+    // deriveIdentity, which throws "Invalid mnemonic" - and since this runs
+    // inside getDeviceLink, that would take down device:status and everything
+    // else with it. A phrase we cannot use is worse than none: drop it and let a
+    // fresh one be minted.
+    if (!validateMnemonic(legacy.trim())) {
+      await ctx.localDb.del(LEGACY_MNEMONIC_KEY).catch(() => {})
+      _trace('dl:legacy-mnemonic-invalid-dropped')
+      return false
+    }
+    // The keystore copy wins if the shell already provisioned one; otherwise adopt.
+    if (!_mnemonic) _mnemonic = legacy.trim()
+    _emitMnemonic(_mnemonic)
+    await ctx.localDb.del(LEGACY_MNEMONIC_KEY).catch(() => {})
+    _trace('dl:migrated-mnemonic-off-disk')
+    return true
+  } catch { return false }
+}
+function hasMnemonicInMemory () { return !!_mnemonic }
 
 // Personal-scope record types the personal base accepts and mirrors locally.
 // EMPTY on purpose: PearList has no personal-scope data today. Lists and items
@@ -181,11 +229,15 @@ let _dlPromise = null
 function getDeviceLink (ctx) {
   if (_dlPromise) return _dlPromise
   _dlPromise = (async () => {
+    // The shell persists it; see makeKeystore. Wired here because ctx.emit is
+    // only available once a method has run.
+    _emitMnemonic = (m) => { try { ctx.emit('deviceLink:mnemonic', { mnemonic: m }) } catch {} }
+    await migrateLegacyMnemonic(ctx)
     const dl = createDeviceLink({
       store: ctx.store,
       swarm: ctx.swarm,
       localDb: ctx.localDb,
-      keystore: makeKeystore(ctx.localDb),
+      keystore: makeKeystore(),
       records: makeRecords(),
       mirror: makeMirror(),
       groupPlugin: makeGroupPlugin(ctx),
@@ -206,4 +258,4 @@ function _resetForTest () { _dlPromise = null }
 // drive it directly because its three legs are PearList's code, not the engine's.
 function _groupPluginForTest (ctx) { return makeGroupPlugin(ctx) }
 
-module.exports = { getDeviceLink, DEVICE_LINK_ENABLED, MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }
+module.exports = { getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }

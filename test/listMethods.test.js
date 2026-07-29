@@ -623,18 +623,83 @@ test('device-link starts on the shared runtime and derives a stable identity', a
   deviceLink._resetForTest()
   t.after(() => deviceLink._resetForTest())
 
-  const ctx = { store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {} }
+  const minted = []
+  const ctx = {
+    store: engine.store, swarm: engine.swarm, localDb: engine.localDb,
+    emit: (event, data) => { if (event === 'deviceLink:mnemonic') minted.push(data.mnemonic) },
+  }
   const dl = await deviceLink.getDeviceLink(ctx)
 
   assert.match(dl.identityPublicKeyHex, /^[0-9a-f]{64}$/, 'an identity is derived from the mnemonic')
-  // The mnemonic is persisted, so the identity is stable rather than minted per
-  // launch - the whole point of it being a RECOVERY phrase.
-  const stored = (await engine.localDb.get(deviceLink.MNEMONIC_KEY)).value.mnemonic
-  assert.equal(stored.split(' ').length, 12)
 
+  // The phrase is handed OUT to the shell to store, never written here. That
+  // event is the only way it leaves the worklet.
+  assert.equal(minted.length, 1, 'the shell was handed exactly one mnemonic')
+  assert.equal(minted[0].split(' ').length, 12)
+
+  // And it must not be in localDb - that was the plaintext-on-disk debt.
+  assert.equal(await engine.localDb.get('deviceLink:mnemonic').catch(() => null), null)
+
+  // Same phrase provisioned back in -> same identity. That is what makes it a
+  // RECOVERY phrase rather than a per-launch key.
   deviceLink._resetForTest()
+  deviceLink.provisionMnemonic(minted[0])
   const again = await deviceLink.getDeviceLink(ctx)
   assert.equal(again.identityPublicKeyHex, dl.identityPublicKeyHex, 'same phrase, same identity')
+
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
+test('a phrase left on disk by the old build is moved to the keystore and deleted', async (t) => {
+  // Fixing where NEW phrases go would be half a fix: a device that ran slice 1
+  // has one in localDb, in plaintext, and that is the copy that matters.
+  const deviceLink = require('../src/deviceLink')
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  deviceLink.provisionMnemonic(null)
+  t.after(() => { deviceLink._resetForTest(); deviceLink.provisionMnemonic(null) })
+
+  // A REAL phrase: deriveIdentity rejects anything else, which is the whole
+  // reason the migration validates before adopting (see the next test).
+  const LEGACY = require('@peerloom/device-link/identity').generateMnemonic()
+  await engine.localDb.put(deviceLink.LEGACY_MNEMONIC_KEY, { mnemonic: LEGACY })
+
+  const handed = []
+  const ctx = {
+    store: engine.store, swarm: engine.swarm, localDb: engine.localDb,
+    emit: (e, d) => { if (e === 'deviceLink:mnemonic') handed.push(d.mnemonic) },
+  }
+  const dl = await deviceLink.getDeviceLink(ctx)
+
+  assert.ok(handed.includes(LEGACY), 'the old phrase was handed to the shell to store')
+  assert.equal(await engine.localDb.get(deviceLink.LEGACY_MNEMONIC_KEY).catch(() => null), null,
+    'and the plaintext row is gone')
+
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
+test('a CORRUPT phrase on disk is dropped, not adopted', async (t) => {
+  // Adopting it would hand garbage to deriveIdentity, which throws - and since
+  // the migration runs inside getDeviceLink, that would take down device:status
+  // and every other device method with it. Found by writing the migration test.
+  const deviceLink = require('../src/deviceLink')
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  deviceLink.provisionMnemonic(null)
+  t.after(() => { deviceLink._resetForTest(); deviceLink.provisionMnemonic(null) })
+
+  await engine.localDb.put(deviceLink.LEGACY_MNEMONIC_KEY, { mnemonic: 'not a real bip39 phrase at all' })
+
+  const dl = await deviceLink.getDeviceLink({
+    store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {},
+  })
+  assert.match(dl.identityPublicKeyHex, /^[0-9a-f]{64}$/, 'a fresh identity was minted instead')
+  assert.equal(await engine.localDb.get(deviceLink.LEGACY_MNEMONIC_KEY).catch(() => null), null,
+    'and the unusable row is gone')
 
   await dl.stop().catch(() => {})
   await engine.close()

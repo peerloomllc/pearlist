@@ -15,7 +15,7 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
-const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, _trace: _dlTrace } = require('./deviceLink')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, _trace: _dlTrace } = require('./deviceLink')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -568,6 +568,19 @@ const methods = {
       // take down a method table the rest of the app depends on.
       return { enabled: true, error: e?.message ?? String(e) }
     }
+  },
+
+  // Hand the worklet the mnemonic the SHELL holds in secure storage (Keystore /
+  // Keychain). Called once at boot, before anything touches device-link.
+  //
+  // The phrase never goes to localDb: the worklet keeps it in memory and the shell
+  // owns the only copy at rest. `null` on a device that has never had one - the
+  // engine mints it on first enable and the deviceLink:mnemonic event carries it
+  // back to the shell to store.
+  'device:provisionMnemonic': async ({ mnemonic }, _ctx) => {
+    const had = provisionMnemonic(mnemonic)
+    _dlTrace('dl:provisioned', { had })
+    return { had }
   },
 
   // Start pairing on the device that ALREADY has the identity (the "primary").
