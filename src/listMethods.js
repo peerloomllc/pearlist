@@ -15,7 +15,7 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
-const { getDeviceLink, DEVICE_LINK_ENABLED } = require('./deviceLink')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink } = require('./deviceLink')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -568,6 +568,70 @@ const methods = {
       // take down a method table the rest of the app depends on.
       return { enabled: true, error: e?.message ?? String(e) }
     }
+  },
+
+  // Start pairing on the device that ALREADY has the identity (the "primary").
+  // Returns a link to show as a QR / copy. Short-lived by design - device-link
+  // expires the session - and `enable()` first, because a personal base has to
+  // exist before another device can be admitted to it.
+  'device:startPairing': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    if (!dl.isEnabled) await dl.enable()
+    const invite = await dl.startPairing()
+    // Build the link OURSELVES from the session snapshot rather than using
+    // device-link's `invite.url`. Its default is `peerloom://pair?...`, which is
+    // not a scheme this app is registered for and not what our parser accepts -
+    // so a link built there could be shown and never open anything.
+    return {
+      url: buildPairLink({
+        topic: invite.topicHex,
+        handshake: invite.handshakeHex,
+        identity: invite.identityHex,
+        expiresMs: invite.expiresAt,
+      }),
+      expiresAt: invite.expiresAt,
+    }
+  },
+
+  'device:cancelPairing': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    dl.cancelPairing()
+    return { ok: true }
+  },
+
+  // The NEW device consumes the link. On success it holds the same identity, is a
+  // writer on the personal base, and - via the group plugin - has been seeded
+  // with every space the primary is in and granted write on them.
+  //
+  // Deliberately NOT wrapped in a timeout here: device-link expires its own
+  // session, and a UI timeout on top would report failure while the handshake was
+  // still in flight.
+  'device:consumePairLink': async ({ url }, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    const parsed = parsePairLink(String(url || ''))
+    if (!parsed.ok) throw new Error('that does not look like a PearList device link')
+    await dl.consumePairLink(parsed)
+    return { ok: true, identityPublicKey: dl.identityPublicKeyHex }
+  },
+
+  'device:list': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    return await dl.listLinkedDevices()
+  },
+
+  'device:setNickname': async ({ writerKey, nickname }, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    await dl.setDeviceNickname(String(writerKey || ''), String(nickname || ''))
+    return { ok: true }
+  },
+
+  // Hides a device from the roster and blocks its writer. NOT a revocation of the
+  // identity: the removed device still knows the mnemonic, so this is "stop
+  // showing and stop accepting", not "make it forget". The UI copy has to say so.
+  'device:remove': async ({ writerKey }, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    await dl.removeDevice(String(writerKey || ''))
+    return { ok: true }
   },
 
   // --- backup export / import ----------------------------------------------

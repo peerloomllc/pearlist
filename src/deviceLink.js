@@ -19,6 +19,16 @@
 // changes that, and it is deliberately last.
 
 const { createDeviceLink } = require('@peerloom/device-link/personal')
+const { defaultEncodeInvite } = require('@peerloom/core/engine')
+const { createPairLinks } = require('@peerloom/device-link/pair-link')
+
+// The pair link's own scheme. NOT the invite path: pear://pearlist/join is a
+// space invite, safe to forward to anyone, and this is the opposite - a link that
+// hands over an identity. Different host so a mis-pasted one of either kind is
+// rejected outright rather than half-understood.
+const pairLinks = createPairLinks({ scheme: 'pear', host: 'pearlist-device' })
+function parsePairLink (url) { return pairLinks.parse(url) }
+function buildPairLink (parts) { return pairLinks.build(parts) }
 
 // OFF by default. Slice 1 ships dark: the engine is constructed and started only
 // when this is on, so an ordinary build behaves exactly as it did before. Flip it
@@ -67,6 +77,71 @@ function makeRecords () { return {} }
 // empty, and the seam to fill when personal-scope data arrives.
 function makeMirror () { return async () => {} }
 
+// The group plugin: what makes a linked device useful in PearList, and the piece
+// PearPetal does NOT have (partner sharing stays on core there, so it injects
+// none). Here the spaces ARE the product - a device that links and then cannot
+// write to any of them has gained nothing.
+//
+// Three legs, called by device-link during and after pairing:
+//   collectGroups()  primary: which spaces am I in? Carries everything joinGroup
+//                    needs, INCLUDING the encryption key and bootstrap. Those are
+//                    secrets, and they ride the authenticated pair channel - the
+//                    same channel that already carries the mnemonic, so this adds
+//                    no new trust assumption.
+//   seedGroups(gs)   secondary: join each of them. Idempotent: a space this device
+//                    is already in is skipped rather than re-joined.
+//   grantGroupWriter primary: admit the new device's per-group writer key, the
+//                    same addWriter op the normal pair channel appends.
+function makeGroupPlugin (ctx) {
+  return {
+    async collectGroups () {
+      const out = []
+      for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
+        if (!value || !value.groupId || !value.groupKey) continue
+        out.push({
+          groupId: value.groupId,
+          groupKey: value.groupKey,
+          encryptionKey: value.encryptionKey,
+          bootstrap: value.bootstrap,
+          name: value.name || '',
+        })
+      }
+      return out
+    },
+
+    async seedGroups (groups) {
+      for (const g of (groups || [])) {
+        if (!g || !g.groupId || !g.groupKey) continue
+        // Already in it (the common case for a re-pair): leave it alone. Joining
+        // twice would mount a second base for the same space.
+        const existing = await ctx.localDb.get('groups:joined:' + g.groupId).catch(() => null)
+        if (existing?.value) continue
+        try {
+          await ctx.joinGroup({
+            inviteKey: defaultEncodeInvite({
+              groupId: g.groupId,
+              groupKey: g.groupKey,
+              encryptionKey: g.encryptionKey,
+              bootstrap: g.bootstrap,
+              name: g.name,
+            }),
+          })
+        } catch {
+          // One bad space must not abort the rest of the fan-out: a device that
+          // joins four of five spaces is far better than one that joins none.
+        }
+      }
+    },
+
+    async grantGroupWriter (groupId, writerKey) {
+      if (!groupId || !/^[0-9a-f]{64}$/i.test(String(writerKey || ''))) return
+      // Exactly what the group pair channel appends when it admits a joiner; the
+      // apply branch is shared, so nothing new has to understand this op.
+      await ctx.append(groupId, { type: 'addWriter', pubkey: String(writerKey) }).catch(() => {})
+    },
+  }
+}
+
 // One engine per worklet, constructed lazily and cached, sharing the group
 // engine's runtime via the method ctx. Flag-agnostic on purpose so a test can
 // drive it directly without touching the constant.
@@ -81,6 +156,7 @@ function getDeviceLink (ctx) {
       keystore: makeKeystore(ctx.localDb),
       records: makeRecords(),
       mirror: makeMirror(),
+      groupPlugin: makeGroupPlugin(ctx),
       platform: '',
       onEvent: (event, data) => { try { ctx.emit(event, data) } catch {} },
     })
@@ -91,5 +167,8 @@ function getDeviceLink (ctx) {
 }
 
 function _resetForTest () { _dlPromise = null }
+// The plugin is otherwise only reachable through device-link's internals; tests
+// drive it directly because its three legs are PearList's code, not the engine's.
+function _groupPluginForTest (ctx) { return makeGroupPlugin(ctx) }
 
-module.exports = { getDeviceLink, DEVICE_LINK_ENABLED, MNEMONIC_KEY, _resetForTest }
+module.exports = { getDeviceLink, DEVICE_LINK_ENABLED, MNEMONIC_KEY, parsePairLink, buildPairLink, _resetForTest, _groupPluginForTest }

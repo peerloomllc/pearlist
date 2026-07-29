@@ -656,6 +656,60 @@ test('device-link identity is NOT the signing identity (coexist, slice 1)', asyn
   await engine.close()
 })
 
+test('the pair link uses OUR scheme, not device-link\'s default', async () => {
+  // device-link builds `peerloom://pair?...` by default - a scheme this app is not
+  // registered for. A link built there would be shown to a user and open nothing,
+  // so PearList builds its own from the session snapshot.
+  const { buildPairLink, parsePairLink } = require('../src/deviceLink')
+  const url = buildPairLink({ topic: 'a'.repeat(64), handshake: 'b'.repeat(64), identity: 'c'.repeat(64), expiresMs: Date.now() + 60000 })
+  assert.ok(url.startsWith('pear://pearlist-device?'), 'our scheme: ' + url.slice(0, 40))
+  const parsed = parsePairLink(url)
+  assert.equal(parsed.ok, true)
+  assert.equal(parsed.identity, 'c'.repeat(64))
+})
+
+test('a SPACE invite is not accepted as a device link, or the reverse', async () => {
+  // The two links look similar and mean opposite things: an invite is safe to
+  // forward, a device link hands over your identity. Different hosts so a
+  // mis-paste is refused outright rather than half-understood.
+  const { parsePairLink } = require('../src/deviceLink')
+  const spaceInvite = 'pear://pearlist/join#' + Buffer.from('{}').toString('base64url')
+  assert.equal(parsePairLink(spaceInvite).ok, false)
+})
+
+test('the group plugin carries every space, and re-seeding is idempotent', async (t) => {
+  // The leg PearPetal does not have: a linked device that cannot write to any
+  // space has gained nothing. Drives the plugin directly - the pairing handshake
+  // itself is device-link's own integration test.
+  const deviceLink = require('../src/deviceLink')
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  t.after(() => deviceLink._resetForTest())
+
+  const a = await call('group:create', { name: 'Home' })
+  await call('group:create', { name: 'Work' })
+
+  // Reach the plugin the way device-link does, through the engine's method ctx.
+  const ctx = { store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {}, append: engine.append, joinGroup: engine.joinGroup }
+  const dl = await deviceLink.getDeviceLink(ctx)
+  const plugin = deviceLink._groupPluginForTest(ctx)
+
+  const groups = await plugin.collectGroups()
+  assert.equal(groups.length, 2, 'both spaces collected')
+  const home = groups.find((g) => g.name === 'Home')
+  assert.equal(home.groupId, a.groupId)
+  assert.ok(home.groupKey && home.encryptionKey && home.bootstrap, 'everything a join needs travels')
+
+  // Seeding spaces this device is already in must be a no-op, not a second mount.
+  const before = engine.bases.size
+  await plugin.seedGroups(groups)
+  assert.equal(engine.bases.size, before, 'already-joined spaces are skipped')
+
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
 test('destroyGroup unmounts a group but leaves other groups intact', async () => {
   const { engine, call } = driver()
   await call('init', {})
