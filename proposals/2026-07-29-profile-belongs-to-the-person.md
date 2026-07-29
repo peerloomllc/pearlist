@@ -128,11 +128,21 @@ Consequences the implementation has to face:
 - The blob core the reference points at must be served to the person's own devices,
   not only to space peers. Both bases share one Corestore, so this is a question of
   what is announced and replicated, not of copying data.
-- **The primary may be offline** when the new phone first shows a roster. The new
-  phone then holds a valid reference and no bytes. Falling back to initials (which
-  is what `Avatar` already renders with no avatar) is correct and must not look
-  like an error - but it should resolve later without a reinstall, so the fetch
-  needs to be retried rather than attempted once at pairing.
+- **FETCH THE BYTES DURING PAIRING, not on first render.** Tim's point, and it
+  settles the design: the primary is online *by construction* while pairing - it
+  generates the link and holds the session open until `expires`. That window is the
+  one moment both devices are guaranteed to be up and talking. Today
+  `resolveAvatar` is lazy: bytes are fetched when something renders a roster, which
+  may be minutes later, after the old phone has been pocketed, closed or swiped away
+  (and the TCL reaps the worklet on swipe-away). Leaving it lazy would mean the
+  cheapest guaranteed opportunity is the one we skip. So the inherit step should
+  pull the image, not just the reference.
+- **The fallback still has to exist**, because the eager fetch can fail - the window
+  is short and the blob may be large. `Avatar` already renders initials when there
+  is no avatar, which is the right thing to show and must not look like an error.
+  But it must heal on its own the next time both devices are connected, rather than
+  waiting for a re-pair or a reinstall. The point of the eager fetch is to make that
+  path rare, not to remove it.
 - Re-publishing the same reference into a space from the second phone must not
   duplicate the blob. The hash is already there to make that checkable.
 
@@ -176,9 +186,15 @@ the one place a per-device name is the right thing.
   pair a freshly installed phone B. B must end up showing that avatar - not
   initials - and the housemate must see ONE person with that avatar, not two rows.
   This is the check the whole "name and avatar are one thing" decision rests on.
-- **On hardware, primary offline at pairing:** pair B, then take A offline before B
-  has fetched the image. B should render initials rather than a broken image, and
-  must pick the avatar up once A returns, with no reinstall and no re-pair.
+- **On hardware, the case that actually happens:** pair B, then immediately close A
+  (swipe it away - the TCL reaps the worklet, so this is a real partition, and it is
+  exactly what someone does after pairing). B must ALREADY have the image, because
+  it was fetched during the pairing window. This is the check that the eager fetch
+  is really eager; with today's lazy `resolveAvatar` it would fail.
+- **On hardware, the fallback:** force the eager fetch to fail (pair with A's app
+  killed the instant the handshake completes). B should render initials, not a
+  broken image, and must pick the avatar up the next time both are connected -
+  without a re-pair or a reinstall.
 - Old-peer check: a device on the pre-change build in the same space still shows a
   sensible name and does not fork.
 
@@ -220,12 +236,21 @@ avatar REFERENCE, not the image, so nothing large moves. The work is in
 reachability instead - see "The avatar is a reference" above, which is now the
 substantive part of this proposal rather than a footnote.
 
-**2b. NEW, and it follows from 2: what does a freshly paired phone show before the
-bytes arrive?** It will have the reference and possibly not the image - certainly
-so if the primary is offline. Rendering initials is already the no-avatar
-behaviour and is the right fallback, but it must be a transient state that heals
-on its own, not a permanent wrong-looking roster. Needs a retry, and a hardware
-check with the primary deliberately offline at pairing time.
+**2b. ANSWERED by Tim 2026-07-29 - fetch the image during pairing.** The first
+version of this question asked what to show "if the primary is offline at pairing".
+That case does not exist: the pairing flow REQUIRES the primary to have the app
+open, since it generates the link and holds the session until `expires`. Both
+devices are guaranteed up and connected for that window.
+
+Which turns the question into a design answer rather than a fallback policy: pull
+the avatar bytes THEN, during the inherit, instead of leaving it to
+`resolveAvatar`'s lazy on-render fetch. Lazy means the fetch happens whenever the
+new phone first renders a roster - possibly much later, by which time the old phone
+may genuinely be closed or swiped away. The one moment both are certainly connected
+is the moment we currently do not use.
+
+The initials fallback still has to exist for a failed or interrupted fetch, and
+still has to heal without a re-pair. It just stops being the expected path.
 
 **3. Should renaming republish member rows immediately, or lazily?** A shared
 profile change has to reach every space the person is in, on both devices, or the
