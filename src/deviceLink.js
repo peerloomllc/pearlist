@@ -254,7 +254,7 @@ function getDeviceLink (ctx) {
   return _dlPromise
 }
 
-function _resetForTest () { _dlPromise = null }
+function _resetForTest () { _dlPromise = null; _attestCache = null; _mnemonic = null }
 // The plugin is otherwise only reachable through device-link's internals; tests
 // drive it directly because its three legs are PearList's code, not the engine's.
 function _groupPluginForTest (ctx) { return makeGroupPlugin(ctx) }
@@ -267,10 +267,27 @@ function _groupPluginForTest (ctx) { return makeGroupPlugin(ctx) }
 // The mnemonic never leaves this module. listMethods.js needs a proof, not a
 // phrase, and handing it the phrase so it could derive one itself would put the
 // most sensitive value in the app into a second place for no gain.
+//
+// CACHED AGAINST THE MNEMONIC THAT PRODUCED IT, not merely "computed once". The
+// first version memoised the proof in listMethods.js for the life of the worklet,
+// reasoning that neither the mnemonic nor the device key changes while running.
+// The mnemonic DOES change while running - that is precisely what pairing is. So
+// a phone that linked mid-session kept publishing a proof attesting to the
+// identity it had BEFORE it became you, and the members list showed two people.
+// Caught on hardware 2026-07-29; see TODO.md.
+//
+// The cache lives here rather than in the caller because this is the only place
+// that can see `_mnemonic` change.
+let _attestCache = null // { mnemonic, pubkey, proofHex }
 async function attestSelf (devicePubkeyHex) {
   if (!_mnemonic || !devicePubkeyHex) return null
+  if (_attestCache && _attestCache.mnemonic === _mnemonic && _attestCache.pubkey === devicePubkeyHex) {
+    return _attestCache.proofHex
+  }
   const proof = await attestDeviceKey(_mnemonic, devicePubkeyHex)
-  return b4a.toString(proof, 'hex')
+  const proofHex = b4a.toString(proof, 'hex')
+  _attestCache = { mnemonic: _mnemonic, pubkey: devicePubkeyHex, proofHex }
+  return proofHex
 }
 
 module.exports = { attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }
