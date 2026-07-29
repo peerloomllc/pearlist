@@ -1,13 +1,20 @@
 # 2026-07-29 - Your name follows you, not your phone
 
-**Status:** DRAFT 2026-07-29, awaiting approval. Follows
+**Status:** DRAFT 2026-07-29, awaiting approval. Two of the four open questions
+answered by Tim the same day - the avatar moves with the name, and a fresh phone
+inherits rather than being asked. Follows
 proposals/2026-07-29-one-person-many-devices.md, which shipped as PR #125 and is
 proven on hardware. This is the defect that showed up minutes after it landed.
 
 **Goal**
 
 Make a person's display name and avatar belong to the PERSON, so a household sees
-one stable name no matter which of that person's phones last wrote to a space.
+one stable identity no matter which of that person's phones last wrote to a space.
+
+**Name and avatar are one thing.** Tim's call, 2026-07-29: together they ARE the
+person as far as everyone else is concerned. Neither is a per-device setting and
+they do not move independently - a change that carried the name across but left the
+avatar behind would still show the household two different people.
 
 **Tier**
 
@@ -99,17 +106,47 @@ So: `profile` (displayName, avatar) becomes a personal-scope record.
   and behaves as it does now.
 
 **Space rows do not change.** Each device still publishes `member:{pubkey}` with
-`displayName` on it. Peers read what they always read. This is the property that
-keeps it T2 rather than T3.
+`displayName` and the avatar reference on it. Peers read what they always read.
+This is the property that keeps it T2 rather than T3.
+
+### The avatar is a reference, and that is the interesting part
+
+A member row does NOT carry the image. It carries
+`{ avatarBlob: { key, id }, avatarHash, avatarType }` and the bytes live in a blob
+core, fetched with `ctx.blobs.get(row.avatarBlob)` (see `resolveAvatar` in
+`src/listMethods.js`). So moving the profile to personal scope moves a few dozen
+bytes, not a picture, and the personal base does not become a blob store.
+
+The real question is therefore not size, it is **reachability**: today a housemate
+gets your avatar bytes over the SPACE's replication, because you are both in that
+space and the blob core is served there. A freshly paired second phone is not in
+any space yet at the moment it inherits your profile - it gets the reference over
+the PERSONAL base and must be able to fetch the bytes over that same path.
+
+Consequences the implementation has to face:
+
+- The blob core the reference points at must be served to the person's own devices,
+  not only to space peers. Both bases share one Corestore, so this is a question of
+  what is announced and replicated, not of copying data.
+- **The primary may be offline** when the new phone first shows a roster. The new
+  phone then holds a valid reference and no bytes. Falling back to initials (which
+  is what `Avatar` already renders with no avatar) is correct and must not look
+  like an error - but it should resolve later without a reinstall, so the fetch
+  needs to be retried rather than attempted once at pairing.
+- Re-publishing the same reference into a space from the second phone must not
+  duplicate the blob. The hash is already there to make that checkable.
 
 ## Scope
 
-**In:** moving `profile` to personal scope, the migration for devices already
-linked, and republishing member rows when the shared profile changes.
+**In:** moving `profile` - displayName AND avatar, together, per Tim's call - to
+personal scope; making the avatar bytes reachable on a person's own devices, not
+only on space peers; the migration for devices already linked; and republishing
+member rows when the shared profile changes.
 
 **Out:** anything that changes the space wire format. Out: per-space nicknames
 (a different feature). Out: the device roster's own nicknames in Settings, which
-are deliberately device-level and stay that way.
+are deliberately device-level and stay that way - that is naming a PHONE, which is
+the one place a per-device name is the right thing.
 
 ## Compat
 
@@ -127,11 +164,21 @@ are deliberately device-level and stay that way.
   `displayName`, so `collapseMembers` returns that name regardless of which row is
   newer. This is the regression test for the bug as observed.
 - Unit: a device with no personal base falls back to its local profile unchanged.
+- Unit: a freshly paired device with no profile of its own inherits the primary's
+  name AND avatar reference, with no prompt. A device with a real differing profile
+  does not silently inherit.
 - **On hardware, two linked phones, and this is the point:** rename on phone A and
   confirm phone B shows the new name AND that a third device (a housemate) sees the
   new name in the members list. Then rename on phone B and confirm it does not flip
   back. The 2026-07-29 rig (Pixel + TCL linked, iPhone as the housemate) is exactly
   the one to reuse.
+- **On hardware, the avatar specifically:** set an avatar on phone A only, then
+  pair a freshly installed phone B. B must end up showing that avatar - not
+  initials - and the housemate must see ONE person with that avatar, not two rows.
+  This is the check the whole "name and avatar are one thing" decision rests on.
+- **On hardware, primary offline at pairing:** pair B, then take A offline before B
+  has fetched the image. B should render initials rather than a broken image, and
+  must pick the avatar up once A returns, with no reinstall and no re-pair.
 - Old-peer check: a device on the pre-change build in the same space still shows a
   sensible name and does not fork.
 
@@ -144,20 +191,41 @@ today's position.
 
 ## Open questions
 
-**1. Which name wins for devices that are ALREADY linked?** Today's rig has "Tim"
-and "TCL" and no basis for choosing. Options: the identity root device's name (has
-a deterministic answer, but may be the phone you care less about), the most
-recently edited (matches today's rule, and is at least what the household is
-currently seeing), or ask the user once at migration ("You have two names on this
-account - which is yours?"). Asking is the only one that cannot pick wrong, and it
-happens once, behind a flag that has not shipped - so the blast radius is the test
-devices. **Recommend asking, and defaulting the prompt to the root device's name.**
+**1. ANSWERED by Tim 2026-07-29 - INHERIT by default, and only ask when there is a
+real conflict.** The prompt was over-designed. The ordinary case is a phone you
+just installed the app on: it has no profile worth keeping, so it should simply
+become you - name and avatar - with nothing to decide and nothing to tap. That is
+also what a user means by "this is my other phone".
 
-**2. Does the avatar move with the name?** They are one `profile` row today, and
-splitting them would be strange. But the avatar is a blob and the personal base has
-different size characteristics than localDb. Recommend moving both, and measuring
-the blob path before committing - if it is a problem, moving the name alone still
-fixes the reported bug and the avatar can follow.
+So the migration rule is:
+
+- **Secondary has no profile of its own** (fresh install - the common case):
+  inherit the primary's silently. No prompt.
+- **Secondary has only the untouched default** (`displayName` still "Member", no
+  avatar): treat as no profile. Inherit silently.
+- **Secondary has a real, DIFFERENT profile** (someone linked a phone they had
+  already been using): this is the only case where the app cannot know, so ask
+  once - "Which of these is you?" - showing both name+avatar pairs. Default the
+  selection to the primary, since the phone being linked is the one joining.
+
+The rare case keeps the prompt; the common case never sees it.
+
+**2. ANSWERED by Tim 2026-07-29 - YES, the avatar moves with the name, and this is
+not optional.** Name and avatar together are the person other people see. Carrying
+one without the other leaves the household looking at two different people, which
+is the bug this proposal exists to fix, half-fixed.
+
+This also retires the size worry the first draft raised: the profile carries an
+avatar REFERENCE, not the image, so nothing large moves. The work is in
+reachability instead - see "The avatar is a reference" above, which is now the
+substantive part of this proposal rather than a footnote.
+
+**2b. NEW, and it follows from 2: what does a freshly paired phone show before the
+bytes arrive?** It will have the reference and possibly not the image - certainly
+so if the primary is offline. Rendering initials is already the no-avatar
+behaviour and is the right fallback, but it must be a transient state that heals
+on its own, not a permanent wrong-looking roster. Needs a retry, and a hardware
+check with the primary deliberately offline at pairing time.
 
 **3. Should renaming republish member rows immediately, or lazily?** A shared
 profile change has to reach every space the person is in, on both devices, or the
