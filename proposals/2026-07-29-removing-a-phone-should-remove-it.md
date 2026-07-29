@@ -1,8 +1,10 @@
 # 2026-07-29 - "I lost my phone, take it off my account"
 
-**Status:** DRAFT 2026-07-29, awaiting approval. The last blocker on flipping
-DEVICE_LINK_ENABLED. Everything else in device linking is shipped and proven on
-hardware (see DONE.md: PRs #117, #121, #123, #125, #127).
+**Status:** READY 2026-07-29, awaiting approval. Both sharp questions answered by Tim
+the same day - it gets its own `revoke2` capability gate, and a space owned by the
+removed phone has ownership transferred to another of the person's own devices first.
+The last blocker on flipping DEVICE_LINK_ENABLED. Everything else in device linking is
+shipped and proven on hardware (see DONE.md: PRs #117, #121, #123, #125, #127).
 
 **Goal**
 
@@ -145,12 +147,16 @@ is close to this already; it should be updated rather than softened.
 ## Scope
 
 **In:** `removeWriter` on the personal base (device-link); same-identity
-authorisation in `authorizeRevoke`; `device:remove` issuing revocations across every
-space the device is a writer in; UI copy stating what removal does and does not do.
+authorisation in `authorizeRevoke` behind a new `revoke2` capability; same-identity
+ownership transfer for spaces the removed device owns; `device:remove` issuing
+revocations across every space the device is a writer in; UI copy stating what removal
+does and does not do, plus surfacing which spaces are not armed yet.
 
-**Out:** re-keying or read revocation - that is "make a new space". Out: revoking
-a device that was never a writer anywhere (nothing to do). Out: any change to how
-rows are signed.
+**Out:** re-keying or read revocation - that is "make a new space". Out: ownership
+RECOVERY where no device of the owner survives - that stays WON'T BUILD per
+proposals/2026-07-28-space-ownership-recovery.md, and this proposal deliberately does
+not reopen it. Out: revoking a device that was never a writer anywhere (nothing to
+do). Out: any change to how rows are signed.
 
 ## Compat
 
@@ -179,6 +185,12 @@ wants its own cap bump (`revoke2`?), not a silent widening of `revoke1`.
   `test/writer-revocation.test.js` shape, extended to the new authoriser.
 - Unit (device-link): `removeDevice` removes the writer, and the removed key can no
   longer append to the personal base.
+- Unit: a `space` row rewritten to name a new owner is honoured when the writer proves
+  the same identity root as the current owner, and REJECTED when it does not - the
+  no-seizure property, and the one that has to be airtight.
+- Unit: revocation is skipped rather than attempted when it would leave no indexer,
+  and the ownership transfer lands before the revocation.
+- Unit: a space armed only under `revoke1` does not honour a same-identity revocation.
 - **On hardware, three devices, and this is the point:** link a second phone, arm a
   space, remove that phone from the first, then try to edit a list ON the removed
   phone and confirm the edit does not reach the others. The 2026-07-29 rig (Pixel +
@@ -205,17 +217,57 @@ update everyone and arm revocation"), refuse with an explanation, or remove and 
 the user has usually lost the phone already - but the wording has to avoid implying a
 lockout that did not happen.
 
-**2. Does this need `revoke2`, a new capability?** Almost certainly, per the Compat
-note: widening who may author an op is exactly the kind of change an old peer honours
-differently. The cost is another "everyone must update" gate before device removal
-works in a space, which is real friction for a rarely-used feature.
+**2. ANSWERED by Tim 2026-07-29 - YES, this gets its own `revoke2` capability.**
+Nobody honours a same-identity revocation until every member of that space advertises
+support, exactly as `revoke1` works today. Reusing `revoke1` was rejected: an armed
+old-build peer accepts `revoke1` ops but would reject a same-identity one, so the two
+disagree about the writer set - the silent fork the capability system exists to
+prevent.
 
-**3. What happens to spaces the removed device OWNS?** If the lost phone was the
-device that created a space, revoking its writer key removes the only owner. Autobase
-also refuses to remove the last indexer (`base.removeable`), which the engine already
-skips rather than throwing. Needs deciding: possibly ownership must transfer to
-another of the person's own devices first - which #125's attestation now makes
-expressible, since another phone can prove it is the same person as the owner.
+The cost is accepted and should be stated in the UI rather than hidden: **device
+removal does nothing in a space until that space is armed under `revoke2`**, which
+needs every member updated. For a feature reached in a hurry after losing a phone,
+that is poor timing - so `space:revocationStatus`, which already reports who is
+holding arming up, should be surfaced on the removal screen rather than only in the
+owner's settings.
+
+**3. ANSWERED by Tim 2026-07-29 - transfer ownership to another of your own phones
+first, then revoke.**
+
+**This is the part that was impossible in July and is not any more, and the distinction
+matters.** proposals/2026-07-28-space-ownership-recovery.md is marked WON'T BUILD, and
+one of its reasons was that any ownership change hands a member "a seizure button in a
+couples app". That objection stands for what it was describing - ownership *recovery*,
+where the owner identity is gone from every phone and somebody else must be allowed to
+claim the space. Nothing can distinguish a legitimate claim from a grab there.
+
+Ownership *transfer between one person's own devices* is a different question, and
+#125 answers it: another phone can **prove** it shares the owner's identity root. That
+is not a seizure, it is the same person. So the rule is narrow and checkable, from
+replicated state alone:
+
+> The `space` row may be rewritten to name a new owner if the writer is a device whose
+> `identityProof` verifies to the same identity root as the current `space.owner`.
+
+Consequences to honour:
+
+- It only works while **another of your devices still exists**. Lose your only phone
+  and you are back to the July answer: export/import into a new space. That limit
+  should be said out loud, because it is the difference between this and the recovery
+  feature that was declined.
+- Autobase refuses to remove the last indexer (`base.removeable`), and the engine
+  already skips rather than throwing. So the transfer must land **before** the
+  revocation, and the revocation must be skipped if it would leave no indexer.
+- This makes the July proposal worth revisiting **in this narrow respect only**. It
+  should not be reopened as ownership recovery; the n=2 finding recorded there still
+  applies to that.
+
+**4. Should removal be automatic on re-pair?** The roster already accumulates stale
+"Unnamed device" entries, one per pairing, because a re-paired phone adds an entry
+rather than replacing its own (its own TODO item). If a device re-pairs with the same
+identity, is the old entry revoked, merged, or left? Merging is probably right, but it
+interacts with this proposal because a revoked-then-re-paired device must not silently
+regain writer access.
 
 **4. Should removal be automatic on re-pair?** The roster already accumulates stale
 "Unnamed device" entries, one per pairing, because a re-paired phone adds an entry
