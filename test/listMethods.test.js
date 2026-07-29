@@ -260,6 +260,47 @@ test('avatar stored as a blob reference (not inline), resolves back for the UI',
   await engine.close()
 })
 
+// Round-trip for the identity proof: publishMember writes it, member:getAll
+// strips it, and an unlinked device is unaffected. The merge logic itself is
+// covered by memberIdentity.test.js with real attestations; this pins the WIRING,
+// which is where the equivalent feature broke last time (a method nothing could
+// reach, so nothing exercised it).
+test('member rows carry no identity proof until a device has linked', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  await call('profile:set', { displayName: 'Sam' })
+  const id = await call('identity:get', {})
+
+  // Device-link is off in this build, so there is no mnemonic to attest with.
+  const base = engine.bases.get(groupId)
+  await base.update()
+  const row = (await base.view.get('member:' + id.pubkey)).value
+  assert.equal(row.identityProof, undefined, 'nothing to prove, nothing published')
+
+  // And the row still reads back normally - an unlinked device must behave
+  // exactly as it did before this feature existed.
+  const members = await call('member:getAll', { groupId })
+  assert.equal(members.length, 1)
+  assert.equal(members[0].displayName, 'Sam')
+  await engine.close()
+})
+
+test('member:getAll never leaks device-shaped fields to the UI', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  await call('profile:set', { displayName: 'Sam' })
+
+  const [m] = await call('member:getAll', { groupId })
+  // Tim's call 2026-07-29: the members list shows people, never hardware. These
+  // are carried internally for the merge and must be stripped before the UI.
+  assert.equal(m.identityProof, undefined)
+  assert.equal(m.updatedAt, undefined)
+  assert.equal(m.deviceCount, undefined)
+  await engine.close()
+})
+
 test('member roster: publish self, read it, and assign a list to a member', async () => {
   const { engine, call } = driver()
   await call('init', {})

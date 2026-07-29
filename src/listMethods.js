@@ -15,7 +15,8 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
-const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, _trace: _dlTrace } = require('./deviceLink')
+const { collapseMembers, sameIdentityKeys, identityRootOf } = require('./memberIdentity')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, _trace: _dlTrace } = require('./deviceLink')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -135,6 +136,77 @@ async function recordRecent (ctx, text) {
 
 // Publish this device's profile as its member:{pubkey} roster row to every group
 // it can write to, so peers can resolve assignee pubkeys to a name + avatar.
+// This device's attestation proof, hex, or null if it has no mnemonic to derive
+// one from (i.e. device-link is off, or on but never linked).
+//
+// NOT memoised here. `attestSelf` caches against the mnemonic that produced the
+// proof, which is the only cache that stays correct across a pairing - see the
+// comment there. A second memo at this level would reintroduce exactly the bug
+// that comment describes, because this module cannot see the mnemonic change.
+async function deviceIdentityProof (ctx) {
+  try {
+    const hex = await attestSelf(pubkeyHex(ctx))
+    _dlTrace('dl:attest', { got: !!hex })
+    return hex || null
+  } catch {
+    // Never fatal. A member row without a proof is the pre-existing behaviour,
+    // and publishing the row matters far more than proving who owns it.
+    return null
+  }
+}
+
+
+// Republish our member row for ONE space when the proof on it is not the one this
+// device would publish today - either because there is none, or because it is the
+// WRONG one.
+//
+// WHY THIS HANGS OFF member:getAll RATHER THAN BOOT. publishMember does not run
+// on launch for a row that already exists - only on a profile change or a first
+// join - so a device that was already a member before this feature existed would
+// never publish a proof, and the collapse would never happen for anyone already
+// in a space. Which is everyone.
+//
+// WHY THE ONCE-PER-SESSION GUARD, which is the whole point of this function's
+// shape. The first version re-checked the stored row each time and republished if
+// it still lacked a proof. An append is not visible in `base.view` until apply
+// catches up, and member:getAll runs on a refresh interval - so it republished
+// every ~2.5s, forever. Measured on hardware 2026-07-29 before it was caught:
+// eight appends in twenty seconds and still going. A self-healing check that
+// re-fires on stale state is a write-amplification bug, not a fix.
+//
+// Trying once per session is sufficient: if the append lands, later sessions see
+// the proof and skip. If it does not, the next launch tries again.
+//
+// WHY THE GUARD IS KEYED ON THE PROOF WE OBSERVED, not on the space alone. The
+// first version skipped whenever ANY proof was present, which made a WRONG proof
+// permanent: a phone that paired mid-session had already published one under its
+// previous identity, so "a proof exists" read as "done" forever and the members
+// list showed one person as two. Not even a restart cleared it. Keying on the
+// observed proof gives exactly one attempt per distinct state - so a proof that
+// changes underneath us (pairing, or our own correction landing) is re-checked
+// once and then settles, while the every-2.5s amplification stays fixed.
+const _proofBackfilled = new Set()
+function backfillIdentityProof (ctx, groupId, publishedProof) {
+  // Set synchronously, before any await: member:getAll runs on a refresh
+  // interval and two overlapping passes must not both decide to publish.
+  const seen = groupId + ':' + (publishedProof || '')
+  if (_proofBackfilled.has(seen)) return
+  _proofBackfilled.add(seen)
+  deviceIdentityProof(ctx).then(async (proof) => {
+    if (!proof) return
+    if (publishedProof) {
+      // Compare IDENTITY ROOTS, not proof bytes. Two proofs for the same person
+      // need not be byte-identical, and it is the root that decides whether the
+      // collapse will treat this row as us.
+      const [mineRoot, publishedRoot] = await Promise.all([
+        identityRootOf(proof), identityRootOf(publishedProof),
+      ])
+      if (mineRoot && publishedRoot && mineRoot === publishedRoot) return
+    }
+    return publishMember(ctx, groupId)
+  }).catch(() => {})
+}
+
 async function publishMember (ctx, onlyGroupId) {
   const prof = (await ctx.localDb.get('profile'))?.value
   // `caps` advertises what this build understands. It is the capability gate for
@@ -145,6 +217,21 @@ async function publishMember (ctx, onlyGroupId) {
   const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP] }
   if (prof?.avatarBlob) { value.avatarBlob = prof.avatarBlob; value.avatarHash = prof.avatarHash; value.avatarType = prof.avatarType || 'image/png' }
   else if (prof?.avatar) value.avatar = prof.avatar // legacy inline (pre-blob profiles)
+
+  // `identityProof` proves this device key belongs to a person, so two phones can
+  // be shown as one member and an assignment can reach both. Additive optional
+  // field, exactly like `caps`: an old peer stores it verbatim, ignores it, shows
+  // two rows and routes to one device - i.e. today's behaviour, which is the right
+  // degradation. See proposals/2026-07-29-one-person-many-devices.md.
+  //
+  // Only present once this device has a mnemonic, which means only after linking.
+  // A phone that never links publishes nothing here and is unaffected - and
+  // src/memberIdentity.js will not merge it with anything, because an ABSENT proof
+  // is not evidence that two people are the same person.
+  const proof = await deviceIdentityProof(ctx)
+  if (proof) value.identityProof = proof
+  _dlTrace('dl:publishMember', { proof: !!proof })
+
   const key = memberKey(pubkeyHex(ctx))
   let published = false
   for (const [groupId, base] of ctx.bases) {
@@ -434,10 +521,32 @@ const methods = {
     const base = viewFor(ctx, groupId)
     const meta = await readRow(base, 'space')
     const out = []
+    const self = pubkeyHex(ctx)
+    // The proof currently published on OUR row, if any. Kept as the value rather
+    // than a boolean: "is there a proof" cannot tell a correct one from one this
+    // device published under a previous identity, before it was paired.
+    let minePublishedProof = null
     for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) {
-      if (isMemberVisible(value, meta)) out.push({ pubkey: value.pubkey, displayName: value.displayName || 'Member', avatar: resolveAvatarCached(ctx, value) })
+      if (value && value.pubkey === self && value.identityProof) minePublishedProof = value.identityProof
+      if (!isMemberVisible(value, meta)) continue
+      // identityProof + updatedAt are carried only so collapseMembers can verify
+      // and order; it strips both before the UI sees the row. Tim's call: the
+      // members list shows people, never hardware.
+      out.push({
+        pubkey: value.pubkey,
+        displayName: value.displayName || 'Member',
+        avatar: resolveAvatarCached(ctx, value),
+        identityProof: value.identityProof,
+        updatedAt: value.updatedAt,
+      })
     }
-    return out
+    // If our own row predates this feature it carries no proof, and nothing else
+    // would ever add one - and if it carries one from before this phone was paired,
+    // that is worse than none. Cheap because the stream above already told us.
+    backfillIdentityProof(ctx, groupId, minePublishedProof)
+    // Two phones of one person become one row. Rows with no verified proof are
+    // never merged - see src/memberIdentity.js for why that rule has no exception.
+    return await collapseMembers(out)
   },
 
   // Remove a member from the space, or put one back. Owner only, and enforced

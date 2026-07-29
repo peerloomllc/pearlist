@@ -331,16 +331,25 @@ function Avatar ({ name, avatar, size = 40 }) {
 
 // Resolve an assignee pubkey to that member's avatar (or a neutral ? if the
 // roster hasn't synced them yet).
+// Resolve a stored assignee to the person it belongs to. `assignee` is a DEVICE
+// key, and a person with two phones is one row covering both - so matching on the
+// row's pubkey alone renders their other phone as "?".
+function memberFor (members, pubkey) {
+  return members.find((x) => x.pubkey === pubkey || (x.keys && x.keys.includes(pubkey)))
+}
 function AssigneeAvatar ({ pubkey, members, size = 22 }) {
   if (!pubkey) return null
-  const m = members.find((x) => x.pubkey === pubkey)
+  const m = memberFor(members, pubkey)
   return <Avatar name={m?.displayName || '?'} avatar={m?.avatar} size={size} />
 }
 function memberLabel (members, pubkey, selfPubkey) {
   if (!pubkey) return 'Nobody'
-  const m = members.find((x) => x.pubkey === pubkey)
+  const m = memberFor(members, pubkey)
   const base = m?.displayName || 'Unknown'
-  return pubkey === selfPubkey ? base + ' (You)' : base
+  // "(You)" must follow the PERSON, not the device: a list assigned to your other
+  // phone is still assigned to you.
+  const mine = m && (m.pubkey === selfPubkey || (m.keys && m.keys.includes(selfPubkey)))
+  return (pubkey === selfPubkey || mine) ? base + ' (You)' : base
 }
 
 // Pick a household member (or nobody) to assign an item or list to.
@@ -1354,15 +1363,31 @@ export default function App () {
     // member row each time, growing the log without bound (and never reappearing,
     // since only the owner can clear an eviction).
     const evictedSelf = !!self && rm.some((m) => m.pubkey === self)
-    if (self && !evictedSelf && !ms.some((m) => m.pubkey === self)) call('member:publish', { groupId }).catch(() => {})
+    // MATCH ON EVERY DEVICE KEY OF A ROW, not just its pubkey. `ms` is COLLAPSED:
+    // one person's phones are a single row carrying the representative device's
+    // pubkey plus `keys` for the rest. Testing `pubkey === self` alone means the
+    // phone that got collapsed away decides it is missing from the roster and
+    // republishes on EVERY refresh tick - exactly the unbounded append the comment
+    // above warns about, reintroduced by the collapse. Measured on hardware
+    // 2026-07-29: ~1 append every 4 s, indefinitely.
+    const hasKey = (m, k) => m.pubkey === k || (Array.isArray(m.keys) && m.keys.includes(k))
+    const keysOf = (m) => (Array.isArray(m.keys) && m.keys.length) ? m.keys : [m.pubkey]
+    if (self && !evictedSelf && !ms.some((m) => hasKey(m, self))) call('member:publish', { groupId }).catch(() => {})
     // "Someone joined" banner: fire only for a member that appears after we have
     // already seen this space's roster once (skips the initial load and self).
+    //
+    // Keyed on the whole key set for the same reason, and for a second one: which
+    // device represents a collapsed row changes as rows are updated, so comparing
+    // the representative pubkey alone reported the SAME person as newly joined
+    // over and over. A person is new only when NONE of their device keys has been
+    // seen - which also means linking your own second phone never announces a
+    // housemate, because it is not one.
     const prev = prevMembersRef.current[groupId]
     if (prev) {
-      const added = ms.find((m) => !prev.has(m.pubkey) && m.pubkey !== self)
+      const added = ms.find((m) => !keysOf(m).some((k) => prev.has(k)) && !hasKey(m, self))
       if (added) setBanner(`${added.displayName || 'Someone'} joined`)
     }
-    prevMembersRef.current[groupId] = new Set(ms.map((m) => m.pubkey))
+    prevMembersRef.current[groupId] = new Set(ms.flatMap(keysOf))
     return ms
   }, [])
 
