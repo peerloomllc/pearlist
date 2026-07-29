@@ -15,6 +15,7 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, _trace: _dlTrace } = require('./deviceLink')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -542,6 +543,105 @@ const methods = {
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
     setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
     return { ok: true, retracted }
+  },
+
+  // --- device linking (SLICE 1, dark) --------------------------------------
+  // The only device-link surface for now: does the engine come up, and what
+  // identity does it derive. Read-only, and returns `{ enabled: false }` on an
+  // ordinary build so the UI can ask without caring whether the flag is on.
+  //
+  // Everything user-facing - pairing, the roster, the recovery phrase - is slices
+  // 2 and 3. See proposals/2026-07-28-device-linking.md.
+  'device:status': async (_args, ctx) => {
+    if (!DEVICE_LINK_ENABLED) return { enabled: false }
+    try {
+      const dl = await getDeviceLink(ctx)
+      return {
+        enabled: true,
+        identityPublicKey: dl.identityPublicKeyHex,
+        personalBaseOpen: dl.isEnabled,
+        // The roster is device-link's own; empty until a second device pairs.
+        devices: await dl.listLinkedDevices().catch(() => []),
+      }
+    } catch (e) {
+      // Never throw from a diagnostic: a broken device-link must not be able to
+      // take down a method table the rest of the app depends on.
+      return { enabled: true, error: e?.message ?? String(e) }
+    }
+  },
+
+  // Start pairing on the device that ALREADY has the identity (the "primary").
+  // Returns a link to show as a QR / copy. Short-lived by design - device-link
+  // expires the session - and `enable()` first, because a personal base has to
+  // exist before another device can be admitted to it.
+  'device:startPairing': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    if (!dl.isEnabled) await dl.enable()
+    _dlTrace('dl:startPairing:called')
+    const invite = await dl.startPairing()
+    // Build the link OURSELVES from the session snapshot rather than using
+    // device-link's `invite.url`. Its default is `peerloom://pair?...`, which is
+    // not a scheme this app is registered for and not what our parser accepts -
+    // so a link built there could be shown and never open anything.
+    return {
+      url: buildPairLink({
+        topic: invite.topicHex,
+        handshake: invite.handshakeHex,
+        identity: invite.identityHex,
+        expiresMs: invite.expiresAt,
+      }),
+      expiresAt: invite.expiresAt,
+    }
+  },
+
+  'device:cancelPairing': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    dl.cancelPairing()
+    return { ok: true }
+  },
+
+  // The NEW device consumes the link. On success it holds the same identity, is a
+  // writer on the personal base, and - via the group plugin - has been seeded
+  // with every space the primary is in and granted write on them.
+  //
+  // Deliberately NOT wrapped in a timeout here: device-link expires its own
+  // session, and a UI timeout on top would report failure while the handshake was
+  // still in flight.
+  'device:consumePairLink': async ({ url }, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    const parsed = parsePairLink(String(url || ''))
+    _dlTrace('dl:consumePairLink:parsed', { ok: parsed.ok, error: parsed.error })
+    if (!parsed.ok) throw new Error('that does not look like a PearList device link')
+    try {
+      await dl.consumePairLink(parsed)
+    } catch (e) {
+      // The failure mode that stalled 2026-07-28 was a consume that never
+      // resolved OR rejected quietly. Trace both outcomes.
+      _dlTrace('dl:consumePairLink:failed', { err: e?.message })
+      throw e
+    }
+    _dlTrace('dl:consumePairLink:ok')
+    return { ok: true, identityPublicKey: dl.identityPublicKeyHex }
+  },
+
+  'device:list': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    return await dl.listLinkedDevices()
+  },
+
+  'device:setNickname': async ({ writerKey, nickname }, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    await dl.setDeviceNickname(String(writerKey || ''), String(nickname || ''))
+    return { ok: true }
+  },
+
+  // Hides a device from the roster and blocks its writer. NOT a revocation of the
+  // identity: the removed device still knows the mnemonic, so this is "stop
+  // showing and stop accepting", not "make it forget". The UI copy has to say so.
+  'device:remove': async ({ writerKey }, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    await dl.removeDevice(String(writerKey || ''))
+    return { ok: true }
   },
 
   // --- backup export / import ----------------------------------------------

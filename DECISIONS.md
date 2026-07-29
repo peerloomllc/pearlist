@@ -2,6 +2,48 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-28 - Ownership recovery: WON'T BUILD, export/import supersedes it
+Tier: would have been T3 (who is trusted to write the `space` row). Proposal
+PR #114, proposals/2026-07-28-space-ownership-recovery.md. Decided against on
+2026-07-28 by Tim, after the backup shipped in the same session.
+
+Context: a user reinstalled, which destroyed the identity his space was owned by.
+The proposal recommended a pre-designated successor plus shrinking what ownership
+gates, and that was accepted the same afternoon - then reversed once the backup
+was actually in and its consequences were followed through.
+
+WHY NOT. Ownership gates exactly four things: rename, delete, evict/restore, and
+arming revocation. Export/import now covers or beats every one of them.
+
+The decisive one is EVICTION, because it is the only reason anyone actually wants
+owner powers back. member:remove only HIDES a member - our own comment says the
+device stays an admitted writer and keeps reading - and revocation stops writes,
+not reads. proposals/2026-07-13-writer-revocation.md already stated the answer:
+"Cutting off reads means re-keying... it means a NEW space. That already works
+today with zero new code... If the goal ever becomes 'they must not see our
+lists', build nothing here - do that instead."
+
+That was written when recreate-and-re-invite meant retyping every list by hand.
+Export/import IS that path, now costing one file and a few invites - so for the
+case people actually care about it is STRONGER than either eviction or revocation,
+because a new space has new keys and the removed person genuinely cannot read it.
+
+What ownership recovery would still have bought: keeping the same space id and not
+re-sending invites. Against a T3 trust change, a capability-gate rollout requiring
+every member to update, fork risk on apply, and a "recover this space" button that
+in a two-person household is indistinguishable from "take this space from my
+partner" - in an app for couples. Not worth it.
+
+DOES NOT APPLY TO the user who prompted it. His device was never ADMITTED as a
+writer, and admission does not involve the owner at all (PearList passes no
+mintAddWriter and no authorizeWriter, so any writer admits). Ownership recovery
+would have left him exactly where he was.
+
+Recorded here rather than left as a TODO so it does not come back on intuition.
+If it ever does return, the thing that would change the answer is a case where
+keeping the SAME space id matters more than removing someone - and none has been
+seen yet.
+
 ## 2026-07-27 - Daily reminder: which lists count, and USE_EXACT_ALARM
 Tier: T1 (app-local policy + one Android permission; no wire, pairing or data
 change). PR #105, P1 of proposals/2026-07-27-reminder-notifications.md.

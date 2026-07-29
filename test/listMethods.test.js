@@ -600,6 +600,140 @@ test('backup:import refuses a file that is not a PearList backup', async () => {
   await engine.close()
 })
 
+// --- device-link (SLICE 1, dark) -------------------------------------------
+// proposals/2026-07-28-device-linking.md. The engine is constructed beside the
+// group engine on the SAME runtime; these assert it comes up and that an ordinary
+// build is untouched by its presence.
+const deviceLink = require('../src/deviceLink')
+
+test('device:status reports disabled on an ordinary build', async () => {
+  // The flag is off in a normal build, and the method must answer rather than
+  // throw - the UI asks unconditionally.
+  const { engine, call } = driver()
+  await call('init', {})
+  assert.deepEqual(await call('device:status', {}), { enabled: false })
+  await engine.close()
+})
+
+test('device-link starts on the shared runtime and derives a stable identity', async (t) => {
+  // Drives the factory directly rather than flipping the constant, so the test
+  // says what it means and does not depend on build config.
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  t.after(() => deviceLink._resetForTest())
+
+  const ctx = { store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {} }
+  const dl = await deviceLink.getDeviceLink(ctx)
+
+  assert.match(dl.identityPublicKeyHex, /^[0-9a-f]{64}$/, 'an identity is derived from the mnemonic')
+  // The mnemonic is persisted, so the identity is stable rather than minted per
+  // launch - the whole point of it being a RECOVERY phrase.
+  const stored = (await engine.localDb.get(deviceLink.MNEMONIC_KEY)).value.mnemonic
+  assert.equal(stored.split(' ').length, 12)
+
+  deviceLink._resetForTest()
+  const again = await deviceLink.getDeviceLink(ctx)
+  assert.equal(again.identityPublicKeyHex, dl.identityPublicKeyHex, 'same phrase, same identity')
+
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
+test('device-link identity is NOT the signing identity (coexist, slice 1)', async (t) => {
+  // The thing most likely to be assumed wrong: adopting device-link does not
+  // change who signs a row. Space rows stay on core's per-device keypair, which
+  // is why two phones are still two members until the mnemonic-root slice.
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  t.after(() => deviceLink._resetForTest())
+
+  const dl = await deviceLink.getDeviceLink({ store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {} })
+  const signing = Buffer.from(engine.identity.publicKey).toString('hex')
+  assert.notEqual(dl.identityPublicKeyHex, signing)
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
+test('the pair link uses OUR scheme, not device-link\'s default', async () => {
+  // device-link builds `peerloom://pair?...` by default - a scheme this app is not
+  // registered for. A link built there would be shown to a user and open nothing,
+  // so PearList builds its own from the session snapshot.
+  const { buildPairLink, parsePairLink } = require('../src/deviceLink')
+  const url = buildPairLink({ topic: 'a'.repeat(64), handshake: 'b'.repeat(64), identity: 'c'.repeat(64), expiresMs: Date.now() + 60000 })
+  assert.ok(url.startsWith('pear://pearlist-device?'), 'our scheme: ' + url.slice(0, 40))
+  const parsed = parsePairLink(url)
+  assert.equal(parsed.ok, true)
+  assert.equal(parsed.identity, 'c'.repeat(64))
+})
+
+test('a SPACE invite is not accepted as a device link, or the reverse', async () => {
+  // The two links look similar and mean opposite things: an invite is safe to
+  // forward, a device link hands over your identity. Different hosts so a
+  // mis-paste is refused outright rather than half-understood.
+  const { parsePairLink } = require('../src/deviceLink')
+  const spaceInvite = 'pear://pearlist/join#' + Buffer.from('{}').toString('base64url')
+  assert.equal(parsePairLink(spaceInvite).ok, false)
+})
+
+test('the group plugin carries every space, and re-seeding is idempotent', async (t) => {
+  // The leg PearPetal does not have: a linked device that cannot write to any
+  // space has gained nothing. Drives the plugin directly - the pairing handshake
+  // itself is device-link's own integration test.
+  const deviceLink = require('../src/deviceLink')
+  const { engine, call } = driver()
+  await call('init', {})
+  deviceLink._resetForTest()
+  t.after(() => deviceLink._resetForTest())
+
+  const a = await call('group:create', { name: 'Home' })
+  await call('group:create', { name: 'Work' })
+
+  // Reach the plugin the way device-link does, through the engine's method ctx.
+  const ctx = { store: engine.store, swarm: engine.swarm, localDb: engine.localDb, emit: () => {}, append: engine.append, joinGroup: engine.joinGroup }
+  const dl = await deviceLink.getDeviceLink(ctx)
+  const plugin = deviceLink._groupPluginForTest(ctx)
+
+  const groups = await plugin.collectGroups()
+  assert.equal(groups.length, 2, 'both spaces collected')
+  const home = groups.find((g) => g.name === 'Home')
+  assert.equal(home.groupId, a.groupId)
+  assert.ok(home.groupKey && home.encryptionKey && home.bootstrap, 'everything a join needs travels')
+
+  // Seeding spaces this device is already in must be a no-op, not a second mount.
+  const before = engine.bases.size
+  await plugin.seedGroups(groups)
+  assert.equal(engine.bases.size, before, 'already-joined spaces are skipped')
+
+  await dl.stop().catch(() => {})
+  await engine.close()
+})
+
+test('the device-link trace REDACTS the pair secrets', () => {
+  // The trace is console.warn'd AND written to a file that gets pulled off the
+  // device. A pair snapshot carries topic + handshake + identity, and together
+  // those ARE the link - which hands over an identity. Logging them in full would
+  // turn a diagnostic into a credential leak.
+  const { _safeEventData } = require('../src/deviceLink')
+  const SECRET = 'deadbeef'.repeat(8) // 64 hex, like the real thing
+
+  const out = _safeEventData({
+    role: 'primary', topicHex: SECRET, handshakeHex: SECRET, identityHex: SECRET,
+    writerKey: SECRET, expiresAt: 123,
+  })
+
+  const dumped = JSON.stringify(out)
+  assert.doesNotMatch(dumped, new RegExp(SECRET), 'no secret survives in full')
+  for (const k of ['topicHex', 'handshakeHex', 'identityHex', 'writerKey']) {
+    assert.equal(out[k], 'deadbeef…', k + ' is a short prefix')
+  }
+  // Short prefixes are kept deliberately: they are what lets two devices' logs be
+  // correlated, which is the entire reason for tracing this at all.
+  assert.equal(out.role, 'primary', 'safe fields pass through untouched')
+  assert.equal(out.expiresAt, 123)
+})
+
 test('destroyGroup unmounts a group but leaves other groups intact', async () => {
   const { engine, call } = driver()
   await call('init', {})

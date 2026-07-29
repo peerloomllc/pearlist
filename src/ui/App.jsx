@@ -2095,7 +2095,7 @@ export default function App () {
         </>
       ) : view === 'profile' ? (
         <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
-          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} />
+          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2275,6 +2275,31 @@ function InviteSheet ({ open, onClose, inviteKey, spaceName }) {
         <Button variant='secondary' onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>
         <Button onClick={share}>Share</Button>
       </div>
+    </BottomSheet>
+  )
+}
+
+// The pair link, shown on the phone you ALREADY use. Deliberately not styled like
+// InviteSheet even though the mechanics rhyme: a space invite is safe to forward
+// to a housemate, and this is the opposite - whoever holds it becomes you. The
+// warning is the first thing in the sheet, and there is no Share button, because
+// "send this to someone" is exactly the wrong instinct here.
+function PairLinkSheet ({ open, url, onClose }) {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => { if (open) setCopied(false) }, [open])
+  const copy = async () => { try { await navigator.clipboard.writeText(url) } catch {} setCopied(true) }
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Pair a device'>
+      <p style={{ color: c.warn, fontSize: 14, fontWeight: 400, textAlign: 'center', margin: `0 0 ${sp.sm}px` }}>
+        Only for a phone you own.
+      </p>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>
+        This link hands over your identity - anyone who uses it becomes you, in every space you are in. Scan it on your other phone, or copy it across. It expires shortly.
+      </p>
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: sp.base }}>
+        {url ? <QrImage text={url} size={200} /> : null}
+      </div>
+      <Button variant='secondary' onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>
     </BottomSheet>
   )
 }
@@ -2747,7 +2772,38 @@ function Group ({ title, children }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged }) {
+  // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
+  // group is hidden unless the worklet says device-link is enabled, so an ordinary
+  // build shows nothing new.
+  const [dl, setDl] = useState(null)          // { enabled, devices, ... } | null
+  const [pairUrl, setPairUrl] = useState(null)
+  const loadDevices = useCallback(async () => {
+    const st = await call('device:status', {}).catch(() => null)
+    setDl(st)
+  }, [])
+  useEffect(() => { loadDevices() }, [loadDevices])
+  async function pairDevice () {
+    try {
+      const { url } = await call('device:startPairing', {})
+      setPairUrl(url)
+    } catch (e) { alert('Could not start pairing: ' + e.message) }
+  }
+  async function linkThisDevice () {
+    const url = prompt('Paste the link shown on your other phone')
+    if (!url) return
+    try {
+      await call('device:consumePairLink', { url })
+      await loadDevices()
+      // The spaces arrive through the group plugin's seedGroups, in the WORKLET.
+      // Nothing tells the space list about them, so without this the pairing looks
+      // like it did nothing until the next launch - measured on hardware
+      // 2026-07-28: six spaces joined and none of them on screen. Same shape as
+      // the restored-templates gap in the backup work.
+      onSpacesChanged?.()
+      alert('Linked. This phone now shares your identity and spaces.')
+    } catch (e) { alert('Could not link: ' + e.message) }
+  }
   const fileRef = useRef(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2828,6 +2884,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
     'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file. You choose where it goes: your phone offers Downloads first, and Documents or a cloud folder are a tap away. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
     'Open a saved copy': 'Reads a file saved by "Save a copy" and puts everything in it back as NEW spaces that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new spaces the usual way once they are there.',
+    'Your devices': "Phones and tablets signed in as you. Pair one and it shares your identity and every space you are in, so your lists are the same on both. Pairing hands over your identity, so only ever do it with a device you own and keep - anyone holding that link becomes you.",
+    'Link this phone': 'Use this on the NEW phone: start pairing on a phone you already use, then paste the link it shows here.',
   }
   async function commitAvatar (value) {
     setBusy(true)
@@ -2901,6 +2959,21 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
           control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
       </Group>
+      {dl?.enabled ? (
+        <Group title='Linked devices'>
+          <Setting onAbout={setInfo} first title='Your devices' about={ABOUT['Your devices']} alignTop
+            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{
+              (dl.devices || []).length
+                ? (dl.devices || []).map((d) => (d.nickname || d.platform || 'Unnamed device') + (d.isThisDevice ? ' (this phone)' : '')).join(', ')
+                : 'Only this phone so far.'
+            }</span>}
+            control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
+          <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
+            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
+            control={<button onClick={linkThisDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
+        </Group>
+      ) : null}
+      <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); call('device:cancelPairing', {}).catch(() => {}); loadDevices() }} />
       <Group title='Notifications'>
         <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
         <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
