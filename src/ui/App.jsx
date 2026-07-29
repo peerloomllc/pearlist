@@ -8,6 +8,7 @@ import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
+import { pairLinkProblem } from '../linkShape.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
@@ -1047,7 +1048,21 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
 // there IS no Settings: this screen returns before the tab bar renders. Without
 // this button a backup file cannot be opened on a phone with no spaces, which is
 // most of the point of having one. (Tim, 2026-07-28.)
-function Onboarding ({ onStart, onJoin, onRestore }) {
+// FOURTH DOOR, added 2026-07-29 and gated. Before it, a replacement or second
+// phone had to Create a space or Join with an invite FIRST - i.e. become a
+// separate person - and only then could it reach Settings to link. That made the
+// feature close to undiscoverable and taught the wrong thing on the way: the
+// device ends up with an identity it did not want.
+//
+// It renders only when device-link is switched on (device:status.enabled), so an
+// ordinary build shows the same three doors it always did. When the flag is off
+// the whole feature is dark, and a fourth button leading nowhere would be worse
+// than no button.
+//
+// Wording avoids "link" as the first word because "Link" reads as "paste a URL"
+// on a screen where the other three options are about spaces. What the user is
+// actually doing is bringing their existing account onto this phone.
+function Onboarding ({ onStart, onJoin, onRestore, onLink }) {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: sp.xl, gap: sp.base, maxWidth: 460, margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
@@ -1058,6 +1073,7 @@ function Onboarding ({ onStart, onJoin, onRestore }) {
       <Button variant='primary' onClick={onStart}>Create a space</Button>
       <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
       <Button variant='secondary' onClick={onRestore}>Open a saved copy</Button>
+      {onLink ? <Button variant='secondary' onClick={onLink}>I already use PearList on another phone</Button> : null}
       {isMock ? <p style={{ textAlign: 'center', color: c.text.muted, fontSize: 12, marginTop: sp.base }}>preview mode (no peer sync)</p> : null}
     </div>
   )
@@ -1237,6 +1253,11 @@ function SyncBanner ({ status }) {
 
 export default function App () {
   const [phase, setPhase] = useState('loading')
+  // Whether device-link is switched on in this build. `device:status` answers
+  // `{ enabled: false }` cheaply when the flag is off, so this is safe to ask on
+  // every launch. Needed at THIS level, not just in Settings, because onboarding
+  // shows the link door and onboarding renders long before Settings exists.
+  const [deviceLinkOn, setDeviceLinkOn] = useState(false)
   const [spaces, setSpaces] = useState([])
   const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
@@ -1351,6 +1372,10 @@ export default function App () {
       await call('init', {})
       call('profile:get', {}).then(setProfile).catch(() => {})
       call('identity:get', {}).then((r) => setSelfPubkey(r?.pubkey || null)).catch(() => {})
+      // Fire-and-forget: a build without the flag answers `{ enabled: false }`,
+      // and a failure here must not hold up boot. Onboarding just shows its
+      // original three doors until (and unless) this resolves true.
+      call('device:status', {}).then((r) => setDeviceLinkOn(!!r?.enabled)).catch(() => {})
       const sp = await loadSpaces()
       if (sp.length) {
         // Reopen the space we were last in, if it is still one we are in.
@@ -1690,6 +1715,33 @@ export default function App () {
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
     call('member:publish', { groupId }).catch(() => {}) // retried on each refresh until writable
+  }
+
+  // Consume a pairing link: this phone adopts the identity shown on the other one
+  // and is seeded with its spaces. Lives here rather than in Settings because
+  // ONBOARDING needs it too - a replacement phone has no Settings to reach, which
+  // is exactly the gap that made linking undiscoverable (see Onboarding).
+  //
+  // The spaces arrive through the group plugin's seedGroups, inside the WORKLET.
+  // Nothing tells the UI about them, so without the reload the pairing looks like
+  // it did nothing until the next launch - measured on hardware 2026-07-28, six
+  // spaces joined and none on screen. Same shape as the restored-templates gap.
+  async function linkThisDevice (url) {
+    const problem = pairLinkProblem(url)
+    if (problem) throw new Error(problem)
+    await call('device:consumePairLink', { url })
+    const sp = await loadSpaces()
+    setSheet(null)
+    // Navigate ONLY from onboarding, where there is nowhere to be. A phone that
+    // just linked has whatever the other one had, so landing in the first space
+    // is the proof it worked - dropping the user on "no spaces yet" reads as a
+    // failed pairing. From Settings the user is already somewhere they chose to
+    // be, and yanking them into a space would be the app losing their place.
+    const first = sp && sp[0]
+    if (first && phase === 'onboarding') { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home') }
+    setBanner(first
+      ? 'Linked. This phone now shares your spaces.'
+      : 'Linked. No spaces on the other phone yet, so there is nothing to show.')
   }
   // Export reads only, so it works on a space this device cannot write to - which
   // is exactly the space someone most needs to get their lists out of.
@@ -2033,13 +2085,15 @@ export default function App () {
     // offers the same two choices, so there is no dead end.
     return (
       <>
-        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} onRestore={importBackup} />
+        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} onRestore={importBackup}
+          onLink={deviceLinkOn ? () => setSheet('link') : null} />
         <GuidedTour open={showTour} onDone={dismissTour}
           onCreate={() => { dismissTour(); setSheet('start') }}
           onJoin={() => { dismissTour(); setSheet('join') }}
           onRestore={() => { dismissTour(); importBackup() }} />
         <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
         <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
+        <LinkDeviceSheet open={sheet === 'link'} onClose={() => setSheet(null)} onLink={linkThisDevice} />
         {/* Restoring can start from here (and from the tour), and its notice goes
             through askConfirm - which is a no-op unless a ConfirmHost is mounted. */}
         <ConfirmHost />
@@ -2095,7 +2149,8 @@ export default function App () {
         </>
       ) : view === 'profile' ? (
         <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
-          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces} />
+          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces}
+          onLinkDevice={linkThisDevice} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2301,6 +2356,62 @@ function PairLinkSheet ({ open, url, onClose }) {
       </div>
       <Button variant='secondary' onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>
     </BottomSheet>
+  )
+}
+
+// The RECEIVING half of pairing, on the phone being added. Replaces a raw
+// window.prompt() that rendered as a system dialog titled "JavaScript" asking the
+// user to paste a link which hands over their identity - which is what a phishing
+// screen looks like. Found by driving the flow on hardware, 2026-07-29.
+//
+// Shaped like JoinSheet (paste field, then scan) because the mechanics are the
+// same and a second pattern for "put a link in" would be gratuitous. Worded like
+// PairLinkSheet, because the stakes are not the same: joining a space gets you
+// into ONE space that someone chose to share, and this makes this phone BECOME
+// you, everywhere. The warning is the first thing in the sheet for that reason.
+//
+// Scan is offered before paste in the copy but rendered after the field, matching
+// JoinSheet's order so the two screens do not feel arbitrarily different.
+function LinkDeviceSheet ({ open, onClose, onLink }) {
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [error, setError] = useState(null)
+  useEffect(() => { if (open) { setUrl(''); setBusy(false); setScanning(false); setError(null) } }, [open])
+
+  const link = async (value) => {
+    const v = (value ?? url).trim(); if (!v) return
+    setBusy(true); setError(null)
+    // Errors render INSIDE the sheet, not through alert(). An Android WebView
+    // titles alert() "JavaScript" exactly as it does prompt(), so routing the
+    // failure through it would reintroduce the thing this screen exists to fix -
+    // caught on hardware 2026-07-29 after the prompt was already gone.
+    // Inline is also simply better here: the message names what to do next, and
+    // it belongs next to the field the user has to correct.
+    //
+    // onLink owns the wording: it is the only thing that knows whether this was
+    // the wrong kind of link, an expired one, or a pairing that never completed.
+    try { await onLink(v) } catch (e) { setBusy(false); setError(e.message || String(e)) }
+  }
+
+  return (
+    <>
+      <BottomSheet open={open} onClose={onClose} title='Link this phone'>
+        <p style={{ color: c.warn, fontSize: 14, fontWeight: 400, textAlign: 'center', margin: `0 0 ${sp.sm}px` }}>
+          Only use a link from your own phone.
+        </p>
+        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>
+          This phone will become you - it gets your spaces and can edit them. Open Settings on the phone you already use, tap Pair, and scan or paste what it shows.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
+          <Field value={url} onChange={(v) => { setUrl(v); if (error) setError(null) }} placeholder='Paste the pairing link' autoFocus />
+          {error ? <span role='alert' style={{ color: c.warn, fontSize: 13, fontWeight: 300, lineHeight: 1.45 }}>{error}</span> : null}
+          <Button disabled={busy || !url.trim()} style={{ opacity: busy || !url.trim() ? 0.5 : 1 }} onClick={() => link()}>{busy ? 'Linking…' : 'Link this phone'}</Button>
+          <Button variant='secondary' onClick={() => setScanning(true)}>Scan QR code</Button>
+        </div>
+      </BottomSheet>
+      <ScannerView open={scanning} onClose={() => setScanning(false)} onDecode={(txt) => { setScanning(false); link(txt) }} />
+    </>
   )
 }
 
@@ -2772,12 +2883,13 @@ function Group ({ title, children }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
   // build shows nothing new.
   const [dl, setDl] = useState(null)          // { enabled, devices, ... } | null
   const [pairUrl, setPairUrl] = useState(null)
+  const [linking, setLinking] = useState(false)
   const loadDevices = useCallback(async () => {
     const st = await call('device:status', {}).catch(() => null)
     setDl(st)
@@ -2789,20 +2901,17 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       setPairUrl(url)
     } catch (e) { alert('Could not start pairing: ' + e.message) }
   }
-  async function linkThisDevice () {
-    const url = prompt('Paste the link shown on your other phone')
-    if (!url) return
-    try {
-      await call('device:consumePairLink', { url })
-      await loadDevices()
-      // The spaces arrive through the group plugin's seedGroups, in the WORKLET.
-      // Nothing tells the space list about them, so without this the pairing looks
-      // like it did nothing until the next launch - measured on hardware
-      // 2026-07-28: six spaces joined and none of them on screen. Same shape as
-      // the restored-templates gap in the backup work.
-      onSpacesChanged?.()
-      alert('Linked. This phone now shares your identity and spaces.')
-    } catch (e) { alert('Could not link: ' + e.message) }
+  // The link itself is handled at the app level (onLinkDevice), because
+  // onboarding needs the same path and only the app knows where to land the user
+  // afterwards. All this adds is refreshing the roster on THIS screen, which is
+  // the only thing Settings owns that the pairing changes.
+  //
+  // Throws on purpose: LinkDeviceSheet catches and shows the message, so the
+  // error surfaces on the sheet the user is looking at rather than behind it.
+  async function linkThisDevice (url) {
+    await onLinkDevice(url)
+    await loadDevices()
+    setLinking(false)
   }
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -2970,10 +3079,11 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
             control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
           <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
-            control={<button onClick={linkThisDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
+            control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
         </Group>
       ) : null}
       <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); call('device:cancelPairing', {}).catch(() => {}); loadDevices() }} />
+      <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
       <Group title='Notifications'>
         <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
         <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
