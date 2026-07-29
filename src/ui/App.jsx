@@ -91,6 +91,15 @@ function parseInvite (text) {
   return s
 }
 
+// One name for a linked device, used by the roster and by the Settings summary
+// line so the two cannot disagree. `platform` is device-link's own fallback and
+// is a bare string like "android"; `fallback` lets the rename field start EMPTY
+// rather than pre-filled with a placeholder the user would have to clear first.
+function deviceLabel (d, fallback = 'Unnamed device') {
+  if (!d) return fallback
+  return (d.nickname && String(d.nickname).trim()) || d.platform || fallback
+}
+
 function initialsFor (label) {
   const s = (label || '').trim()
   if (!s) return '?'
@@ -2291,6 +2300,88 @@ function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate
   )
 }
 
+// The linked-device roster. `device:setNickname` and `device:remove` had been
+// implemented since slice 2 with NO way to reach them - which is how the rename
+// method came to pass its arguments in the wrong order and nobody noticed
+// (see listMethods.js). Reaching them is most of what this component is for.
+//
+// THE TWO ACTIONS ARE NOT SYMMETRIC, and the UI reflects that rather than hiding
+// it behind a uniform row:
+//
+//   RENAME works on THIS phone only. deviceMeta is a self-attested row - the
+//   merge rule drops a put whose author is not the device it describes - so
+//   "rename my partner's phone" is not a thing that can work. Offering it would
+//   be a control that silently does nothing.
+//
+//   REMOVE works on OTHER phones only. The engine refuses to delete its own row
+//   (decideDeviceMetaDel returns self:true), so a Remove on this phone would be
+//   the same silent no-op in the other direction.
+//
+// So: the row for this phone is editable, the rows for other phones are
+// removable, and neither offers the control that would not work.
+function DeviceRosterSheet ({ open, onClose, devices, onRename, onRemove }) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const list = devices || []
+  const self = list.find((d) => d.self || d.isThisDevice) || null
+  const others = list.filter((d) => !(d.self || d.isThisDevice))
+
+  // Reset from the roster each time it opens, so a cancelled edit does not
+  // survive to look like a saved one.
+  useEffect(() => {
+    if (open) { setName(deviceLabel(self, '')); setBusy(false) }
+  }, [open, self])
+
+  const save = async () => {
+    const v = name.trim(); if (!v || v === deviceLabel(self, '')) return
+    setBusy(true)
+    try { await onRename(v) } catch (e) { alert(problem('Could not rename this phone', e)) }
+    setBusy(false)
+  }
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Your devices'>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>
+        Phones signed in as you. They share your spaces and can edit them.
+      </p>
+
+      <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>This phone</span>
+      <div style={{ display: 'flex', gap: sp.sm, alignItems: 'center', margin: `${sp.sm}px 0 ${sp.base}px` }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Field value={name} onChange={setName} placeholder='Name this phone' />
+        </div>
+        <Button
+          variant='secondary'
+          disabled={busy || !name.trim() || name.trim() === deviceLabel(self, '')}
+          style={{ width: 'auto', flexShrink: 0, opacity: busy || !name.trim() || name.trim() === deviceLabel(self, '') ? 0.5 : 1 }}
+          onClick={save}
+        >{busy ? 'Saving…' : 'Save'}</Button>
+      </div>
+
+      {others.length ? (
+        <>
+          <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Other phones</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: sp.sm }}>
+            {others.map((d) => (
+              <div key={d.writerKey} style={{ display: 'flex', alignItems: 'center' }}>
+                <span style={{ flex: 1, minWidth: 0, padding: `${sp.md}px ${sp.sm}px`, color: c.text.primary, fontSize: 16, fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {deviceLabel(d)}
+                </span>
+                <button onClick={() => onRemove(d)} aria-label={`Remove ${deviceLabel(d)}`}
+                  style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <TrashIcon size={17} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>No other phones yet. Pair one from the previous screen.</span>
+      )}
+    </BottomSheet>
+  )
+}
+
 function JoinSheet ({ open, onClose, onJoin }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2891,6 +2982,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   const [dl, setDl] = useState(null)          // { enabled, devices, ... } | null
   const [pairUrl, setPairUrl] = useState(null)
   const [linking, setLinking] = useState(false)
+  const [roster, setRoster] = useState(false)
   const loadDevices = useCallback(async () => {
     const st = await call('device:status', {}).catch(() => null)
     setDl(st)
@@ -2913,6 +3005,32 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     await onLinkDevice(url)
     await loadDevices()
     setLinking(false)
+  }
+
+  // Renames THIS phone. No writerKey: deviceMeta is self-attested, so a device
+  // can only name itself - see device:setNickname in listMethods.js.
+  async function renameThisDevice (nickname) {
+    await call('device:setNickname', { nickname })
+    await loadDevices()
+  }
+
+  // Takes another phone off the roster. The confirm has to be honest about how
+  // little this does, because "Remove" on a device list reads as "cut it off"
+  // and it is not that: there is no writer revocation in device-link, the other
+  // phone keeps the recovery phrase, keeps the spaces, and can still edit them.
+  // Saying otherwise would be reassuring someone about a lost phone that is in
+  // fact still fully in their account.
+  async function removeDevice (d) {
+    const label = deviceLabel(d)
+    const ok = await askConfirm({
+      title: `Remove ${label}?`,
+      message: `It stops showing in this list. It does NOT lock that phone out - it still has your recovery phrase and your spaces, and can still edit them. To take it off for real you would need to move your spaces to a new one.`,
+      confirmLabel: 'Remove',
+      danger: true,
+    })
+    if (!ok) return
+    try { await call('device:remove', { writerKey: d.writerKey }) } catch (e) { alert(problem('Could not remove that phone', e)); return }
+    await loadDevices()
   }
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -3074,10 +3192,15 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           <Setting onAbout={setInfo} first title='Your devices' about={ABOUT['Your devices']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{
               (dl.devices || []).length
-                ? (dl.devices || []).map((d) => (d.nickname || d.platform || 'Unnamed device') + (d.isThisDevice ? ' (this phone)' : '')).join(', ')
+                ? (dl.devices || []).map((d) => deviceLabel(d) + ((d.self || d.isThisDevice) ? ' (this phone)' : '')).join(', ')
                 : 'Only this phone so far.'
             }</span>}
-            control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
+            control={<div style={{ display: 'flex', gap: sp.sm, flexShrink: 0 }}>
+              {(dl.devices || []).length
+                ? <button onClick={() => setRoster(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Manage</button>
+                : null}
+              <button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>
+            </div>} />
           <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
@@ -3085,6 +3208,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       ) : null}
       <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); call('device:cancelPairing', {}).catch(() => {}); loadDevices() }} />
       <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
+      <DeviceRosterSheet open={roster} onClose={() => setRoster(false)} devices={dl?.devices}
+        onRename={renameThisDevice} onRemove={removeDevice} />
       <Group title='Notifications'>
         <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
         <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
