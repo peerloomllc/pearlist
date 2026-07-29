@@ -1,8 +1,10 @@
 # 2026-07-29 - Your name follows you, not your phone
 
-**Status:** DRAFT 2026-07-29, awaiting approval. Two of the four open questions
-answered by Tim the same day - the avatar moves with the name, and a fresh phone
-inherits rather than being asked. Follows
+**Status:** READY 2026-07-29, awaiting approval. ALL FOUR open questions are
+answered - the avatar moves with the name, a fresh phone inherits rather than being
+asked, the image transfers during the pairing window, and a rename republishes
+immediately behind a coalescing guard. Tim also decided this does NOT block
+flipping the flag: linking ships first. Follows
 proposals/2026-07-29-one-person-many-devices.md, which shipped as PR #125 and is
 proven on hardware. This is the defect that showed up minutes after it landed.
 
@@ -177,6 +179,12 @@ the one place a per-device name is the right thing.
 - Unit: a freshly paired device with no profile of its own inherits the primary's
   name AND avatar reference, with no prompt. A device with a real differing profile
   does not silently inherit.
+- Unit: republishing is skipped when the row would not differ. This is the guard
+  that keeps question 3's "immediate" from becoming dcdb22b again, so it gets a test
+  rather than only a hardware measurement.
+- **On hardware, the amplification gate (non-negotiable, per question 3):** rename,
+  then count `publishMember` calls over 90 s on BOTH linked phones and require it to
+  settle at zero. The same measurement that caught dcdb22b.
 - **On hardware, two linked phones, and this is the point:** rename on phone A and
   confirm phone B shows the new name AND that a third device (a housemate) sees the
   new name in the members list. Then rename on phone B and confirm it does not flip
@@ -252,15 +260,44 @@ is the moment we currently do not use.
 The initials fallback still has to exist for a failed or interrupted fetch, and
 still has to heal without a re-pair. It just stops being the expected path.
 
-**3. Should renaming republish member rows immediately, or lazily?** A shared
-profile change has to reach every space the person is in, on both devices, or the
-household sees the old name until something else triggers a republish. Immediate
-republish is correct but is a fan-out across every space from both phones at once -
-and PR #125 already had to fix a write-amplification bug in this exact area
-(dcdb22b). Whatever is chosen must be measured on hardware the way that one was:
-count `publishMember` calls over 90 s and require it to settle at zero.
+**3. ANSWERED by Tim 2026-07-29 - IMMEDIATE, with a coalescing guard.** A rename
+republishes to every space as soon as the shared profile changes, so housemates see
+it at once. Fixing a wrong name is most of why anyone renames, and a lazy update
+that leaves quiet spaces stale for days fails at exactly that.
 
-**4. Is this a blocker for flipping DEVICE_LINK_ENABLED?** It is the last
-user-visible defect known in linking. Arguably yes. But if the answer to question 1
-is "ask the user", that prompt is itself part of the linking UX, so the two want to
-ship together rather than in sequence.
+The guard is not optional, because this is the same code that already produced a
+write-amplification bug in PR #125 (dcdb22b, 21 appends in 90 s):
+
+- **Debounce**, so a burst of edits (typing a name, then picking a photo) is one
+  write per space rather than one per keystroke.
+- **Write only when the row would actually differ.** Compare against what is
+  already published and skip a no-op republish. This is the property that stops a
+  refresh loop from turning into an append loop.
+- **Both phones will try.** Two devices in the same space each republishing their
+  own row is correct - each owns its own `member:{pubkey}` - but it doubles the
+  fan-out, so the debounce has to hold per device, not per person.
+- **Measured on hardware the way dcdb22b was**: count `publishMember` calls over
+  90 s after a rename and require it to settle at ZERO. Not "looks fine".
+
+**4. ANSWERED by Tim 2026-07-29 - NO. This does not block the flag; linking ships
+first.**
+
+Recorded against the recommendation, which was to block. Tim's call: linking is
+proven and works, and the name flip only bites someone who named their two phones
+differently, which is not the common case.
+
+What follows from that, and should be understood rather than discovered:
+
+- **The first thing a linked user may notice is their name changing on its own.**
+  That is the accepted cost. It is cosmetic and reversible - no data is affected -
+  but it will look like a bug to whoever hits it.
+- The inherit-on-pairing step from question 1 is part of the LINKING flow, not this
+  proposal, so if linking ships first then a freshly paired phone keeps its own name
+  until this lands. In practice that is the flip, made likely rather than rare.
+  Worth deciding whether to carry just the inherit-at-pairing copy (option B, which
+  this proposal rejected as a *fix*) into the linking release as a stopgap - it is
+  cheap and it makes the common fresh-install case correct without waiting for
+  personal-scope storage.
+- **This is no longer the critical path to the flag.** The remaining flag blockers
+  are `device:remove` not actually revoking, and the `device:status` stall WATCH.
+  Those now decide when linking ships.
