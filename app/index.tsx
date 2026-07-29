@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import * as DocumentPicker from 'expo-document-picker'
 import * as Sharing from 'expo-sharing'
+import * as SecureStore from 'expo-secure-store'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { requestLocalNetworkPermission } from '../modules/local-network'
@@ -363,6 +364,37 @@ const WORKLET_INIT_TIMEOUT_MS = 25_000
 // slow, and a false trip costs one reload rather than a broken app.
 const WEBVIEW_FIRST_LOAD_TIMEOUT_MS = 15_000
 
+// --- the device-link mnemonic, and why the SHELL owns it -------------------
+// A BIP39 seed phrase is the whole identity, so it belongs in the OS keystore
+// (Android Keystore / iOS Keychain), not in the worklet's localDb where it would
+// sit in plaintext on disk.
+//
+// The worklet cannot reach secure storage - that is a shell capability, and this
+// app's IPC only runs shell -> worklet. Rather than build a whole RPC direction
+// for one string, this uses the two directions that already exist: the shell
+// hands the phrase IN at boot (device:provisionMnemonic) and the worklet hands a
+// freshly minted one OUT as an event (deviceLink:mnemonic), which lands here.
+//
+// Failures are swallowed on purpose. Secure storage can be unavailable (no
+// screen lock on some devices, a keystore reset after a restore), and device-link
+// is off by default - a phone that cannot store a phrase must still start.
+const MNEMONIC_STORE_KEY = 'pearlist.deviceLink.mnemonic'
+
+async function loadStoredMnemonic (): Promise<string | null> {
+  try { return await SecureStore.getItemAsync(MNEMONIC_STORE_KEY) } catch { return null }
+}
+async function storeMnemonic (mnemonic: string) {
+  try {
+    await SecureStore.setItemAsync(MNEMONIC_STORE_KEY, mnemonic, {
+      // Available after the first unlock, so a background start can still read
+      // it, but never leaves the device in an iCloud/Android backup.
+      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+    })
+  } catch (e: any) {
+    bootLog('mnemonic not stored: ' + (e?.message ?? String(e)))
+  }
+}
+
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
 let _workletStarted = false
@@ -445,6 +477,11 @@ async function startWorklet () {
         const msg = JSON.parse(line)
         if (msg.id != null && _pending.has(msg.id)) { _pending.get(msg.id)!(msg); _pending.delete(msg.id) }
         else if (msg.event === 'pair:trace') writePairTrace(msg.data?.lines)
+        // device-link minted a fresh phrase. This event is the ONLY way it leaves
+        // the worklet, and the keystore is the only place it comes to rest.
+        else if (msg.event === 'deviceLink:mnemonic') {
+          if (typeof msg.data?.mnemonic === 'string') storeMnemonic(msg.data.mnemonic)
+        }
         else if (msg.event === 'notify:assigned') {
           const isList = msg.data?.kind === 'list'
           const text = msg.data?.text ?? (isList ? 'a list' : 'an item')
@@ -489,6 +526,16 @@ async function startWorklet () {
     new Promise((r) => setTimeout(() => r(TIMED_OUT), WORKLET_INIT_TIMEOUT_MS)),
   ])
   if (res === TIMED_OUT) throw new Error(`worklet init did not reply within ${WORKLET_INIT_TIMEOUT_MS}ms`)
+
+  // Hand the worklet whatever the keystore holds, before anything can touch
+  // device-link. NOT awaited into the boot gate's failure path: a device that
+  // cannot read secure storage must still start the app - device-link is off by
+  // default, and the worst case is that pairing is unavailable until next launch.
+  try {
+    await callRaw('device:provisionMnemonic', { mnemonic: await loadStoredMnemonic() })
+  } catch (e: any) {
+    bootLog('mnemonic not provisioned: ' + (e?.message ?? String(e)))
+  }
 }
 export async function ensureBackendStarted () { await startWorklet() }
 
