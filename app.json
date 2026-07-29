@@ -11,6 +11,7 @@
     "ios": {
       "bundleIdentifier": "com.pearlist",
       "buildNumber": "9",
+      "associatedDomains": ["applinks:peerloomllc.com"],
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan space invite QR codes.",
         "NSLocalNetworkUsageDescription": "PearList connects directly to your peers' devices on your Wi-Fi to sync lists peer-to-peer.",
