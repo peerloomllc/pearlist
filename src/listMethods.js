@@ -642,15 +642,40 @@ const methods = {
     return await dl.listLinkedDevices()
   },
 
-  'device:setNickname': async ({ writerKey, nickname }, ctx) => {
+  // Renames THIS device, and only this device. Not a limitation of the IPC - it
+  // is what deviceMeta is: a self-attested row, so `decideDeviceMetaPut` checks
+  // the op's author against the row's writerKey and drops anything else. A phone
+  // naming another phone is rejected by the merge rule, so offering it would be a
+  // button that silently does nothing.
+  //
+  // TOOK A writerKey UNTIL 2026-07-29 and passed it as the FIRST argument to
+  // `setDeviceNickname(nickname)`, which takes one. So the nickname was set to
+  // the writer key - a 64-char hex string - and the real nickname was dropped.
+  // Nothing caught it because no UI could reach this method (see the roster sheet
+  // in App.jsx, added the same day).
+  'device:setNickname': async ({ nickname }, ctx) => {
     const dl = await getDeviceLink(ctx)
-    await dl.setDeviceNickname(String(writerKey || ''), String(nickname || ''))
+    await dl.setDeviceNickname(String(nickname || ''))
     return { ok: true }
   },
 
-  // Hides a device from the roster and blocks its writer. NOT a revocation of the
-  // identity: the removed device still knows the mnemonic, so this is "stop
-  // showing and stop accepting", not "make it forget". The UI copy has to say so.
+  // Takes a device OFF THE ROSTER. Read what this does and does not do before
+  // writing copy for it, because the obvious reading is wrong:
+  //
+  //   it does     drop the deviceMeta row and leave a `deviceMetaHidden:`
+  //               tombstone, so the device stops appearing on every device that
+  //               applies the op
+  //   it does NOT revoke anything. There is no removeWriter in device-link
+  //               (grepped 2026-07-29). The removed phone keeps the mnemonic,
+  //               keeps its spaces, and can still write to them.
+  //   it does NOT even remove itself: `decideDeviceMetaDel` returns `self: true`
+  //               for the target's own row, so the removed phone's own list is
+  //               unchanged. Only the OTHER devices stop showing it.
+  //
+  // This comment used to assert that removal stopped the other device writing.
+  // It does not, and the UI copy must not imply it either - telling someone a
+  // lost phone has been shut out when it has not is the worst possible thing to
+  // be wrong about on this screen.
   'device:remove': async ({ writerKey }, ctx) => {
     const dl = await getDeviceLink(ctx)
     await dl.removeDevice(String(writerKey || ''))

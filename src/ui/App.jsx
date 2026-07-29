@@ -8,6 +8,8 @@ import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
+import { pairLinkProblem } from '../linkShape.js'
+import { problem, terminated } from '../userText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
@@ -87,6 +89,15 @@ function parseInvite (text) {
     return ''
   }
   return s
+}
+
+// One name for a linked device, used by the roster and by the Settings summary
+// line so the two cannot disagree. `platform` is device-link's own fallback and
+// is a bare string like "android"; `fallback` lets the rename field start EMPTY
+// rather than pre-filled with a placeholder the user would have to clear first.
+function deviceLabel (d, fallback = 'Unnamed device') {
+  if (!d) return fallback
+  return (d.nickname && String(d.nickname).trim()) || d.platform || fallback
 }
 
 function initialsFor (label) {
@@ -1047,7 +1058,21 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
 // there IS no Settings: this screen returns before the tab bar renders. Without
 // this button a backup file cannot be opened on a phone with no spaces, which is
 // most of the point of having one. (Tim, 2026-07-28.)
-function Onboarding ({ onStart, onJoin, onRestore }) {
+// FOURTH DOOR, added 2026-07-29 and gated. Before it, a replacement or second
+// phone had to Create a space or Join with an invite FIRST - i.e. become a
+// separate person - and only then could it reach Settings to link. That made the
+// feature close to undiscoverable and taught the wrong thing on the way: the
+// device ends up with an identity it did not want.
+//
+// It renders only when device-link is switched on (device:status.enabled), so an
+// ordinary build shows the same three doors it always did. When the flag is off
+// the whole feature is dark, and a fourth button leading nowhere would be worse
+// than no button.
+//
+// Wording avoids "link" as the first word because "Link" reads as "paste a URL"
+// on a screen where the other three options are about spaces. What the user is
+// actually doing is bringing their existing account onto this phone.
+function Onboarding ({ onStart, onJoin, onRestore, onLink }) {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: sp.xl, gap: sp.base, maxWidth: 460, margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: sp.lg }}>
@@ -1058,6 +1083,7 @@ function Onboarding ({ onStart, onJoin, onRestore }) {
       <Button variant='primary' onClick={onStart}>Create a space</Button>
       <Button variant='secondary' onClick={onJoin}>Join with an invite</Button>
       <Button variant='secondary' onClick={onRestore}>Open a saved copy</Button>
+      {onLink ? <Button variant='secondary' onClick={onLink}>I already use PearList on another phone</Button> : null}
       {isMock ? <p style={{ textAlign: 'center', color: c.text.muted, fontSize: 12, marginTop: sp.base }}>preview mode (no peer sync)</p> : null}
     </div>
   )
@@ -1082,13 +1108,13 @@ function NameSetup ({ profile, onDone }) {
       } else {
         setAvatar(await compressToAvatar(await readFileDataUrl(file)))
       }
-    } catch { alert('Could not read that image') }
+    } catch { alert('Could not read that image.') }
   }
   async function cont () {
     const n = name.trim(); if (!n) return
     setBusy(true)
     try { await call('profile:set', { displayName: n, avatar: avatar || undefined }); onDone() }
-    catch (e) { alert('Could not save: ' + e.message); setBusy(false) }
+    catch (e) { alert(problem('Could not save', e)); setBusy(false) }
   }
   const hasAvatar = !!avatarSrc(avatar)
   return (
@@ -1237,6 +1263,11 @@ function SyncBanner ({ status }) {
 
 export default function App () {
   const [phase, setPhase] = useState('loading')
+  // Whether device-link is switched on in this build. `device:status` answers
+  // `{ enabled: false }` cheaply when the flag is off, so this is safe to ask on
+  // every launch. Needed at THIS level, not just in Settings, because onboarding
+  // shows the link door and onboarding renders long before Settings exists.
+  const [deviceLinkOn, setDeviceLinkOn] = useState(false)
   const [spaces, setSpaces] = useState([])
   const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
@@ -1351,6 +1382,10 @@ export default function App () {
       await call('init', {})
       call('profile:get', {}).then(setProfile).catch(() => {})
       call('identity:get', {}).then((r) => setSelfPubkey(r?.pubkey || null)).catch(() => {})
+      // Fire-and-forget: a build without the flag answers `{ enabled: false }`,
+      // and a failure here must not hold up boot. Onboarding just shows its
+      // original three doors until (and unless) this resolves true.
+      call('device:status', {}).then((r) => setDeviceLinkOn(!!r?.enabled)).catch(() => {})
       const sp = await loadSpaces()
       if (sp.length) {
         // Reopen the space we were last in, if it is still one we are in.
@@ -1506,7 +1541,7 @@ export default function App () {
   // Parse the blob and join. Registered once; joinSpace closes over stable setters.
   useEffect(() => {
     const off = on('deeplink:invite', ({ url }) => {
-      joinSpace(url).catch((e) => setBanner('Could not open that invite: ' + (e?.message || e)))
+      joinSpace(url).catch((e) => setBanner(problem('Could not open that invite', e)))
     })
     return off
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1685,11 +1720,38 @@ export default function App () {
   }
   async function joinSpace (inviteInput) {
     const inviteKey = parseInvite(inviteInput)
-    if (!inviteKey) throw new Error('that does not look like an invite link')
+    if (!inviteKey) throw new Error('That does not look like an invite link.')
     const { groupId } = await call('group:join', { inviteKey })
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
     call('member:publish', { groupId }).catch(() => {}) // retried on each refresh until writable
+  }
+
+  // Consume a pairing link: this phone adopts the identity shown on the other one
+  // and is seeded with its spaces. Lives here rather than in Settings because
+  // ONBOARDING needs it too - a replacement phone has no Settings to reach, which
+  // is exactly the gap that made linking undiscoverable (see Onboarding).
+  //
+  // The spaces arrive through the group plugin's seedGroups, inside the WORKLET.
+  // Nothing tells the UI about them, so without the reload the pairing looks like
+  // it did nothing until the next launch - measured on hardware 2026-07-28, six
+  // spaces joined and none on screen. Same shape as the restored-templates gap.
+  async function linkThisDevice (url) {
+    const problem = pairLinkProblem(url)
+    if (problem) throw new Error(problem)
+    await call('device:consumePairLink', { url })
+    const sp = await loadSpaces()
+    setSheet(null)
+    // Navigate ONLY from onboarding, where there is nowhere to be. A phone that
+    // just linked has whatever the other one had, so landing in the first space
+    // is the proof it worked - dropping the user on "no spaces yet" reads as a
+    // failed pairing. From Settings the user is already somewhere they chose to
+    // be, and yanking them into a space would be the app losing their place.
+    const first = sp && sp[0]
+    if (first && phase === 'onboarding') { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home') }
+    setBanner(first
+      ? 'Linked. This phone now shares your spaces.'
+      : 'Linked. No spaces on the other phone yet, so there is nothing to show.')
   }
   // Export reads only, so it works on a space this device cannot write to - which
   // is exactly the space someone most needs to get their lists out of.
@@ -1720,7 +1782,7 @@ export default function App () {
       // again is not a backup.
       setBanner('Saved ' + parts.join(', ') + (saved && saved.where ? ` to ${saved.where}` : ''))
     } catch (e) {
-      alert('Could not save a copy: ' + e.message)
+      alert(problem('Could not save a copy', e))
     }
   }
   // Always NEW spaces, never a merge (see backup:import). So the worst case of a
@@ -1729,7 +1791,7 @@ export default function App () {
     try {
       const picked = await call('shell:pickFile', {})
       if (!picked || picked.canceled) return
-      if (!String(picked.content || '').trim()) throw new Error('that file is empty')
+      if (!String(picked.content || '').trim()) throw new Error('That file is empty.')
       const { spaces, learnedAisles, counts } = await call('backup:import', { jsonString: picked.content })
       // The localStorage half, which only the UI can write. MERGE for the learned
       // aisles (an entry this device already has is a more recent correction than
@@ -1767,7 +1829,7 @@ export default function App () {
       const first = spaces && spaces[0]
       if (first) { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home'); setSheet(null) }
     } catch (e) {
-      alert('Could not open that file: ' + e.message)
+      alert(problem('Could not open that file', e))
     }
   }
   function switchSpace (groupId) {
@@ -1776,7 +1838,7 @@ export default function App () {
   async function deleteSpace (targetId) {
     const id = targetId || activeSpaceId; if (!id) return
     setSheet(null); setDeleteTarget(null)
-    try { await call('space:delete', { groupId: id }) } catch (e) { alert('Could not delete space: ' + e.message); return }
+    try { await call('space:delete', { groupId: id }) } catch (e) { alert(problem('Could not delete space', e)); return }
     const sp = await loadSpaces()
     // Only move off if we deleted the space we were viewing.
     if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
@@ -1798,7 +1860,7 @@ export default function App () {
     })
     if (!ok) return
     let res
-    try { res = await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not remove: ' + e.message); return }
+    try { res = await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert(problem('Could not remove', e)); return }
     await loadMembers(gid, selfPubkey)
     // Be honest when we could only HIDE them. Cutting a device off needs its writer
     // binding, which only exists if it has been online since Stronger removal was
@@ -1822,12 +1884,12 @@ export default function App () {
       confirmLabel: 'Turn on',
     })
     if (!ok) return
-    try { await call('space:armRevocation', { groupId: gid }) } catch (e) { alert(e.message); return }
+    try { await call('space:armRevocation', { groupId: gid }) } catch (e) { alert(terminated(e.message)); return }
     await loadMembers(gid, selfPubkey)
     setBanner('Stronger removal is on.')
   }
   async function restoreMember (m) {
-    try { await call('member:restore', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not add back: ' + e.message); return }
+    try { await call('member:restore', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert(problem('Could not add back', e)); return }
     await loadMembers(gid, selfPubkey)
     setBanner(`${m.displayName || 'Member'} added back.`)
   }
@@ -1842,7 +1904,7 @@ export default function App () {
     })
     if (!ok) return
     setSheet(null)
-    try { await call('space:leave', { groupId: space.groupId }) } catch (e) { alert('Could not leave: ' + e.message); return }
+    try { await call('space:leave', { groupId: space.groupId }) } catch (e) { alert(problem('Could not leave', e)); return }
     const sp = await loadSpaces()
     if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
     if (sp.length === 0) setPhase('onboarding')
@@ -2033,13 +2095,15 @@ export default function App () {
     // offers the same two choices, so there is no dead end.
     return (
       <>
-        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} onRestore={importBackup} />
+        <Onboarding onStart={() => setSheet('start')} onJoin={() => setSheet('join')} onRestore={importBackup}
+          onLink={deviceLinkOn ? () => setSheet('link') : null} />
         <GuidedTour open={showTour} onDone={dismissTour}
           onCreate={() => { dismissTour(); setSheet('start') }}
           onJoin={() => { dismissTour(); setSheet('join') }}
           onRestore={() => { dismissTour(); importBackup() }} />
         <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
         <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
+        <LinkDeviceSheet open={sheet === 'link'} onClose={() => setSheet(null)} onLink={linkThisDevice} />
         {/* Restoring can start from here (and from the tour), and its notice goes
             through askConfirm - which is a no-op unless a ConfirmHost is mounted. */}
         <ConfirmHost />
@@ -2095,7 +2159,8 @@ export default function App () {
         </>
       ) : view === 'profile' ? (
         <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
-          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces} />
+          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces}
+          onLinkDevice={linkThisDevice} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2165,7 +2230,7 @@ export default function App () {
           const prevRemind = typeof sheet.item.remindAt === 'number' ? sheet.item.remindAt : null
           if ((patch.remindAt ?? null) !== prevRemind) {
             try { await call('item:setReminder', { groupId: gid, listId: openListId, itemId: sheet.item.id, remindAt: patch.remindAt ?? null }) }
-            catch (e) { alert('Could not set that reminder: ' + (e?.message || e)) }
+            catch (e) { alert(problem('Could not set that reminder', e)) }
           }
           if ((patch.repeat || '') !== (sheet.item.repeat || '')) {
             await call('item:setRepeat', { groupId: gid, listId: openListId, itemId: sheet.item.id, repeat: patch.repeat || null }).catch(() => {})
@@ -2235,6 +2300,88 @@ function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate
   )
 }
 
+// The linked-device roster. `device:setNickname` and `device:remove` had been
+// implemented since slice 2 with NO way to reach them - which is how the rename
+// method came to pass its arguments in the wrong order and nobody noticed
+// (see listMethods.js). Reaching them is most of what this component is for.
+//
+// THE TWO ACTIONS ARE NOT SYMMETRIC, and the UI reflects that rather than hiding
+// it behind a uniform row:
+//
+//   RENAME works on THIS phone only. deviceMeta is a self-attested row - the
+//   merge rule drops a put whose author is not the device it describes - so
+//   "rename my partner's phone" is not a thing that can work. Offering it would
+//   be a control that silently does nothing.
+//
+//   REMOVE works on OTHER phones only. The engine refuses to delete its own row
+//   (decideDeviceMetaDel returns self:true), so a Remove on this phone would be
+//   the same silent no-op in the other direction.
+//
+// So: the row for this phone is editable, the rows for other phones are
+// removable, and neither offers the control that would not work.
+function DeviceRosterSheet ({ open, onClose, devices, onRename, onRemove }) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const list = devices || []
+  const self = list.find((d) => d.self || d.isThisDevice) || null
+  const others = list.filter((d) => !(d.self || d.isThisDevice))
+
+  // Reset from the roster each time it opens, so a cancelled edit does not
+  // survive to look like a saved one.
+  useEffect(() => {
+    if (open) { setName(deviceLabel(self, '')); setBusy(false) }
+  }, [open, self])
+
+  const save = async () => {
+    const v = name.trim(); if (!v || v === deviceLabel(self, '')) return
+    setBusy(true)
+    try { await onRename(v) } catch (e) { alert(problem('Could not rename this phone', e)) }
+    setBusy(false)
+  }
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Your devices'>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>
+        Phones signed in as you. They share your spaces and can edit them.
+      </p>
+
+      <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>This phone</span>
+      <div style={{ display: 'flex', gap: sp.sm, alignItems: 'center', margin: `${sp.sm}px 0 ${sp.base}px` }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Field value={name} onChange={setName} placeholder='Name this phone' />
+        </div>
+        <Button
+          variant='secondary'
+          disabled={busy || !name.trim() || name.trim() === deviceLabel(self, '')}
+          style={{ width: 'auto', flexShrink: 0, opacity: busy || !name.trim() || name.trim() === deviceLabel(self, '') ? 0.5 : 1 }}
+          onClick={save}
+        >{busy ? 'Saving…' : 'Save'}</Button>
+      </div>
+
+      {others.length ? (
+        <>
+          <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Other phones</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: sp.sm }}>
+            {others.map((d) => (
+              <div key={d.writerKey} style={{ display: 'flex', alignItems: 'center' }}>
+                <span style={{ flex: 1, minWidth: 0, padding: `${sp.md}px ${sp.sm}px`, color: c.text.primary, fontSize: 16, fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {deviceLabel(d)}
+                </span>
+                <button onClick={() => onRemove(d)} aria-label={`Remove ${deviceLabel(d)}`}
+                  style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <TrashIcon size={17} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>No other phones yet. Pair one from the previous screen.</span>
+      )}
+    </BottomSheet>
+  )
+}
+
 function JoinSheet ({ open, onClose, onJoin }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2243,7 +2390,7 @@ function JoinSheet ({ open, onClose, onJoin }) {
   const join = async (value) => {
     const v = (value ?? code).trim(); if (!v) return
     setBusy(true)
-    try { await onJoin(v) } catch (e) { setBusy(false); alert('Could not join: ' + e.message) }
+    try { await onJoin(v) } catch (e) { setBusy(false); alert(problem('Could not join', e)) }
   }
   return (
     <>
@@ -2301,6 +2448,62 @@ function PairLinkSheet ({ open, url, onClose }) {
       </div>
       <Button variant='secondary' onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>
     </BottomSheet>
+  )
+}
+
+// The RECEIVING half of pairing, on the phone being added. Replaces a raw
+// window.prompt() that rendered as a system dialog titled "JavaScript" asking the
+// user to paste a link which hands over their identity - which is what a phishing
+// screen looks like. Found by driving the flow on hardware, 2026-07-29.
+//
+// Shaped like JoinSheet (paste field, then scan) because the mechanics are the
+// same and a second pattern for "put a link in" would be gratuitous. Worded like
+// PairLinkSheet, because the stakes are not the same: joining a space gets you
+// into ONE space that someone chose to share, and this makes this phone BECOME
+// you, everywhere. The warning is the first thing in the sheet for that reason.
+//
+// Scan is offered before paste in the copy but rendered after the field, matching
+// JoinSheet's order so the two screens do not feel arbitrarily different.
+function LinkDeviceSheet ({ open, onClose, onLink }) {
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [error, setError] = useState(null)
+  useEffect(() => { if (open) { setUrl(''); setBusy(false); setScanning(false); setError(null) } }, [open])
+
+  const link = async (value) => {
+    const v = (value ?? url).trim(); if (!v) return
+    setBusy(true); setError(null)
+    // Errors render INSIDE the sheet, not through alert(). An Android WebView
+    // titles alert() "JavaScript" exactly as it does prompt(), so routing the
+    // failure through it would reintroduce the thing this screen exists to fix -
+    // caught on hardware 2026-07-29 after the prompt was already gone.
+    // Inline is also simply better here: the message names what to do next, and
+    // it belongs next to the field the user has to correct.
+    //
+    // onLink owns the wording: it is the only thing that knows whether this was
+    // the wrong kind of link, an expired one, or a pairing that never completed.
+    try { await onLink(v) } catch (e) { setBusy(false); setError(terminated(e.message || String(e))) }
+  }
+
+  return (
+    <>
+      <BottomSheet open={open} onClose={onClose} title='Link this phone'>
+        <p style={{ color: c.warn, fontSize: 14, fontWeight: 400, textAlign: 'center', margin: `0 0 ${sp.sm}px` }}>
+          Only use a link from your own phone.
+        </p>
+        <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>
+          This phone will become you - it gets your spaces and can edit them. Open Settings on the phone you already use, tap Pair, and scan or paste what it shows.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
+          <Field value={url} onChange={(v) => { setUrl(v); if (error) setError(null) }} placeholder='Paste the pairing link' autoFocus />
+          {error ? <span role='alert' style={{ color: c.warn, fontSize: 13, fontWeight: 300, lineHeight: 1.45 }}>{error}</span> : null}
+          <Button disabled={busy || !url.trim()} style={{ opacity: busy || !url.trim() ? 0.5 : 1 }} onClick={() => link()}>{busy ? 'Linking…' : 'Link this phone'}</Button>
+          <Button variant='secondary' onClick={() => setScanning(true)}>Scan QR code</Button>
+        </div>
+      </BottomSheet>
+      <ScannerView open={scanning} onClose={() => setScanning(false)} onDecode={(txt) => { setScanning(false); link(txt) }} />
+    </>
   )
 }
 
@@ -2772,12 +2975,14 @@ function Group ({ title, children }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
   // build shows nothing new.
   const [dl, setDl] = useState(null)          // { enabled, devices, ... } | null
   const [pairUrl, setPairUrl] = useState(null)
+  const [linking, setLinking] = useState(false)
+  const [roster, setRoster] = useState(false)
   const loadDevices = useCallback(async () => {
     const st = await call('device:status', {}).catch(() => null)
     setDl(st)
@@ -2787,22 +2992,45 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     try {
       const { url } = await call('device:startPairing', {})
       setPairUrl(url)
-    } catch (e) { alert('Could not start pairing: ' + e.message) }
+    } catch (e) { alert(problem('Could not start pairing', e)) }
   }
-  async function linkThisDevice () {
-    const url = prompt('Paste the link shown on your other phone')
-    if (!url) return
-    try {
-      await call('device:consumePairLink', { url })
-      await loadDevices()
-      // The spaces arrive through the group plugin's seedGroups, in the WORKLET.
-      // Nothing tells the space list about them, so without this the pairing looks
-      // like it did nothing until the next launch - measured on hardware
-      // 2026-07-28: six spaces joined and none of them on screen. Same shape as
-      // the restored-templates gap in the backup work.
-      onSpacesChanged?.()
-      alert('Linked. This phone now shares your identity and spaces.')
-    } catch (e) { alert('Could not link: ' + e.message) }
+  // The link itself is handled at the app level (onLinkDevice), because
+  // onboarding needs the same path and only the app knows where to land the user
+  // afterwards. All this adds is refreshing the roster on THIS screen, which is
+  // the only thing Settings owns that the pairing changes.
+  //
+  // Throws on purpose: LinkDeviceSheet catches and shows the message, so the
+  // error surfaces on the sheet the user is looking at rather than behind it.
+  async function linkThisDevice (url) {
+    await onLinkDevice(url)
+    await loadDevices()
+    setLinking(false)
+  }
+
+  // Renames THIS phone. No writerKey: deviceMeta is self-attested, so a device
+  // can only name itself - see device:setNickname in listMethods.js.
+  async function renameThisDevice (nickname) {
+    await call('device:setNickname', { nickname })
+    await loadDevices()
+  }
+
+  // Takes another phone off the roster. The confirm has to be honest about how
+  // little this does, because "Remove" on a device list reads as "cut it off"
+  // and it is not that: there is no writer revocation in device-link, the other
+  // phone keeps the recovery phrase, keeps the spaces, and can still edit them.
+  // Saying otherwise would be reassuring someone about a lost phone that is in
+  // fact still fully in their account.
+  async function removeDevice (d) {
+    const label = deviceLabel(d)
+    const ok = await askConfirm({
+      title: `Remove ${label}?`,
+      message: `It stops showing in this list. It does NOT lock that phone out - it still has your recovery phrase and your spaces, and can still edit them. To take it off for real you would need to move your spaces to a new one.`,
+      confirmLabel: 'Remove',
+      danger: true,
+    })
+    if (!ok) return
+    try { await call('device:remove', { writerKey: d.writerKey }) } catch (e) { alert(problem('Could not remove that phone', e)); return }
+    await loadDevices()
   }
   const fileRef = useRef(null)
   const [name, setName] = useState('')
@@ -2890,7 +3118,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   async function commitAvatar (value) {
     setBusy(true)
     try { await call('profile:set', { displayName: profile?.displayName || name.trim() || 'Me', avatar: value }); onSaved?.() }
-    catch (e) { alert('Could not save photo: ' + e.message) } finally { setBusy(false) }
+    catch (e) { alert(problem('Could not save photo', e)) } finally { setBusy(false) }
   }
   async function onPickFile (e) {
     const file = e.target.files?.[0]; e.target.value = ''
@@ -2907,13 +3135,13 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       } else {
         await commitAvatar(await compressToAvatar(await readFileDataUrl(file)))
       }
-    } catch { alert('Could not read that image') }
+    } catch { alert('Could not read that image.') }
   }
   async function saveName () {
     const trimmed = name.trim(); if (!trimmed) return
     setBusy(true)
     try { await call('profile:set', { displayName: trimmed }); onSaved?.() }
-    catch (e) { alert('Could not save name: ' + e.message) } finally { setBusy(false) }
+    catch (e) { alert(problem('Could not save name', e)) } finally { setBusy(false) }
   }
   const hasAvatar = !!avatarSrc(profile?.avatar)
   const nameDirty = name.trim() && name.trim() !== profile?.displayName
@@ -2964,16 +3192,24 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           <Setting onAbout={setInfo} first title='Your devices' about={ABOUT['Your devices']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{
               (dl.devices || []).length
-                ? (dl.devices || []).map((d) => (d.nickname || d.platform || 'Unnamed device') + (d.isThisDevice ? ' (this phone)' : '')).join(', ')
+                ? (dl.devices || []).map((d) => deviceLabel(d) + ((d.self || d.isThisDevice) ? ' (this phone)' : '')).join(', ')
                 : 'Only this phone so far.'
             }</span>}
-            control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
+            control={<div style={{ display: 'flex', gap: sp.sm, flexShrink: 0 }}>
+              {(dl.devices || []).length
+                ? <button onClick={() => setRoster(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Manage</button>
+                : null}
+              <button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>
+            </div>} />
           <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
-            control={<button onClick={linkThisDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
+            control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
         </Group>
       ) : null}
       <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); call('device:cancelPairing', {}).catch(() => {}); loadDevices() }} />
+      <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
+      <DeviceRosterSheet open={roster} onClose={() => setRoster(false)} devices={dl?.devices}
+        onRename={renameThisDevice} onRemove={removeDevice} />
       <Group title='Notifications'>
         <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
         <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
