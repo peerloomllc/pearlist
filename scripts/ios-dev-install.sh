@@ -177,7 +177,8 @@ ssh "$MAC_MINI" "bash -lc '
     -archivePath $ARCHIVE_PATH \
     DEVELOPMENT_TEAM=$TEAM_ID \
     CODE_SIGN_STYLE=Automatic \
-    archive 2>&1 | grep -E \"^error:|ARCHIVE FAILED|ARCHIVE SUCCEEDED\" || true
+    -allowProvisioningUpdates \
+    archive 2>&1 | grep -E \"^error:|error: |ARCHIVE FAILED|ARCHIVE SUCCEEDED\" || true
 '"
 
 step "export development IPA"
