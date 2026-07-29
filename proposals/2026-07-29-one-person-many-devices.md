@@ -64,56 +64,80 @@ the flag reverts, the extra member rows in other people's spaces do not.
 Worth keeping on the table only if linking is scoped to people who do not use
 assignment - which is not a thing the app can know.
 
-### B. Correlate the rows - a person id on the member row
+### B. Attest the device - publish a proof on the member row
 
-Add an optional `personId` to the `member:` row: a value both of a person's
-devices can derive, so the space can tell that two device keys are one person
-without changing what signs anything.
+**This section was rewritten after answering open questions 3 and 4 below. The
+first draft proposed a self-attested `personId` hash. That is strictly worse than
+what the stack already provides and should not be built.**
 
-- **Derivation.** `deriveProfileId(identityPublicKey)` already exists in
-  device-link (`src/identity.js`) and is exactly this: a stable 16-byte hash of the
-  mnemonic-derived identity key. A device that has linked can publish it; a device
-  that has not simply omits it.
-- **Display.** Members with the same `personId` collapse to one row.
-- **Routing.** `assignee` keeps meaning a device key on the wire, but the notify
-  rule matches on *my person* rather than *my device*: fire if
-  `assignee === selfKey` OR the assignee's member row shares my `personId`.
-- **Compat.** Additive optional field, same argument as `caps`, `kind` and
-  `remindAt`: `rowApplyDecision` validates only pubkey/updatedAt/sig/namespace and
-  `applyListOp` stores rows verbatim, so an old peer keeps the field on a
+`keet-identity-key` - already a device-link dependency, already in the worklet
+bundle - exists for exactly this problem. The identity key derived from the
+mnemonic **attests** each device's own key, producing a proof any peer can verify:
+
+```js
+const proof0 = await id.bootstrap(deviceA.publicKey)                    // first phone
+const proof1 = await IdentityKey.attestDevice(deviceB.publicKey, deviceA, proof0)
+IdentityKey.verify(proof1, null)  // -> { identityPublicKey, devicePublicKey }
+```
+
+So the member row carries `identityProof` (bytes), not a hash anyone can claim.
+
+- **Correlation.** Two member rows whose proofs verify to the same
+  `identityPublicKey` are one person. Verified, not asserted.
+- **Display.** Those rows collapse to one.
+- **Routing.** `assignee` keeps meaning a device key on the wire; the notify rule
+  matches if `assignee === selfKey` OR the assignee's row proves the same identity
+  root as mine.
+- **Compat.** Additive optional field - same argument as `caps`, `kind` and
+  `remindAt`. `rowApplyDecision` validates only pubkey/updatedAt/sig/namespace and
+  `applyListOp` stores rows verbatim, so an old peer preserves the field on a
   read-modify-write and never forks. An old peer shows two rows and routes to one
-  device - i.e. exactly today's behaviour, which is the correct degradation.
+  device: exactly today's behaviour, which is the correct degradation.
+- **Cost.** Measured: 139 bytes for a bootstrapped device, 235 for an attested
+  second one. Roughly 190-315 chars base64 on a row that today holds a display
+  name and an avatar reference. Not free, not a problem.
 
-**What it does not fix.** A reinstall is still a new person: the new install has a
-new per-device key, so it publishes a new member row. `personId` makes it
-*recognisable* as the same person, which is enough for display and routing but
-does not restore ownership or writer status. It is a correlation, not an identity.
+**Forgery fails, measured.** Attesting an attacker's own key against someone
+else's proof, signed with the attacker's own keypair, does not verify. That closes
+the impersonation hole the self-attested version would have opened - which is why
+that version is withdrawn rather than kept as a cheaper alternative.
 
-Honest risk: `personId` is self-attested, like `displayName`. A device can claim
-someone else's. Today that buys an attacker a merged row and assignment
-notifications inside a space they are *already a member of* - so it is a nuisance,
-not an escalation - but it is a new claim on a signed row and should be reasoned
-about rather than waved past.
+**What it still does not fix.** A reinstall publishes a new member row with a new
+device key. The proof makes it *provably the same person*, which is enough for
+display and routing - but restoring ownership additionally requires `space.owner`
+checks to accept an identity root rather than a device key. That is a separate,
+smaller change this proposal does not make, and it is now possible without
+touching key derivation at all.
 
-### C. Mnemonic-root - one identity, derived from the phrase
+### C. Mnemonic-root - derive the signing key from the phrase
 
-Slice 4 of the device-linking proposal: derive core's per-device signing key from
-the device-link mnemonic, so both phones sign as the *same* member. Two phones
-become one row because they genuinely are one writer. A reinstall holding the
-phrase is the same person, which also resolves the ownership-loss case that
-2026-07-28 closed as won't-build.
+Slice 4 of the device-linking proposal. **The framing in that proposal, and in the
+first draft of this one, was wrong**, and open question 3 is what exposed it.
 
-This is the correct model and the expensive one. From the existing proposal:
+The assumed mechanism was "both phones sign as the same member", i.e. share one
+writer key. That is not viable and never was: an Autobase writer is a Hypercore,
+Hypercore is a single-writer append-only log, and it carries an explicit `fork`
+counter with detection logic (`hypercore/lib/core.js` - "both proofs are valid,
+now check if they forked"). Two devices appending to one core at the same index is
+precisely the forked condition. Autobase gives each writer its own core for this
+reason.
+
+So option C, in the form it was written, is **not expensive - it is unavailable**.
+
+What remains of the idea is per-device keys *derived from* the mnemonic rather
+than generated randomly. That gets a reinstall its old key back, which is real -
+but it does NOT collapse two phones into one member, because two devices still
+need two distinct keys. It would therefore still need option B on top to solve the
+problem this proposal is about, while additionally carrying the migration the
+device-linking proposal warned about:
 
 > Every space in the field has member rows and an owner keyed to the current
 > per-device keys. Changing how that key is derived either needs those identities
-> carried across (the old key keeps working, the mnemonic-derived one is added) or
-> it orphans people from their own spaces.
+> carried across [...] or it orphans people from their own spaces.
 
-It also breaks a property the current design relies on: two phones sharing one
-writer key means two devices appending to the same Autobase writer, which is not
-something the current engine does. That needs answering before this is costed, and
-it may be the thing that decides it.
+Recommend dropping C from this decision entirely and reopening it later, on its
+own terms, as "should a reinstall recover its old device key" - which is a
+different question from "is this the same person".
 
 ## Scope
 
@@ -121,29 +145,35 @@ it may be the thing that decides it.
 changes what `assignee` *stores* on the wire. Both options deliberately keep
 `assignee` a device key so old peers keep working.
 
-**Recommendation: B now, C as the goal, and do not flip the flag until B ships.**
+**Recommendation: build B, drop C from this decision, and do not flip the flag
+until B ships.**
 
-B is additive, degrades to today's behaviour on old peers, reuses a derivation
-that already exists, and fixes the failure that actually harms people. C is where
-this should end up, but it is a migration with an unanswered engine question, and
-holding the whole feature hostage to it means linking ships never. Doing B first
-does not make C harder: `personId` is derived from the same identity key that C
-would root the signing key in, so the correlation stays true afterwards and the
-member rows it produced remain valid.
+That is a stronger recommendation than the first draft made, because answering the
+open questions removed the tradeoff rather than resolving it. B is no longer "the
+cheap option with a self-attestation risk" - it is verified by the identity key,
+it uses a library already in the bundle, it is additive, it degrades on old peers
+to exactly today's behaviour, and it fixes the routing failure that actually harms
+people. C is not the expensive-but-correct alternative it was described as; in the
+form written it cannot be built at all.
 
 ## Compat
 
 - **B:** additive optional field. Old peers store it verbatim, show two rows and
-  route to one device - today's behaviour. No migration, no fork. New peers with
-  no linked device publish no `personId` and are unaffected.
-- **C:** not additive. Needs identities carried across, and its own old-peer fork
-  test (a device on the previous build must not diverge from one on the new).
+  route to one device - today's behaviour. No migration, no fork. A device that
+  has never linked publishes no proof and is unaffected.
+- **C:** withdrawn. If the residual idea (mnemonic-derived per-device keys) is
+  ever picked up it is not additive and needs identities carried across plus its
+  own old-peer fork test.
 
 ## Verify
 
 - `npm run verify` green.
-- Unit: two member rows sharing a `personId` collapse to one; rows without one are
-  never merged (an absent `personId` must not match another absent one).
+- Unit: two member rows whose proofs verify to the same identity root collapse to
+  one; rows with no proof are never merged (an absent proof must not match another
+  absent one, or every unlinked member becomes the same person).
+- Unit: a proof that does not verify is IGNORED, not trusted and not fatal - a
+  malformed or forged row must leave the member visible as their own device rather
+  than merging them into someone else or hiding them.
 - Unit: the notify rule fires for an assignment to *either* of a person's devices,
   and does not fire for a different person in the same space.
 - **On hardware, three devices, and this is the point of the change:** assign a
@@ -164,17 +194,41 @@ goes first.
 
 ## Open questions
 
-1. **Does `personId` belong on the member row or the item?** On the member row it
-   is published once and every reader correlates. On the item it would have to be
-   written at assign time, which bakes today's answer into rows that outlive it.
-   The proposal assumes the member row; worth a second opinion.
-2. **What does the members list show for a collapsed person?** One row with both
-   devices' avatars, or one row that has simply stopped mentioning devices? The
-   second is more honest to what a person is, but loses the ability to see that a
-   partner has an old phone still attached.
-3. **Can two devices share one Autobase writer at all (option C)?** This is the
-   question that decides whether C is expensive or impossible, and nobody has
-   answered it. It should be answered before C is scheduled, not during.
-4. **Does self-attested `personId` need hardening?** See the risk in B. A signed
-   claim from the linked device (it can prove it holds the identity key) would be
-   stronger than an asserted hash, at the cost of a real protocol addition.
+**1. ANSWERED - the proof goes on the MEMBER row, not the item.** On the member
+row it is published once and every reader correlates for itself. On the item it
+would have to be written at assign time, freezing today's answer into rows that
+outlive it - and an assignment made before a second phone was linked could never
+learn about it. Nothing argues the other way once stated, so this is settled
+rather than open.
+
+**2. STILL OPEN, and it is yours - what does a collapsed person look like?**
+Two defensible answers and they say different things about the product:
+   - **One row, no mention of devices.** Most honest to what a person is. You lose
+     the ability to notice that a partner still has an old phone attached.
+   - **One row that can be expanded to show devices.** Keeps that visibility at
+     the cost of putting plumbing in a household app's members list.
+   I lean to the first, with the device list staying where it already is, in your
+   own Settings - your devices are your business, not the household's. But this is
+   a product call, not a technical one.
+
+**3. ANSWERED - no, and it is the wrong question.** Two devices cannot share one
+Autobase writer: a writer is a Hypercore, Hypercore is single-writer append-only
+and carries an explicit `fork` counter with detection (`hypercore/lib/core.js`),
+so two devices appending to one core at the same index is the forked condition by
+definition. Autobase gives every writer its own core for exactly this reason.
+**But nothing needs to share a writer.** `keet-identity-key` links separate device
+keys to one identity root by attestation - which is what option B now uses. This
+answer is what rewrote both B and C above.
+
+**4. ANSWERED - self-attestation is not needed, so the risk goes away.** The
+identity key signs an attestation of each device key and peers verify the chain.
+Measured: two devices with separate keypairs both verify to the same
+`identityPublicKey`, and a forged proof (attacker's key, attacker's signature,
+against someone else's proof) does **not** verify. The self-attested `personId`
+from the first draft is withdrawn rather than kept as a cheaper option, because
+there is no longer anything cheaper about it.
+
+## What is left for Tim
+
+Only question 2, plus approving the direction. Everything else that was open is
+now closed with evidence rather than judgement.
