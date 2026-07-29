@@ -9,6 +9,7 @@ import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { pairLinkProblem } from '../linkShape.js'
+import { problem, terminated } from '../userText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
@@ -1098,13 +1099,13 @@ function NameSetup ({ profile, onDone }) {
       } else {
         setAvatar(await compressToAvatar(await readFileDataUrl(file)))
       }
-    } catch { alert('Could not read that image') }
+    } catch { alert('Could not read that image.') }
   }
   async function cont () {
     const n = name.trim(); if (!n) return
     setBusy(true)
     try { await call('profile:set', { displayName: n, avatar: avatar || undefined }); onDone() }
-    catch (e) { alert('Could not save: ' + e.message); setBusy(false) }
+    catch (e) { alert(problem('Could not save', e)); setBusy(false) }
   }
   const hasAvatar = !!avatarSrc(avatar)
   return (
@@ -1531,7 +1532,7 @@ export default function App () {
   // Parse the blob and join. Registered once; joinSpace closes over stable setters.
   useEffect(() => {
     const off = on('deeplink:invite', ({ url }) => {
-      joinSpace(url).catch((e) => setBanner('Could not open that invite: ' + (e?.message || e)))
+      joinSpace(url).catch((e) => setBanner(problem('Could not open that invite', e)))
     })
     return off
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1710,7 +1711,7 @@ export default function App () {
   }
   async function joinSpace (inviteInput) {
     const inviteKey = parseInvite(inviteInput)
-    if (!inviteKey) throw new Error('that does not look like an invite link')
+    if (!inviteKey) throw new Error('That does not look like an invite link.')
     const { groupId } = await call('group:join', { inviteKey })
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
@@ -1772,7 +1773,7 @@ export default function App () {
       // again is not a backup.
       setBanner('Saved ' + parts.join(', ') + (saved && saved.where ? ` to ${saved.where}` : ''))
     } catch (e) {
-      alert('Could not save a copy: ' + e.message)
+      alert(problem('Could not save a copy', e))
     }
   }
   // Always NEW spaces, never a merge (see backup:import). So the worst case of a
@@ -1781,7 +1782,7 @@ export default function App () {
     try {
       const picked = await call('shell:pickFile', {})
       if (!picked || picked.canceled) return
-      if (!String(picked.content || '').trim()) throw new Error('that file is empty')
+      if (!String(picked.content || '').trim()) throw new Error('That file is empty.')
       const { spaces, learnedAisles, counts } = await call('backup:import', { jsonString: picked.content })
       // The localStorage half, which only the UI can write. MERGE for the learned
       // aisles (an entry this device already has is a more recent correction than
@@ -1819,7 +1820,7 @@ export default function App () {
       const first = spaces && spaces[0]
       if (first) { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home'); setSheet(null) }
     } catch (e) {
-      alert('Could not open that file: ' + e.message)
+      alert(problem('Could not open that file', e))
     }
   }
   function switchSpace (groupId) {
@@ -1828,7 +1829,7 @@ export default function App () {
   async function deleteSpace (targetId) {
     const id = targetId || activeSpaceId; if (!id) return
     setSheet(null); setDeleteTarget(null)
-    try { await call('space:delete', { groupId: id }) } catch (e) { alert('Could not delete space: ' + e.message); return }
+    try { await call('space:delete', { groupId: id }) } catch (e) { alert(problem('Could not delete space', e)); return }
     const sp = await loadSpaces()
     // Only move off if we deleted the space we were viewing.
     if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
@@ -1850,7 +1851,7 @@ export default function App () {
     })
     if (!ok) return
     let res
-    try { res = await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not remove: ' + e.message); return }
+    try { res = await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert(problem('Could not remove', e)); return }
     await loadMembers(gid, selfPubkey)
     // Be honest when we could only HIDE them. Cutting a device off needs its writer
     // binding, which only exists if it has been online since Stronger removal was
@@ -1874,12 +1875,12 @@ export default function App () {
       confirmLabel: 'Turn on',
     })
     if (!ok) return
-    try { await call('space:armRevocation', { groupId: gid }) } catch (e) { alert(e.message); return }
+    try { await call('space:armRevocation', { groupId: gid }) } catch (e) { alert(terminated(e.message)); return }
     await loadMembers(gid, selfPubkey)
     setBanner('Stronger removal is on.')
   }
   async function restoreMember (m) {
-    try { await call('member:restore', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert('Could not add back: ' + e.message); return }
+    try { await call('member:restore', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert(problem('Could not add back', e)); return }
     await loadMembers(gid, selfPubkey)
     setBanner(`${m.displayName || 'Member'} added back.`)
   }
@@ -1894,7 +1895,7 @@ export default function App () {
     })
     if (!ok) return
     setSheet(null)
-    try { await call('space:leave', { groupId: space.groupId }) } catch (e) { alert('Could not leave: ' + e.message); return }
+    try { await call('space:leave', { groupId: space.groupId }) } catch (e) { alert(problem('Could not leave', e)); return }
     const sp = await loadSpaces()
     if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
     if (sp.length === 0) setPhase('onboarding')
@@ -2220,7 +2221,7 @@ export default function App () {
           const prevRemind = typeof sheet.item.remindAt === 'number' ? sheet.item.remindAt : null
           if ((patch.remindAt ?? null) !== prevRemind) {
             try { await call('item:setReminder', { groupId: gid, listId: openListId, itemId: sheet.item.id, remindAt: patch.remindAt ?? null }) }
-            catch (e) { alert('Could not set that reminder: ' + (e?.message || e)) }
+            catch (e) { alert(problem('Could not set that reminder', e)) }
           }
           if ((patch.repeat || '') !== (sheet.item.repeat || '')) {
             await call('item:setRepeat', { groupId: gid, listId: openListId, itemId: sheet.item.id, repeat: patch.repeat || null }).catch(() => {})
@@ -2298,7 +2299,7 @@ function JoinSheet ({ open, onClose, onJoin }) {
   const join = async (value) => {
     const v = (value ?? code).trim(); if (!v) return
     setBusy(true)
-    try { await onJoin(v) } catch (e) { setBusy(false); alert('Could not join: ' + e.message) }
+    try { await onJoin(v) } catch (e) { setBusy(false); alert(problem('Could not join', e)) }
   }
   return (
     <>
@@ -2391,7 +2392,7 @@ function LinkDeviceSheet ({ open, onClose, onLink }) {
     //
     // onLink owns the wording: it is the only thing that knows whether this was
     // the wrong kind of link, an expired one, or a pairing that never completed.
-    try { await onLink(v) } catch (e) { setBusy(false); setError(e.message || String(e)) }
+    try { await onLink(v) } catch (e) { setBusy(false); setError(terminated(e.message || String(e))) }
   }
 
   return (
@@ -2899,7 +2900,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     try {
       const { url } = await call('device:startPairing', {})
       setPairUrl(url)
-    } catch (e) { alert('Could not start pairing: ' + e.message) }
+    } catch (e) { alert(problem('Could not start pairing', e)) }
   }
   // The link itself is handled at the app level (onLinkDevice), because
   // onboarding needs the same path and only the app knows where to land the user
@@ -2999,7 +3000,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   async function commitAvatar (value) {
     setBusy(true)
     try { await call('profile:set', { displayName: profile?.displayName || name.trim() || 'Me', avatar: value }); onSaved?.() }
-    catch (e) { alert('Could not save photo: ' + e.message) } finally { setBusy(false) }
+    catch (e) { alert(problem('Could not save photo', e)) } finally { setBusy(false) }
   }
   async function onPickFile (e) {
     const file = e.target.files?.[0]; e.target.value = ''
@@ -3016,13 +3017,13 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       } else {
         await commitAvatar(await compressToAvatar(await readFileDataUrl(file)))
       }
-    } catch { alert('Could not read that image') }
+    } catch { alert('Could not read that image.') }
   }
   async function saveName () {
     const trimmed = name.trim(); if (!trimmed) return
     setBusy(true)
     try { await call('profile:set', { displayName: trimmed }); onSaved?.() }
-    catch (e) { alert('Could not save name: ' + e.message) } finally { setBusy(false) }
+    catch (e) { alert(problem('Could not save name', e)) } finally { setBusy(false) }
   }
   const hasAvatar = !!avatarSrc(profile?.avatar)
   const nameDirty = name.trim() && name.trim() !== profile?.displayName

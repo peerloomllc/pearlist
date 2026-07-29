@@ -44,8 +44,8 @@ function isInviteLink (text) {
 // can open the link screen (onboarding and Settings).
 function pairLinkProblem (text) {
   if (isPairLink(text)) return null
-  if (isInviteLink(text)) return 'that is a space invite, not a pairing link - on your other phone open Settings and tap Pair'
-  return 'that does not look like a pairing link'
+  if (isInviteLink(text)) return 'That is a space invite, not a pairing link. On your other phone open Settings and tap Pair.'
+  return 'That does not look like a pairing link.'
 }
 
 module.exports = { isPairLink, isInviteLink, pairLinkProblem }
