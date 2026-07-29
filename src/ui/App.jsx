@@ -2095,7 +2095,7 @@ export default function App () {
         </>
       ) : view === 'profile' ? (
         <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
-          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} />
+          spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces} />
       ) : view === 'about' ? (
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
@@ -2772,7 +2772,7 @@ function Group ({ title, children }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
   // build shows nothing new.
@@ -2795,6 +2795,12 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     try {
       await call('device:consumePairLink', { url })
       await loadDevices()
+      // The spaces arrive through the group plugin's seedGroups, in the WORKLET.
+      // Nothing tells the space list about them, so without this the pairing looks
+      // like it did nothing until the next launch - measured on hardware
+      // 2026-07-28: six spaces joined and none of them on screen. Same shape as
+      // the restored-templates gap in the backup work.
+      onSpacesChanged?.()
       alert('Linked. This phone now shares your identity and spaces.')
     } catch (e) { alert('Could not link: ' + e.message) }
   }

@@ -15,7 +15,7 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
-const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink } = require('./deviceLink')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, _trace: _dlTrace } = require('./deviceLink')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -577,6 +577,7 @@ const methods = {
   'device:startPairing': async (_args, ctx) => {
     const dl = await getDeviceLink(ctx)
     if (!dl.isEnabled) await dl.enable()
+    _dlTrace('dl:startPairing:called')
     const invite = await dl.startPairing()
     // Build the link OURSELVES from the session snapshot rather than using
     // device-link's `invite.url`. Its default is `peerloom://pair?...`, which is
@@ -609,8 +610,17 @@ const methods = {
   'device:consumePairLink': async ({ url }, ctx) => {
     const dl = await getDeviceLink(ctx)
     const parsed = parsePairLink(String(url || ''))
+    _dlTrace('dl:consumePairLink:parsed', { ok: parsed.ok, error: parsed.error })
     if (!parsed.ok) throw new Error('that does not look like a PearList device link')
-    await dl.consumePairLink(parsed)
+    try {
+      await dl.consumePairLink(parsed)
+    } catch (e) {
+      // The failure mode that stalled 2026-07-28 was a consume that never
+      // resolved OR rejected quietly. Trace both outcomes.
+      _dlTrace('dl:consumePairLink:failed', { err: e?.message })
+      throw e
+    }
+    _dlTrace('dl:consumePairLink:ok')
     return { ok: true, identityPublicKey: dl.identityPublicKeyHex }
   },
 

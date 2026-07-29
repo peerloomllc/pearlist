@@ -30,6 +30,31 @@ const pairLinks = createPairLinks({ scheme: 'pear', host: 'pearlist-device' })
 function parsePairLink (url) { return pairLinks.parse(url) }
 function buildPairLink (parts) { return pairLinks.build(parts) }
 
+// Diagnostic trace, wired to the same `mark()` the group pair channel uses
+// (src/bare.js), so device-link's handshake shows up in logcat and in the
+// pullable pair-trace file next to `[pair worklet+Nms]` lines. Without this the
+// engine is silent: its events go to onEvent -> ctx.emit, i.e. shell events, and
+// a failed pairing leaves nothing to read. That is exactly what stalled the
+// 2026-07-28 hardware attempt - the handshake did not complete and there was no
+// way to see which leg.
+let _trace = () => {}
+function setTrace (fn) { if (typeof fn === 'function') _trace = fn }
+
+// REDACTED on purpose. A pair snapshot carries topicHex, handshakeHex and
+// identityHex - together they ARE the link, and the link hands over an identity.
+// This trace is console.warn'd and written to a file that gets pulled off the
+// device, so full values must never reach it. Short prefixes are enough to
+// correlate two devices' logs, which is the whole reason to log them.
+const short = (v) => (typeof v === 'string' && v.length > 12) ? v.slice(0, 8) + '…' : v
+function safeEventData (data) {
+  if (!data || typeof data !== 'object') return data
+  const out = {}
+  for (const [k, v] of Object.entries(data)) {
+    out[k] = /topic|handshake|identity|writerKey|pubkey|key/i.test(k) ? short(v) : v
+  }
+  return out
+}
+
 // OFF by default. Slice 1 ships dark: the engine is constructed and started only
 // when this is on, so an ordinary build behaves exactly as it did before. Flip it
 // to exercise the engine in a debug build; it does not become a user-facing
@@ -106,10 +131,13 @@ function makeGroupPlugin (ctx) {
           name: value.name || '',
         })
       }
+      _trace('dl:collectGroups', { spaces: out.length })
       return out
     },
 
     async seedGroups (groups) {
+      _trace('dl:seedGroups', { spaces: (groups || []).length })
+      let joined = 0
       for (const g of (groups || [])) {
         if (!g || !g.groupId || !g.groupKey) continue
         // Already in it (the common case for a re-pair): leave it alone. Joining
@@ -126,18 +154,22 @@ function makeGroupPlugin (ctx) {
               name: g.name,
             }),
           })
-        } catch {
+          joined++
+        } catch (e) {
           // One bad space must not abort the rest of the fan-out: a device that
           // joins four of five spaces is far better than one that joins none.
+          _trace('dl:seedGroups-failed', { gid: short(g.groupId), err: e?.message })
         }
       }
+      _trace('dl:seedGroups-done', { joined })
     },
 
     async grantGroupWriter (groupId, writerKey) {
       if (!groupId || !/^[0-9a-f]{64}$/i.test(String(writerKey || ''))) return
       // Exactly what the group pair channel appends when it admits a joiner; the
       // apply branch is shared, so nothing new has to understand this op.
-      await ctx.append(groupId, { type: 'addWriter', pubkey: String(writerKey) }).catch(() => {})
+      _trace('dl:grantGroupWriter', { gid: short(groupId), writer: short(String(writerKey)) })
+      await ctx.append(groupId, { type: 'addWriter', pubkey: String(writerKey) }).catch((e) => _trace('dl:grantGroupWriter-failed', { err: e?.message }))
     },
   }
 }
@@ -158,7 +190,10 @@ function getDeviceLink (ctx) {
       mirror: makeMirror(),
       groupPlugin: makeGroupPlugin(ctx),
       platform: '',
-      onEvent: (event, data) => { try { ctx.emit(event, data) } catch {} },
+      onEvent: (event, data) => {
+        _trace('dl:' + event, safeEventData(data))
+        try { ctx.emit(event, data) } catch {}
+      },
     })
     await dl.start()
     return dl
@@ -171,4 +206,4 @@ function _resetForTest () { _dlPromise = null }
 // drive it directly because its three legs are PearList's code, not the engine's.
 function _groupPluginForTest (ctx) { return makeGroupPlugin(ctx) }
 
-module.exports = { getDeviceLink, DEVICE_LINK_ENABLED, MNEMONIC_KEY, parsePairLink, buildPairLink, _resetForTest, _groupPluginForTest }
+module.exports = { getDeviceLink, DEVICE_LINK_ENABLED, MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }

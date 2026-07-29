@@ -710,6 +710,30 @@ test('the group plugin carries every space, and re-seeding is idempotent', async
   await engine.close()
 })
 
+test('the device-link trace REDACTS the pair secrets', () => {
+  // The trace is console.warn'd AND written to a file that gets pulled off the
+  // device. A pair snapshot carries topic + handshake + identity, and together
+  // those ARE the link - which hands over an identity. Logging them in full would
+  // turn a diagnostic into a credential leak.
+  const { _safeEventData } = require('../src/deviceLink')
+  const SECRET = 'deadbeef'.repeat(8) // 64 hex, like the real thing
+
+  const out = _safeEventData({
+    role: 'primary', topicHex: SECRET, handshakeHex: SECRET, identityHex: SECRET,
+    writerKey: SECRET, expiresAt: 123,
+  })
+
+  const dumped = JSON.stringify(out)
+  assert.doesNotMatch(dumped, new RegExp(SECRET), 'no secret survives in full')
+  for (const k of ['topicHex', 'handshakeHex', 'identityHex', 'writerKey']) {
+    assert.equal(out[k], 'deadbeef…', k + ' is a short prefix')
+  }
+  // Short prefixes are kept deliberately: they are what lets two devices' logs be
+  // correlated, which is the entire reason for tracing this at all.
+  assert.equal(out.role, 'primary', 'safe fields pass through untouched')
+  assert.equal(out.expiresAt, 123)
+})
+
 test('destroyGroup unmounts a group but leaves other groups intact', async () => {
   const { engine, call } = driver()
   await call('init', {})

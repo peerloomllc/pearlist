@@ -9,6 +9,7 @@ const Hyperswarm = require('hyperswarm')
 const { applyListOp } = require('./listWire')
 const { authorizeRevoke, admitWriter } = require('./revocation')
 const relay = require('./relay')
+const deviceLink = require('./deviceLink')
 const listMethods = require('./listMethods')
 
 // Pairing/writer-admission trace (diagnostic, 2026-07-01). The core emits marks
@@ -32,6 +33,10 @@ function mark (name, extra) {
   _traceLines.push(line)
   if (_engine) { try { _engine.emit('pair:trace', { lines: _traceLines.slice() }) } catch {} }
 }
+// device-link traces through the SAME channel as the group pair marks, so one
+// logcat filter shows both halves of a pairing. See src/deviceLink.js for what is
+// redacted before it gets here.
+deviceLink.setTrace(mark)
 mark('worklet:loaded')
 
 const engine = createGroupEngine({
