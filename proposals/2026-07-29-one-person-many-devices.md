@@ -1,8 +1,10 @@
 # 2026-07-29 - One person, many devices: what a member IS
 
-**Status:** DRAFT 2026-07-29, awaiting Tim. Follows PR #123 (the linking UI), which
-closed the last of the buildable gaps in
-proposals/2026-07-28-device-linking.md. Everything left is this.
+**Status:** READY 2026-07-29, awaiting approval. All open questions closed - three
+answered with evidence while drafting (which rewrote two of the three options),
+the fourth decided by Tim: **the members list shows one person, with no mention of
+devices.** Follows PR #123 (the linking UI), which closed the last of the
+buildable gaps in proposals/2026-07-28-device-linking.md. Everything left is this.
 
 **Goal**
 
@@ -201,15 +203,20 @@ outlive it - and an assignment made before a second phone was linked could never
 learn about it. Nothing argues the other way once stated, so this is settled
 rather than open.
 
-**2. STILL OPEN, and it is yours - what does a collapsed person look like?**
-Two defensible answers and they say different things about the product:
-   - **One row, no mention of devices.** Most honest to what a person is. You lose
-     the ability to notice that a partner still has an old phone attached.
-   - **One row that can be expanded to show devices.** Keeps that visibility at
-     the cost of putting plumbing in a household app's members list.
-   I lean to the first, with the device list staying where it already is, in your
-   own Settings - your devices are your business, not the household's. But this is
-   a product call, not a technical one.
+**2. ANSWERED by Tim 2026-07-29 - one person in the members list, no mention of
+devices.** The members list shows people. It does not show, hint at, or let you
+expand to see how many phones anyone is carrying.
+
+Consequences the implementation has to honour:
+   - No device count, no "2 devices" badge, no expandable row. If it would tell a
+     housemate something about your hardware, it does not belong here.
+   - The roster in your own Settings stays the only place devices are visible, and
+     it stays yours: it lists YOUR phones, never anyone else's.
+   - The avatar and display name come from ONE of the collapsed rows, so the merge
+     needs a deterministic pick - most recently updated row wins, so a rename on
+     your newer phone shows rather than whichever row happened to sort first.
+   - A member the app cannot prove is you stays a separate row. Collapsing on a
+     guess would be the one way this decision could mislead someone.
 
 **3. ANSWERED - no, and it is the wrong question.** Two devices cannot share one
 Autobase writer: a writer is a Hypercore, Hypercore is single-writer append-only
@@ -230,5 +237,5 @@ there is no longer anything cheaper about it.
 
 ## What is left for Tim
 
-Only question 2, plus approving the direction. Everything else that was open is
-now closed with evidence rather than judgement.
+Nothing but approval. All four questions are closed - three with evidence, the
+fourth by Tim's call on 2026-07-29.
