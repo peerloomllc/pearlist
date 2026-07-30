@@ -544,6 +544,17 @@ function viewFor (ctx, groupId) {
   return base
 }
 
+// This device's writer core key on a base, hex, or null if it has none yet.
+// The thing `_w` on our own member row is supposed to equal - see
+// space:revocationStatus. Never throws: a base without a local core is a
+// legitimate state during startup, and the callers all degrade to "cannot tell".
+function localWriterHex (base) {
+  try {
+    const k = base && base.local && base.local.key
+    return k ? b4a.toString(k, 'hex') : null
+  } catch { return null }
+}
+
 // Linearize before reading so a mutate sees the latest committed state (e.g.
 // an item:add that just replicated or was appended a moment ago).
 // Is this list a free-text note? Used to keep note-only behaviour out of the
@@ -810,7 +821,21 @@ const methods = {
 
     const me = pubkeyHex(ctx)
     const mine = rows.find((r) => r.pubkey === me)
-    const bound = !!(mine && typeof mine._w === 'string')
+    // BOUND MEANS "names the key we write with NOW", not merely "has a binding".
+    //
+    // It used to test `typeof mine._w === 'string'`, which was fine while a writer
+    // key could never change. It can now: re-pairing a removed phone rotates it
+    // (proposals/2026-07-30-repairing-a-removed-phone.md). A stale `_w` naming the
+    // OLD, already-revoked key would then sail through a presence check, the
+    // republish would never fire, and a later removal would revoke a dead key and
+    // report success - a removal silently degraded to hide-only, which is the exact
+    // failure this retry exists to prevent.
+    //
+    // Only answerable for OURSELVES: `base.local.key` is this device's writer core,
+    // and there is no equivalent for anyone else's row. `unbound` below therefore
+    // still uses presence for other members, which is the best available there.
+    const myWriter = localWriterHex(base)
+    const bound = !!(mine && typeof mine._w === 'string' && (!myWriter || mine._w === myWriter))
     if (armed && mine && !bound) publishMember(ctx, groupId).catch(() => {})
 
     return {
