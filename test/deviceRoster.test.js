@@ -90,6 +90,13 @@ test('the removal confirm claims exactly what removal now does, no more', () => 
   }
   // Reading survives in every branch that claims a cut-off, and it must say so.
   assert.match(body, /can still SEE what it already has/, 'the cut-off branches must still scope it to writes')
+
+  // PERMANENCE, in every branch. Removal cannot be undone - the revokedWriter
+  // record refuses that key forever - and the confirm said nothing about it until
+  // Tim tried to re-pair a removed iPhone and could not (2026-07-30).
+  assert.match(body, /cannot be undone/i, 'the confirm must say removal is permanent')
+  assert.match(body, /delete PearList on it/i, 'and name the only way back: a fresh install')
+  assert.match(body, /\$\{spaceLine\} \$\{forever\}/, 'permanence is appended to EVERY branch, not one of them')
 })
 
 test('listMethods describes device:remove as it now behaves', () => {
