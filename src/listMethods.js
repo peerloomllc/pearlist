@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
@@ -319,7 +319,7 @@ async function publishMember (ctx, onlyGroupId) {
   // honouring a SAME-IDENTITY revocation is a rule an old peer decides differently,
   // so the owner may only arm revokeV2 once everyone advertises revoke2. Advertising
   // it is free and additive; it does nothing until a space is armed.
-  const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP, REVOKE_SELF_CAP] }
+  const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP] }
   if (prof?.avatarBlob) { value.avatarBlob = prof.avatarBlob; value.avatarHash = prof.avatarHash; value.avatarType = prof.avatarType || 'image/png' }
   else if (prof?.avatar) value.avatar = prof.avatar // legacy inline (pre-blob profiles)
 
@@ -533,14 +533,28 @@ async function armRevocation (ctx, groupId) {
   for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) rows.push(value)
   const evicted = Object.keys(meta.evicted || {})
   const selfOk = allMembersSupportSelfRevoke(rows, evicted)
+  // promoteV1 lets the owner's OWN other phones sign the view, so the pair can cover
+  // for each other and either can be removed. Without it the space's creator is its
+  // only indexer and Autobase will never let it go - see
+  // proposals/2026-07-30-the-space-creator-cannot-be-removed.md.
+  const promoteOk = allMembersSupportPromote(rows, evicted)
 
-  // Already armed for v1: still worth a pass to add v2 if everyone has since updated.
+  // Already armed for v1: still worth a pass to add the later flags if everyone has
+  // since updated. Each is added independently - a space stuck on an old peer for
+  // one capability should still gain the others.
   if (meta.revokeV1 === true) {
-    if (meta.revokeV2 === true || !selfOk) {
-      return { ok: true, armed: true, already: true, selfRevoke: meta.revokeV2 === true }
+    const next = { ...meta }
+    let changed = false
+    if (meta.revokeV2 !== true && selfOk) { next.revokeV2 = true; changed = true }
+    if (meta.promoteV1 !== true && promoteOk) { next.promoteV1 = true; changed = true }
+    if (changed) await putRow(ctx, groupId, 'space', next)
+    return {
+      ok: true,
+      armed: true,
+      already: true,
+      selfRevoke: next.revokeV2 === true,
+      promote: next.promoteV1 === true,
     }
-    await putRow(ctx, groupId, 'space', { ...meta, revokeV2: true })
-    return { ok: true, armed: true, already: true, selfRevoke: true }
   }
 
   if (!allMembersSupportRevoke(rows, evicted)) {
@@ -552,8 +566,9 @@ async function armRevocation (ctx, groupId) {
   }
   const next = { ...meta, revokeV1: true }
   if (selfOk) next.revokeV2 = true
+  if (promoteOk) next.promoteV1 = true
   await putRow(ctx, groupId, 'space', next)
-  return { ok: true, armed: true, selfRevoke: !!selfOk }
+  return { ok: true, armed: true, selfRevoke: !!selfOk, promote: !!promoteOk }
 }
 
 function viewFor (ctx, groupId) {

@@ -45,6 +45,7 @@
 // Hiding is not revoking: an evicted device stays an admitted Autobase writer and
 // can still read the space. Real writer removal is a separate T3.
 
+const b4a = require('b4a')
 const { verifyValue } = require('@peerloom/core/records')
 
 const FUTURE_TS_TOLERANCE_MS = 5 * 60 * 1000
@@ -178,6 +179,27 @@ const REVOKE_CAP = 'revoke1'
 // would have been the silent-fork bug, not a shortcut.
 const REVOKE_SELF_CAP = 'revoke2'
 
+// PROMOTING YOUR OWN OTHER PHONE TO AN INDEXER. A THIRD capability, and it has to
+// be, for the same reason as the first two: a peer that does not do it computes a
+// different INDEXER SET from the same log, and the indexer set decides who signs
+// the view. That is consensus divergence, i.e. a fork.
+//
+// WHY IT EXISTS. Autobase refuses to remove the last indexer, and `admitWriter`
+// admits every post-arming writer as a non-indexer - deliberately, so revoking a
+// housemate never touches the indexer set. The consequence nobody wrote down: the
+// device that CREATED a space is its only indexer, forever, so it can never be cut
+// off. That is the worst phone for it to be, because the phone that made the
+// household space is usually the person's main one - the one whose loss sends
+// someone looking for "remove this device". Found on hardware 2026-07-30: a removal
+// reported success while the removed phone kept editing.
+// See proposals/2026-07-30-the-space-creator-cannot-be-removed.md.
+//
+// DELIBERATELY NARROW: only the OWNER'S OWN devices are promoted, proven by the
+// identity attestation. A housemate stays a non-indexer, which keeps the property
+// the non-indexer rule was chosen for. So a person's phones can always cover for
+// each other, and a housemate's revocation still never disturbs signing.
+const PROMOTE_CAP = 'promote1'
+
 function hasCap (row, cap) { return !!(row && Array.isArray(row.caps) && row.caps.includes(cap)) }
 
 // Do all members (bar the eviction target) advertise `cap`?
@@ -197,6 +219,44 @@ function allMembersSupportRevoke (memberRows, except = []) {
 }
 function allMembersSupportSelfRevoke (memberRows, except = []) {
   return allMembersSupportCap(memberRows, REVOKE_SELF_CAP, except)
+}
+function allMembersSupportPromote (memberRows, except = []) {
+  return allMembersSupportCap(memberRows, PROMOTE_CAP, except)
+}
+
+// Promote a member's writer core to an INDEXER when it is one of the OWNER'S own
+// phones. Called from apply, on the member write, once promoteV1 is armed.
+//
+// WHAT IT FIXES: Autobase will not remove the last indexer, so a space whose only
+// indexer is its creator can never have that creator cut off. Giving the owner's
+// second phone a signature makes the pair cover for each other, so either can be
+// removed. Measured before it was written: promoting a non-indexer via addWriter
+// with `indexer: true` makes the former sole indexer removeable, its revocation then
+// takes effect, and the promoted device keeps writing.
+//
+// NARROW ON PURPOSE. A housemate is NOT promoted: keeping them a non-indexer is
+// exactly why post-arming writers are admitted that way, so that revoking one never
+// disturbs who signs the view. This only ever adds the owner's own devices.
+//
+// IDEMPOTENT. addWriter for a key that is already an indexer is a no-op, and this
+// runs on every member write, so a row republished a hundred times promotes once in
+// effect. Deliberate: there is no "is it already an indexer" read that is safe to
+// branch on inside apply, because indexed state LAGS and two peers could read it
+// differently - which would be the very fork this is gated to avoid.
+async function maybePromoteOwnDevice (ctx, view, row) {
+  const { base } = ctx
+  if (!base || typeof base.addWriter !== 'function') return
+  if (!row || typeof row._w !== 'string' || typeof row.pubkey !== 'string') return
+
+  const meta = (await view.get('space'))?.value
+  if (!meta || meta.promoteV1 !== true || typeof meta.owner !== 'string') return
+  if (row.pubkey === meta.owner) return               // already the indexer we have
+  if (isEvicted(meta, row.pubkey)) return             // not a device we want signing
+
+  // The whole gate: does this member prove the same person as the owner?
+  if (!await sameIdentityAsOwner(view, row.pubkey, meta.owner)) return
+
+  await base.addWriter(b4a.from(row._w, 'hex'), { indexer: true })
 }
 
 // engine applyOps: one op at a time, in linearized order. A delete is a put of
@@ -281,6 +341,20 @@ async function applyListOp (op, ctx) {
       }
     }
     await view.put(op.key, value)
+    // PROMOTE THE OWNER'S OTHER PHONES TO INDEXERS. Done HERE, on the member write,
+    // and not at admission time - because at admission all we have is the writer
+    // core key, and the identity attestation that proves "this is my own phone"
+    // lives on the member row and cannot be linked to that key yet. By the time a
+    // row is written we have both: `_w` names the writer, `identityProof` names the
+    // person.
+    //
+    // Everything it decides on is replicated state read back out of the view, so
+    // every peer promotes the same key at the same point in the log. Gated on
+    // promoteV1 because a peer that does NOT do it computes a different indexer set
+    // and forks - see PROMOTE_CAP.
+    if (op.key.startsWith('member:')) {
+      try { await maybePromoteOwnDevice(ctx, view, value) } catch { /* never block a member write */ }
+    }
     try { await maybeNotify(ctx, op.key, op.value, existing) } catch {}
   }
 }
@@ -608,4 +682,4 @@ function isReminderPending (item, list, selfKey, now) {
 // fire. 32 leaves generous headroom, plus a slot for the daily digest.
 const MAX_SCHEDULED_REMINDERS = 32
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
