@@ -72,28 +72,77 @@ test('the removal confirm claims exactly what removal now does, no more', () => 
   const body = src.slice(at, at + 1600)
 
   assert.match(body, /askConfirm\(/, 'removal must be confirmed')
-  // The protection it DOES now give.
+  // The protection it DOES now give, stated in every branch.
   assert.match(body, /can no longer change your own account/i, 'must state the account-level revocation')
-  // The limit it still has - and this must stay explicit.
-  assert.match(body, /does NOT lock that phone out of your shared lists/i, 'must scope the limit to shared lists')
-  assert.match(body, /recovery phrase/i, 'naming why: it still holds the phrase')
+  assert.match(body, /recovery phrase/i, 'naming why it is not a full lockout: it still holds the phrase')
 
-  // Claims that would over-promise: a blanket lockout, or revoking the spaces.
-  for (const claim of [/locks? (that|the) phone out(?! of your shared)/i, /revokes? (its|the) access/i, /cannot edit/i, /shut out/i]) {
+  // THE LIMIT IS NOW CONDITIONAL. It used to be one fixed sentence, and this test
+  // used to REQUIRE that sentence - which is how the copy stayed wrong on an armed
+  // space long after removal started cutting those off. So: the pessimistic line
+  // must still exist, but only as the branch for "no space is ready".
+  assert.match(body, /ready === 0[\s\S]{0,120}does NOT lock that phone out of your shared lists/i,
+    'the old promise survives only as the zero-ready branch')
+
+  // Claims that would over-promise in the branches that DO cut it off. A lockout of
+  // shared lists is now sayable; a lockout full stop, or of reading, is not.
+  for (const claim of [/revokes? (its|the) access/i, /shut out/i, /can no longer (see|read)/i, /loses? (the )?recovery phrase/i]) {
     assert.doesNotMatch(body, claim, `removal copy must not over-promise: ${claim}`)
   }
+  // Reading survives in every branch that claims a cut-off, and it must say so.
+  assert.match(body, /can still SEE what it already has/, 'the cut-off branches must still scope it to writes')
 })
 
 test('listMethods describes device:remove as it now behaves', () => {
   // The comment claimed "blocks its writer" (false), was corrected to "there is no
-  // removeWriter in device-link" (true until PR #6), and is now true again in a
-  // narrower way. Comments are where the next person forms their mental model, so
-  // this pins the current shape rather than any past one.
+  // removeWriter in device-link" (true until PR #6), then to "does NOT touch the
+  // SHARED SPACES" - which THIS TEST then pinned in place for months after
+  // revokeDeviceFromSpaces started doing exactly that. The removal confirm was
+  // written off the stale text and inherited the error, so a user was told a phone
+  // kept access and then told it had been cut off, in one flow (TCL, 2026-07-30).
+  //
+  // So this now pins what it DOES, and actively forbids the stale claim. Comments
+  // are where the next person forms their mental model; a test that freezes an
+  // out-of-date one is worse than no test.
   const raw = read('src/listMethods.js')
   assert.doesNotMatch(raw, /blocks its writer/, 'that claim was false')
   assert.doesNotMatch(raw, /There is no removeWriter in device-link/, 'no longer true as of device-link PR #6')
+  assert.doesNotMatch(raw, /it does NOT touch the SHARED SPACES/i, 'it does touch them - revokeDeviceFromSpaces')
   assert.match(raw, /revoke the device's writer key on the PERSONAL base/i, 'say what it does')
-  assert.match(raw, /does NOT touch the SHARED SPACES/i, 'and what it still does not')
+  assert.match(raw, /revoke it in each SHARED SPACE that is armed/i, 'and that it reaches shared spaces')
+  assert.match(raw, /does NOT stop the device READING/i, 'and what it still does not')
+})
+
+test('the removal confirm is built from a PREVIEW, not a fixed sentence', () => {
+  // The regression this exists for: a single hardcoded line promising the phone was
+  // NOT locked out of shared lists, shown seconds before the app said it had been.
+  const src = app()
+  assert.match(src, /device:removalPreview/, 'the confirm asks what will actually happen')
+  // The old unconditional promise must not come back as the only wording.
+  const bare = src.match(/It does NOT lock that phone out of your shared lists/g) || []
+  assert.equal(bare.length, 1, 'that sentence is now ONE branch of a choice, not the message')
+  assert.match(src, /cut off from \$\{ready\} of your \$\{total\} shared spaces/, 'partial case is stated with counts')
+
+  // And the preview must run the SAME predicate the removal runs, or the two drift
+  // apart again the moment either is edited.
+  const raw = read('src/listMethods.js')
+  assert.match(raw, /async function spaceRevokeBlocker /, 'the predicate is its own function')
+  const calls = raw.match(/await spaceRevokeBlocker\(/g) || []
+  assert.equal(calls.length, 2, 'called by BOTH the preview and the removal, so they cannot drift')
+})
+
+test('the device removal path does not use alert() - "JavaScript"-titled dialogs', () => {
+  // An Android WebView titles alert() "JavaScript". LinkDeviceSheet was moved off it
+  // on 2026-07-29; removeDevice was missed and shipped that dialog as the LAST thing
+  // a person sees after cutting off a lost phone (TCL, 2026-07-30).
+  const src = app()
+  const start = src.indexOf('async function removeDevice')
+  assert.ok(start > 0, 'found removeDevice')
+  const body = src.slice(start, src.indexOf('\n  const fileRef', start))
+  assert.ok(body.length > 200, 'sliced a real function body')
+  assert.doesNotMatch(body, /[^.\w]alert\(/, 'every outcome goes through notify()')
+  assert.match(body, /await notify\(/, 'and it is awaited, so the messages queue rather than stack')
+  // notify must be an acknowledgement, not a question with a pointless Cancel.
+  assert.match(src, /function notify \(title, message\)[\s\S]{0,400}noCancel: true/, 'notify uses the noCancel acknowledgement')
 })
 
 test('a device label falls back consistently, and empty nicknames do not win', () => {
