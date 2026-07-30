@@ -426,6 +426,23 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
 //   - this device cannot write to that space
 // The caller surfaces `blocked` so the UI can say "3 of 4 spaces" instead of implying
 // a clean sweep.
+// Why this space cannot honour the revocation, or null if it can. Its own function
+// so the PREVIEW the user is shown before confirming and the ACTION that follows
+// are the same decision - see device:removalPreview. They drifted once already:
+// the confirm promised a lost phone kept its access while the very next dialog
+// said it had been cut off (watched on the TCL 2026-07-30).
+//
+// Deliberately does NOT try to predict the owner-transfer failure below. That one
+// is only knowable by attempting it, so the preview must not promise around it.
+async function spaceRevokeBlocker (ctx, base, appPubkey) {
+  if (!base.writable) return 'not-writable'
+  const meta = await readRow(base, 'space')
+  if (!(meta && meta.revokeV1 === true && meta.revokeV2 === true)) return 'not-armed'
+  const row = await readRow(base, memberKey(appPubkey))
+  if (!(row && typeof row._w === 'string')) return 'no-writer-binding'
+  return null
+}
+
 async function revokeDeviceFromSpaces (ctx, appPubkey) {
   const out = { revoked: 0, blocked: [] }
   if (typeof appPubkey !== 'string' || !appPubkey) return out
@@ -434,11 +451,9 @@ async function revokeDeviceFromSpaces (ctx, appPubkey) {
 
   for (const [groupId, base] of ctx.bases) {
     try {
-      if (!base.writable) { out.blocked.push({ groupId, why: 'not-writable' }); continue }
+      const blocker = await spaceRevokeBlocker(ctx, base, appPubkey)
+      if (blocker) { out.blocked.push({ groupId, why: blocker }); continue }
       const meta = await readRow(base, 'space')
-      if (!(meta && meta.revokeV1 === true && meta.revokeV2 === true)) {
-        out.blocked.push({ groupId, why: 'not-armed' }); continue
-      }
       // If the phone being removed OWNS this space, take ownership first.
       //
       // Revoking an owner without this leaves the space permanently unmanageable -
@@ -989,27 +1004,62 @@ const methods = {
   //   it does     revoke the device's writer key on the PERSONAL base, as of
   //               peerloom-device-link PR #6, so it can no longer write there and
   //               cannot be silently re-admitted by a replayed addWriter
-  //   it does NOT touch the SHARED SPACES. The removed phone keeps the per-space
-  //               writer keys it was granted at pairing (grantGroupWriter) and can
-  //               still edit those lists. That is the space-side half of
-  //               proposals/2026-07-29-removing-a-phone-should-remove-it.md, which
-  //               needs a same-identity authorisation change in core behind a
-  //               `revoke2` gate, and is NOT built yet.
+  //   it does     revoke it in each SHARED SPACE that is armed for revokeV2 and has
+  //               a writer binding for it, taking ownership first where the removed
+  //               phone owned the space. Best-effort per space, reported in
+  //               `spaces`. (This paragraph said "NOT built yet" until 2026-07-30,
+  //               months after revokeDeviceFromSpaces below started doing it. The
+  //               removal confirm was written off that stale text and inherited the
+  //               error - see device:removalPreview.)
   //   it does NOT stop the device READING. Core replicates to anyone holding the
   //               topic and key, and the removed phone has both on disk. Cutting
   //               reads off means a new space (DECISIONS.md 2026-07-28).
   //   it does NOT un-know the recovery phrase.
+  //   it does NOT reach a space that is unarmed, that this phone cannot write to,
+  //               or where the removed phone never wrote while armed.
   //
-  // So the honest promise today is "off your device list, and it can no longer
-  // write to your own account - but it can still change shared lists until the
-  // space-side half ships". Do not let the copy round that up. Telling someone a
-  // lost phone has been shut out when it has not is the worst possible thing to be
-  // wrong about on this screen.
+  // So the honest promise is "off your device list, it can no longer write to your
+  // own account, and it is cut off from the shared spaces that were ready" - with
+  // the count, never a clean sweep. Do not let the copy round that up in either
+  // direction. Telling someone a lost phone has been shut out when it has not is
+  // the worst possible thing to be wrong about on this screen; telling them it has
+  // NOT been when it has sends them to rebuild spaces they did not need to.
   //
   // Returns device-link's own { hidden, revoked, self? } verbatim rather than a flat
   // ok:true, because those can differ - a revocation that would leave no indexer is
   // skipped, and removing the phone you are holding is refused - and the UI needs to
   // be able to say which happened.
+  // What removing this device WOULD do to the shared spaces, so the confirm can
+  // say it before the user commits. Read-only: it runs the same
+  // `spaceRevokeBlocker` predicate the removal itself runs, so the two cannot
+  // disagree the way they did before 2026-07-30.
+  //
+  // `ready` is deliberately a FLOOR, not a promise: the owner-transfer step can
+  // still fail at removal time and is not predictable from here, so the confirm
+  // says what will be attempted and the result message says what landed.
+  'device:removalPreview': async ({ writerKey }, ctx) => {
+    const none = { ready: 0, total: 0 }
+    try {
+      const dl = await getDeviceLink(ctx)
+      const rows = await dl.listLinkedDevices().catch(() => [])
+      const row = rows.find((r) => r && r.writerKey === String(writerKey || ''))
+      const appPubkey = row && typeof row.appPubkey === 'string' ? row.appPubkey : null
+      // No mapping means this device predates appPubkey being recorded
+      // (device-link PR #7), so nothing space-side can be aimed at it.
+      if (!appPubkey || appPubkey === pubkeyHex(ctx)) return none
+      let ready = 0; let total = 0
+      for (const [, base] of ctx.bases) {
+        total++
+        try { if (!(await spaceRevokeBlocker(ctx, base, appPubkey))) ready++ } catch {}
+      }
+      return { ready, total }
+    } catch {
+      // A preview that cannot be computed must not block the removal. The caller
+      // falls back to the cautious wording.
+      return none
+    }
+  },
+
   'device:remove': async ({ writerKey }, ctx) => {
     const dl = await getDeviceLink(ctx)
     const res = await dl.removeDevice(String(writerKey || ''))

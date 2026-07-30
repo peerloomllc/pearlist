@@ -741,6 +741,20 @@ function clearOverrides () { try { localStorage.removeItem(OVERRIDES_KEY) } catc
 let _askConfirm = null
 function askConfirm (opts) { return _askConfirm ? _askConfirm(opts) : Promise.resolve(true) }
 
+// A themed ACKNOWLEDGEMENT - askConfirm with nothing to decide. Use instead of
+// alert() for anything the user is meant to read and act on.
+//
+// WHY IT EXISTS: an Android WebView renders alert() as a system dialog TITLED
+// "JavaScript", exactly as it does prompt(). LinkDeviceSheet was moved off alert()
+// for that reason on 2026-07-29, but the device REMOVAL path was missed, so the
+// last thing a person saw after cutting off a lost phone was a dialog labelled
+// "JavaScript" (seen on the TCL 2026-07-30). Falls through to alert() only when no
+// ConfirmHost is mounted, which is no worse than before.
+function notify (title, message) {
+  if (!_askConfirm) { try { alert(message) } catch {} return Promise.resolve() }
+  return _askConfirm({ title, message, confirmLabel: 'OK', noCancel: true }).then(() => {})
+}
+
 // Single themed confirm dialog for the whole app (see askConfirm). Rendered once.
 function ConfirmHost () {
   const [state, setState] = useState(null)
@@ -3095,21 +3109,31 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   // anything either. Correct, but it needs saying.
   async function removeDevice (d) {
     const label = deviceLabel(d)
+    // ASK THE WORKLET WHAT THIS WILL ACTUALLY DO before promising anything. The
+    // message used to be a single fixed sentence saying the phone would NOT be
+    // locked out of shared lists - written when that was true of every space, and
+    // left behind when the space-side revocation shipped. On an armed space the
+    // user was told it kept access and then, seconds later, told it had been cut
+    // off. Both dialogs, one flow, watched on the TCL 2026-07-30.
+    const preview = await call('device:removalPreview', { writerKey: d.writerKey }).catch(() => null)
+    const ready = preview?.ready || 0
+    const total = preview?.total || 0
+    // Never promise a clean sweep: `ready` is a floor (the owner-transfer step can
+    // still fail) and the result message reports what actually landed.
+    const spaceLine = ready === 0
+      ? `It does NOT lock that phone out of your shared lists - it still has your recovery phrase and your spaces, and can still edit them. To take it off those for real you would need to move them to a new space.`
+      : ready === total
+        ? `It will also be cut off from your shared lists${total > 1 ? ` (${total} spaces)` : ''}, so it can no longer change them. It keeps your recovery phrase and can still SEE what it already has.`
+        : `It will also be cut off from ${ready} of your ${total} shared spaces. In the rest it can still edit, because everyone there has to be on the latest version first. It keeps your recovery phrase and can still SEE what it already has.`
     const ok = await askConfirm({
       title: `Remove ${label}?`,
-      // Precise on purpose, and it changed when the personal-base revocation
-      // landed. It is now MORE than "hides a row" and still LESS than a lockout,
-      // and the middle is the honest place: it can no longer write to your own
-      // account, it CAN still edit shared lists, and it still holds the phrase.
-      // Rounding either way is the failure mode - a lost phone is the one case
-      // where a person acts on this sentence.
-      message: `It stops showing in this list and can no longer change your own account. It does NOT lock that phone out of your shared lists - it still has your recovery phrase and your spaces, and can still edit them. To take it off those for real you would need to move them to a new space.`,
+      message: `It stops showing in this list and can no longer change your own account. ${spaceLine}`,
       confirmLabel: 'Remove',
       danger: true,
     })
     if (!ok) return
     let res
-    try { res = await call('device:remove', { writerKey: d.writerKey }) } catch (e) { alert(problem('Could not remove that phone', e)); return }
+    try { res = await call('device:remove', { writerKey: d.writerKey }) } catch (e) { await notify('Could not remove that phone', problem('Could not remove that phone', e)); return }
     await loadDevices()
     // AND RE-READ THE SPACES, because removal can change who OWNS one: if the phone
     // being removed owned a space, this device takes it over first (see
@@ -3120,7 +3144,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     // exactly like the ownership transfer having been rejected when it had applied.
     await onSpacesChanged?.()
     if (res && res.ok === false) {
-      alert(res.self
+      await notify('Could not remove that phone', res.self
         ? 'That is this phone. To sign this phone out, remove it from one of your other phones.'
         : 'This phone was removed from your account on another phone, so it can no longer change it.')
       return
@@ -3133,15 +3157,15 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     if (sp && (sp.revoked || (sp.blocked && sp.blocked.length))) {
       const blocked = (sp.blocked || []).length
       if (!blocked) {
-        alert(`Done. That phone can no longer edit your shared lists${sp.revoked > 1 ? ` (${sp.revoked} spaces)` : ''}.`)
+        await notify(`${label} removed`, `Done. That phone can no longer edit your shared lists${sp.revoked > 1 ? ` (${sp.revoked} spaces)` : ''}.`)
       } else if ((sp.blocked || []).some((b) => b.why === 'owner-transfer-failed')) {
         // Distinct message: the reason is not "update everyone", and sending someone
         // to fix that would waste their time on the wrong thing.
-        alert('That phone still runs one or more of your spaces and this phone could not take them over, so it keeps access to those - cutting it off would leave nobody able to manage them. Try again in a moment.')
+        await notify('Partly removed', 'That phone still runs one or more of your spaces and this phone could not take them over, so it keeps access to those - cutting it off would leave nobody able to manage them. Try again in a moment.')
       } else if (!sp.revoked) {
-        alert('That phone is off your account, but it can still edit your shared lists. Everyone in a space has to be on the latest version before it can be cut off there.')
+        await notify('Partly removed', 'That phone is off your account, but it can still edit your shared lists. Everyone in a space has to be on the latest version before it can be cut off there.')
       } else {
-        alert(`That phone was cut off from ${sp.revoked} of ${sp.revoked + blocked} spaces. In the rest, everyone has to be on the latest version first.`)
+        await notify('Partly removed', `That phone was cut off from ${sp.revoked} of ${sp.revoked + blocked} spaces. In the rest, everyone has to be on the latest version first.`)
       }
     }
   }
