@@ -1085,6 +1085,49 @@ const methods = {
     }
   },
 
+  // Re-pairing a phone that was REMOVED, second half. Announces this device's
+  // per-space writer key so the other phone re-grants it.
+  //
+  // WHY IT IS A SEPARATE STEP and not part of pairing: at handshake time this
+  // device is not yet a writer on the personal base - it becomes one only once the
+  // primary's addWriter replicates back - so it cannot append anything then. And
+  // `seedGroups` SKIPS a space the device is already in, which is right (joining
+  // twice would mount a second base) but leaves a re-paired phone in the space with
+  // a revoked writer key and no way to say so.
+  //
+  // Shared spaces need no protocol change for this: they keep no denylist, so an
+  // ordinary addWriter re-admits (test/readmission.test.js). The op below is the
+  // existing `deviceGroupWriter`, whose apply branch has been in device-link since
+  // it was written with nothing producing it.
+  'device:announceSpaceWriters': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    if (!dl.isEnabled) return { ok: false, announced: 0, why: 'not-enabled' }
+    // Only meaningful once the personal base will accept our writes.
+    if (!dl.isWritable()) return { ok: false, announced: 0, why: 'not-writable' }
+    let announced = 0
+    for (const [groupId, base] of ctx.bases) {
+      const w = localWriterHex(base)
+      if (!w) continue
+      try { if (await dl.announceGroupWriter(groupId, w)) announced++ } catch {}
+    }
+    _dlTrace('dl:announceSpaceWriters', { announced })
+    return { ok: true, announced }
+  },
+
+  // Move this phone to a fresh writer key on the personal base.
+  //
+  // Exposed for the "set this phone up again" path and for diagnosis. The normal
+  // route is automatic: consumePairLink rotates when it detects a RE-pair, because
+  // a removed phone's old key is refused forever and the grant would fail silently.
+  'device:rotateLocalWriter': async (_args, ctx) => {
+    const dl = await getDeviceLink(ctx)
+    if (!dl.isEnabled) throw new Error('device linking is not set up on this phone')
+    const before = dl.personalBase ? b4a.toString(dl.personalBase.local.key, 'hex') : null
+    const after = await dl.rotateLocalWriter()
+    _dlTrace('dl:rotateLocalWriter', { before: before && before.slice(0, 8), after: after && after.slice(0, 8) })
+    return { ok: !!after, before, after }
+  },
+
   'device:remove': async ({ writerKey }, ctx) => {
     const dl = await getDeviceLink(ctx)
     const res = await dl.removeDevice(String(writerKey || ''))
