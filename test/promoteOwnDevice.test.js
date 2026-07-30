@@ -227,4 +227,12 @@ test('promote1 is advertised and armed alongside the other capabilities', () => 
   // ...and it must never promote a housemate.
   assert.match(wire, /if \(!await sameIdentityAsOwner\(view, row\.pubkey, meta\.owner\)\) return/,
     'only the owner\'s own devices')
+
+  // AND IT MUST BE REACHABLE ON AN ALREADY-ARMED SPACE. The Turn-on control
+  // disappears once armed - correctly, arming is one way - so without a catch-up
+  // path any capability added later is unreachable on every existing space, however
+  // long everyone waits. promoteV1 was the first to hit that.
+  assert.match(methods, /meta\.revokeV2 !== true \|\| meta\.promoteV1 !== true/,
+    'an armed space notices it is missing a later flag')
+  assert.match(methods, /armRevocation\(ctx, groupId\)\.catch/, 'and re-runs the gate to pick it up')
 })
