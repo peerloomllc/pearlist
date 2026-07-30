@@ -3209,6 +3209,20 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       } else {
         await notify('Partly removed', `That phone was cut off from ${sp.revoked} of ${sp.revoked + blocked} spaces. In the rest, everyone has to be on the latest version first.`)
       }
+    } else {
+      // SAY SOMETHING. This branch used to be absent, so a removal that touched no
+      // space at all reported NOTHING - no error, no confirmation - and the phone
+      // carried on editing the household's lists. Watched on the TCL 2026-07-30,
+      // and the silence was the only clue to what had gone wrong.
+      //
+      // Two ways to get here, and they are not the same news. `spaces` comes back
+      // { revoked: 0, blocked: [] } either when there were no shared spaces to
+      // touch, or when device:remove could not map this device to its member rows -
+      // in which case it skipped every space without trying.
+      await notify(res && res.appPubkey ? `${label} removed` : 'Only partly removed',
+        res && res.appPubkey
+          ? 'That phone is off your account. There were no shared lists to cut it off from.'
+          : 'That phone is off your account, but this phone could not work out which member it is in your shared lists, so it may still be able to edit them. Open PearList on both phones for a moment and remove it again.')
     }
   }
   const fileRef = useRef(null)
