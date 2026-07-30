@@ -37,6 +37,33 @@ function mark (name, extra) {
 // logcat filter shows both halves of a pairing. See src/deviceLink.js for what is
 // redacted before it gets here.
 deviceLink.setTrace(mark)
+
+// DO NOT LET A STRAY REJECTION KILL THE APP.
+//
+// Bare aborts the whole worklet on an unhandled rejection or uncaught exception,
+// and there was no listener for either - not here and not in @peerloom/core. So one
+// unhandled rejection anywhere took PearList down, on every launch, forever: the
+// app opened, hit the same rejection, and died. Both test phones were left
+// unusable that way on 2026-07-30 by a single HypercoreError escaping the writer
+// admission path.
+//
+// A broken feature is recoverable. An app that will not start is not, and the user
+// cannot tell the difference between "this crashed" and "this is gone".
+//
+// LOUD, NOT SILENT. Today's worst bugs were all things that failed quietly, so
+// these go through the same trace channel as everything else and land in the pulled
+// pair-trace log. This makes the app survive; it does not make the error go away,
+// and anything that shows up here is a real bug to chase.
+function guard (kind) {
+  try {
+    Bare.on(kind, (err) => {
+      try { mark('worklet:' + kind, { err: (err && err.message) || String(err), code: err && err.code }) } catch {}
+    })
+  } catch { /* older runtime without the hook: nothing to install, same as before */ }
+}
+guard('unhandledRejection')
+guard('uncaughtException')
+
 mark('worklet:loaded')
 
 const engine = createGroupEngine({
