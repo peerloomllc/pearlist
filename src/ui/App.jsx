@@ -3193,6 +3193,13 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       const blocked = (sp.blocked || []).length
       if (!blocked) {
         await notify(`${label} removed`, `Done. That phone can no longer edit your shared lists${sp.revoked > 1 ? ` (${sp.revoked} spaces)` : ''}.`)
+      } else if ((sp.blocked || []).some((b) => b.why === 'sole-indexer')) {
+        // ITS OWN MESSAGE, because "everyone has to update" is not just unhelpful
+        // here - it is wrong, and following it would change nothing. Autobase will
+        // not remove the last indexer of a space, and the phone that CREATED a space
+        // is usually its only one. Nothing the user does to other people's phones
+        // fixes that; the only way out is a new space.
+        await notify('Still in your shared lists', 'That phone is off your account, but it keeps its shared lists: it is the only device that signs for one of your spaces, so removing it would leave that space with nobody able to keep it going. To cut it off for real you would have to move those lists to a new space.')
       } else if ((sp.blocked || []).some((b) => b.why === 'owner-transfer-failed')) {
         // Distinct message: the reason is not "update everyone", and sending someone
         // to fix that would waste their time on the wrong thing.
