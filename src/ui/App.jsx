@@ -3123,10 +3123,10 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       const blocked = (sp.blocked || []).length
       if (!blocked) {
         alert(`Done. That phone can no longer edit your shared lists${sp.revoked > 1 ? ` (${sp.revoked} spaces)` : ''}.`)
-      } else if ((sp.blocked || []).some((b) => b.why === 'target-owns-space')) {
-        // Distinct message, because the reason is not "update everyone" and telling
-        // someone to do that would send them off to fix the wrong thing.
-        alert('That phone still runs one or more of your spaces, so it keeps access to those - cutting it off would leave nobody able to manage them. Move those spaces to another phone first.')
+      } else if ((sp.blocked || []).some((b) => b.why === 'owner-transfer-failed')) {
+        // Distinct message: the reason is not "update everyone", and sending someone
+        // to fix that would waste their time on the wrong thing.
+        alert('That phone still runs one or more of your spaces and this phone could not take them over, so it keeps access to those - cutting it off would leave nobody able to manage them. Try again in a moment.')
       } else if (!sp.revoked) {
         alert('That phone is off your account, but it can still edit your shared lists. Everyone in a space has to be on the latest version before it can be cut off there.')
       } else {

@@ -54,7 +54,31 @@ function itemKey (listId, itemId) { return 'item:' + listId + ':' + itemId }
 function memberKey (pubkey) { return 'member:' + pubkey }
 const LIST_RANGE = { gt: 'list:', lt: 'list:~' }
 const MEMBER_RANGE = { gt: 'member:', lt: 'member:~' }
-const { sameIdentityKeys } = require('./memberIdentity')
+const { sameIdentityKeys, identityRootOf } = require('./memberIdentity')
+
+// Does `candidate` prove the same identity root as `ownerPubkey`? Used only by the
+// same-identity ownership transfer in the `space` branch.
+//
+// DETERMINISTIC: both proofs come from replicated member rows and identityRootOf is
+// pure crypto over those bytes, so every peer reaches the same answer. An ABSENT
+// proof on either side is never a match - the same rule the members collapse follows,
+// because treating two absences as equal would let any member take the space.
+async function sameIdentityAsOwner (view, candidate, ownerPubkey) {
+  if (typeof candidate !== 'string' || typeof ownerPubkey !== 'string') return false
+  if (candidate === ownerPubkey) return true
+  let candProof = null
+  let ownerProof = null
+  try {
+    for await (const { value } of view.createReadStream(MEMBER_RANGE)) {
+      if (!value || typeof value.pubkey !== 'string') continue
+      if (value.pubkey === candidate) candProof = value.identityProof
+      if (value.pubkey === ownerPubkey) ownerProof = value.identityProof
+    }
+  } catch { return false }
+  if (!candProof || !ownerProof) return false
+  const [a, b] = await Promise.all([identityRootOf(candProof), identityRootOf(ownerProof)])
+  return !!(a && b && a === b)
+}
 function itemRange (listId) { return { gt: 'item:' + listId + ':', lt: 'item:' + listId + ':~' } }
 
 const NAMESPACES = ['list:', 'item:', 'member:']
@@ -196,7 +220,35 @@ async function applyListOp (op, ctx) {
       if (v.owner !== v.pubkey) return // the claimant must name themselves owner
       await view.put('space', v)
     } else {
-      if (v.pubkey !== existing.owner) return // only the established owner
+      // Normally only the established owner may touch this row. The ONE exception is
+      // a same-identity OWNERSHIP TRANSFER: another of the owner's own phones may
+      // take it over, proven by the identity attestation on the member rows.
+      //
+      // WHY THIS IS NOT A SEIZURE BUTTON, which is what got ownership recovery
+      // declined in July (proposals/2026-07-28-space-ownership-recovery.md): that
+      // was about letting SOMEBODY ELSE claim a space when the owner is gone, and
+      // nothing can tell a legitimate claim from a grab. This is the same person's
+      // other device, and it is checkable - so both the writer AND the new owner
+      // must prove the same identity root as the CURRENT owner. A space therefore
+      // cannot be handed to a stranger, only moved between one person's phones.
+      //
+      // WHY IT EXISTS: removing a phone that owns a space used to leave that space
+      // permanently unmanageable, because the owner is the only device that may
+      // rename, delete, evict or arm. Watched on hardware 2026-07-29 - a button
+      // labelled "remove this phone" locked its own user out. Transfer first, revoke
+      // second.
+      //
+      // GATED ON revokeV2, deliberately reusing that capability rather than adding
+      // one: revokeV2 is only armed once every member advertises `revoke2`, i.e.
+      // every member runs a build that understands this rule too. An old peer would
+      // reject the new row, store a different `space` value and fork - and indexers
+      // sign the view, so that is not a soft failure.
+      let allowed = v.pubkey === existing.owner
+      if (!allowed && existing.revokeV2 === true && typeof existing.owner === 'string') {
+        allowed = await sameIdentityAsOwner(view, v.pubkey, existing.owner) &&
+                  await sameIdentityAsOwner(view, v.owner, existing.owner)
+      }
+      if (!allowed) return
       if (typeof existing.updatedAt === 'number' && v.updatedAt <= existing.updatedAt) return
       await view.put('space', v)
       if (v.deleted && !existing.deleted && typeof emit === 'function') { try { emit('space:deleted', { groupId }) } catch {} }

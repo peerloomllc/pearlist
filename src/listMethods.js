@@ -439,21 +439,26 @@ async function revokeDeviceFromSpaces (ctx, appPubkey) {
       if (!(meta && meta.revokeV1 === true && meta.revokeV2 === true)) {
         out.blocked.push({ groupId, why: 'not-armed' }); continue
       }
-      // NEVER revoke the OWNER of a space, even though the rule would allow it.
+      // If the phone being removed OWNS this space, take ownership first.
       //
-      // Demonstrated on hardware 2026-07-29 and it is worse than it sounds: the
-      // owner's device is the only one that may rename, delete, evict or arm, so
-      // revoking its writer leaves the space permanently unmanageable - and the
-      // owner is a phone of MINE, so I have locked myself out of my own space with
-      // a button labelled "remove this phone".
+      // Revoking an owner without this leaves the space permanently unmanageable -
+      // the owner is the only device that may rename, delete, evict or arm. Watched
+      // on hardware 2026-07-29: a button labelled "remove this phone" locked its own
+      // user out of their own space.
       //
-      // The merged proposal's answer is same-identity ownership TRANSFER first, and
-      // that is not built. Until it is, skipping is the honest behaviour: the phone
-      // keeps write access to that one space and the caller says so, which is a
-      // smaller harm than a space nobody can administer. See
-      // proposals/2026-07-29-removing-a-phone-should-remove-it.md open question 3.
+      // Legitimate because it is the SAME PERSON: applyListOp only honours a
+      // same-identity owner change, so this cannot hand a space to anyone else. And
+      // it must land BEFORE the revocation, because once the old owner's writer is
+      // gone it can no longer sign anything - including a handover.
       if (meta.owner === appPubkey) {
-        out.blocked.push({ groupId, why: 'target-owns-space' }); continue
+        try {
+          await putRow(ctx, groupId, 'space', { ...meta, owner: me })
+          _dlTrace('dl:ownershipTaken', { gid: String(groupId).slice(0, 8) })
+        } catch {
+          // Could not take it over, so do NOT revoke - that is the state that
+          // bricks the space. Report it instead.
+          out.blocked.push({ groupId, why: 'owner-transfer-failed' }); continue
+        }
       }
       const row = await readRow(base, memberKey(appPubkey))
       const writerKey = row && typeof row._w === 'string' ? row._w : null
