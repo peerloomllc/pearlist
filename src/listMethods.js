@@ -402,6 +402,61 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
   return { ok: true, evicted, revoked }
 }
 
+// Revoke ONE OF MY OWN DEVICES from every space it can write to.
+//
+// This is the space half of "remove this phone": device-link revokes it on the
+// personal base, and this cuts it off from the shared lists, which is the part a
+// person actually cares about after losing a phone.
+//
+// `appPubkey` is the removed device's CORE identity key, carried on its roster row
+// precisely so this lookup is possible - see the comment in device-meta.js for why
+// self-attesting it is safe.
+//
+// WE DO NOT NEED TO OWN THE SPACE. authorizeRevoke accepts a revocation from a device
+// that proves the same identity root as the target, which is exactly this case - my
+// phone revoking my other phone. That is what makes removal work in a housemate's
+// space at all. See proposals/2026-07-29-removing-a-phone-should-remove-it.md.
+//
+// BEST-EFFORT PER SPACE, and it reports which ones it could not do rather than
+// pretending. A space is skipped when:
+//   - it is not armed for revokeV2 (an old member has not updated, so honouring a
+//     same-identity revocation would fork it)
+//   - the device has no `_w` binding, i.e. it never wrote while the space was armed,
+//     so there is nothing to name
+//   - this device cannot write to that space
+// The caller surfaces `blocked` so the UI can say "3 of 4 spaces" instead of implying
+// a clean sweep.
+async function revokeDeviceFromSpaces (ctx, appPubkey) {
+  const out = { revoked: 0, blocked: [] }
+  if (typeof appPubkey !== 'string' || !appPubkey) return out
+  const me = pubkeyHex(ctx)
+  if (appPubkey === me) return out // never revoke the phone we are holding
+
+  for (const [groupId, base] of ctx.bases) {
+    try {
+      if (!base.writable) { out.blocked.push({ groupId, why: 'not-writable' }); continue }
+      const meta = await readRow(base, 'space')
+      if (!(meta && meta.revokeV1 === true && meta.revokeV2 === true)) {
+        out.blocked.push({ groupId, why: 'not-armed' }); continue
+      }
+      const row = await readRow(base, memberKey(appPubkey))
+      const writerKey = row && typeof row._w === 'string' ? row._w : null
+      if (!writerKey) { out.blocked.push({ groupId, why: 'no-writer-binding' }); continue }
+
+      await ctx.append(groupId, signValue({
+        type: 'revokeWriter', pubkey: writerKey, by: me, groupId,
+      }, ctx.identity.secretKey))
+      out.revoked++
+      _dlTrace('dl:revokedFromSpace', { gid: String(groupId).slice(0, 8), writer: writerKey.slice(0, 8) })
+    } catch (e) {
+      // One bad space must not stop the others - the same reasoning as the backup
+      // fan-out. A phone cut off from three of four spaces is far better than none.
+      out.blocked.push({ groupId, why: 'error' })
+    }
+  }
+  return out
+}
+
 // Arm hard revocation for a space. Owner only, and ONE WAY - it changes how every
 // peer applies writer ops, so there is no un-arming without re-forking.
 //
@@ -937,8 +992,12 @@ const methods = {
   'device:remove': async ({ writerKey }, ctx) => {
     const dl = await getDeviceLink(ctx)
     const res = await dl.removeDevice(String(writerKey || ''))
-    _dlTrace('dl:removeDevice', { hidden: !!res?.hidden, revoked: !!res?.revoked, self: !!res?.self })
-    return { ok: !!(res && (res.hidden || res.revoked)), ...res }
+    const spaces = res?.appPubkey ? await revokeDeviceFromSpaces(ctx, res.appPubkey) : { revoked: 0, blocked: [] }
+    _dlTrace('dl:removeDevice', {
+      hidden: !!res?.hidden, revoked: !!res?.revoked, self: !!res?.self,
+      mapped: !!res?.appPubkey, spacesRevoked: spaces.revoked, spacesBlocked: spaces.blocked.length,
+    })
+    return { ok: !!(res && (res.hidden || res.revoked)), ...res, spaces }
   },
 
   // --- backup export / import ----------------------------------------------

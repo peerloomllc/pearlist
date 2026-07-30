@@ -3112,6 +3112,22 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       alert(res.self
         ? 'That is this phone. To sign this phone out, remove it from one of your other phones.'
         : 'This phone was removed from your account on another phone, so it can no longer change it.')
+      return
+    }
+    // Say how far the shared-list part actually got. Removal is best-effort per
+    // space - a space no one has finished updating cannot honour it yet - and
+    // reporting a clean sweep when three of four worked is the kind of wrong that
+    // matters most on a lost phone.
+    const sp = res && res.spaces
+    if (sp && (sp.revoked || (sp.blocked && sp.blocked.length))) {
+      const blocked = (sp.blocked || []).length
+      if (!blocked) {
+        alert(`Done. That phone can no longer edit your shared lists${sp.revoked > 1 ? ` (${sp.revoked} spaces)` : ''}.`)
+      } else if (!sp.revoked) {
+        alert('That phone is off your account, but it can still edit your shared lists. Everyone in a space has to be on the latest version before it can be cut off there.')
+      } else {
+        alert(`That phone was cut off from ${sp.revoked} of ${sp.revoked + blocked} spaces. In the rest, everyone has to be on the latest version first.`)
+      }
     }
   }
   const fileRef = useRef(null)
