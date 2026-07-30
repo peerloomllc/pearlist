@@ -129,28 +129,81 @@ Narrowed by the correction above - spaces need no change at all.
    common case for a re-pair"), so nothing currently re-grants a space writer for a
    space the phone never left. That skip is right for joining and wrong for
    re-admission, and it is the likeliest place for this to half-work.
-3. UI: when pairing fails because this device was removed, offer "set this phone up
+3. **Fix the `_w` staleness check** - compare against the base's current local key
+   instead of testing presence (see answer 1). This is not optional garnish: without
+   it a re-paired phone cannot be removed again properly, which turns a recovery
+   feature into a way to defeat the removal feature.
+4. UI: when pairing fails because this device was removed, offer "set this phone up
    again" rather than an error. That is the whole user-facing surface.
 
-## Open questions
+## Open questions - ANSWERED 2026-07-30
 
-1. **Does the core per-device identity keypair rotate too, or only the Autobase
-   writer key?** They are separate (`appPubkey` vs writer key). Rotating only the
-   writer means the phone keeps its identity and its member rows, which is probably
-   what a user wants - it is still their phone. Needs checking against
-   `memberIdentity` and the `_w` binding, because a stale binding is what makes a
-   removal silently degrade to hide-only (see `space:revocationStatus`).
-2. **What happens to the old, revoked member row in each shared space?** It should
-   stay as a tombstone. Confirm the rotated device does not show up twice.
-3. **Should this be automatic on detecting revocation, or explicit?** Explicit. A
-   phone silently re-admitting itself is exactly the shape the denylist exists to
-   prevent, even if the handshake would still gate it.
+### 1. Only the Autobase writer key rotates. The identity keypair does not.
+
+They are separate: `pubkeyHex(ctx)` (core's per-device signing key, the `appPubkey`)
+versus `base.local.key` (the Autobase writer core). Only the second is what
+`addWriter` / `removeWriter` name, and only the second is refused by the denylist.
+
+The identity must NOT rotate, because it is what makes the phone still *you*:
+`member:{pubkey}` rows, the `identityProof` attestation, `assignee` routing and
+`createdBy` all key off it. Rotating it would make the phone a new person - losing
+its assignments, needing re-attestation, and leaving its old member row behind as a
+ghost that `collapseMembers` cannot merge away.
+
+**But this surfaces a problem that has to be fixed as part of the work.** The `_w`
+binding on a member row records the writer key that wrote it. After a rotation it
+is STALE - it names the dead key. And the readiness check does not notice:
+
+```js
+const bound = !!(mine && typeof mine._w === 'string')
+if (armed && mine && !bound) publishMember(ctx, groupId).catch(() => {})
+```
+
+(`space:revocationStatus`) It tests only that `_w` is *present*, not that it matches
+the writer this device actually uses now. So after a rotation `bound` stays true,
+the republish never fires, and `_w` keeps naming a key that was revoked ages ago.
+
+The consequence is the bad one: a LATER removal of this phone would append
+`revokeWriter` for the dead key and silently do nothing - a removal that degrades to
+hide-only, which is exactly the failure that comment warns about and that was found
+on-device once already.
+
+**Required change:** compare `_w` against `ctx.bases.get(groupId).local.key` rather
+than checking presence, and republish when they differ. That also makes the check
+correct for any future reason a writer key changes, not just this one.
+
+### 2. Nothing lingers, on either base.
+
+- **Shared spaces:** the identity does not change, so there is no second member row
+  - it is the same row, and `_w` re-derives on the next publish (applyListOp stamps
+  it from `node.from.key` on every member write while armed). No duplicate member,
+  nothing to tombstone.
+- **Personal base:** `deviceMetaHidden:` is keyed by WRITER key
+  (`peerloom-device-link/src/personal.js`), so the removed row stays hidden under
+  the old key while the rotated device publishes a fresh row under its new one. No
+  ghost and no duplicate in the roster.
+
+One detail worth knowing rather than tripping over: a `deviceMeta` put DELETES the
+hidden tombstone for its own writer key. That cannot resurrect the removed row here,
+because the old key can never append again - but it means the tombstone is not a
+permanent record, and nothing should be built on it as if it were.
+
+### 3. Explicit, confirmed.
+
+A phone that silently re-keys and re-admits itself is the shape the denylist exists
+to prevent, even though the pairing handshake would still gate it. It also makes the
+UI honest: the user asked for this phone to come back.
 
 ## Verify
 
 - Unit: a rotated key is admitted while the old key stays refused, on a real
-  Autobase (the `test/forkSafety.test.js` harness shape, not a mock view).
+  Autobase (the `test/readmission.test.js` harness shape, not a mock view).
 - Unit: the `revokedWriter:` row survives the rotation - removal must still stick.
+- **Unit: a re-paired phone can be removed AGAIN and it actually revokes.** This is
+  the regression that the `_w` staleness would cause, and it is the one that turns
+  the feature into a hole. Assert the second removal names the CURRENT writer key.
+- Unit: `space:revocationStatus` reports unbound when `_w` names a key that is not
+  this base's local key.
 - Two-device, hardware: remove a phone, rotate + re-pair it, confirm it returns as
   ONE member and not two, and that the old key is still refused.
 - An old peer in an armed space is unaffected, since no apply rule changed.
