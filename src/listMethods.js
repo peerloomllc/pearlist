@@ -440,6 +440,24 @@ async function spaceRevokeBlocker (ctx, base, appPubkey) {
   if (!(meta && meta.revokeV1 === true && meta.revokeV2 === true)) return 'not-armed'
   const row = await readRow(base, memberKey(appPubkey))
   if (!(row && typeof row._w === 'string')) return 'no-writer-binding'
+  // AUTOBASE WILL NOT REMOVE THE LAST INDEXER, and asking it to fails SILENTLY:
+  // core's engine marks apply:revokewriter-unremoveable and skips. We used to
+  // append anyway and count it revoked, so the app said "that phone can no longer
+  // edit your shared lists" about a phone that could.
+  //
+  // Found by Tim 2026-07-30 removing the TCL from the iPhone: the TCL created the
+  // space so it is the only INDEXER (the iPhone was admitted with indexer:false),
+  // and the removal reported success while the TCL went on editing. The reverse
+  // direction had worked precisely because the phone being removed was NOT an
+  // indexer, which is what hid this.
+  //
+  // Asking the same question the engine will ask, up front, so the preview and the
+  // result both tell the truth.
+  try {
+    if (typeof base.removeable === 'function' && !base.removeable(b4a.from(row._w, 'hex'))) {
+      return 'sole-indexer'
+    }
+  } catch { /* a malformed key is caught by no-writer-binding above; do not block on it */ }
   return null
 }
 
