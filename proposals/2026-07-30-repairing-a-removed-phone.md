@@ -32,14 +32,38 @@ if (op.addWriter) {
 
 (`peerloom-device-link/src/personal.js`)
 
-**The denylist is not only an anti-theft measure, and this is the part that is easy
-to get wrong.** Autobase apply is deterministic over the whole log: the original
-`addWriter` for that device is still in there and is re-applied every time the view
-is rebuilt. Without a replicated record that the key was revoked, the removal would
-silently undo itself on the next rebuild. The denylist is what makes removal stick
-at all.
+### CORRECTION, same day, and it changes the design
 
-So it must not simply be deleted.
+This section originally claimed: "the original `addWriter` is still in the log and
+is re-applied every time the view is rebuilt, so without a replicated record that
+the key was revoked, the removal would silently undo itself on the next rebuild."
+
+**That is wrong.** Measured on a real Autobase in `test/readmission.test.js`:
+
+| Question | Answer |
+| --- | --- |
+| Does a revocation survive a full rebuild from disk, with NO denylist? | **Yes.** Apply is ORDERED - `addWriter` at seq 5 then `removeWriter` at seq 50 linearizes to removed, every time, forever. |
+| Does a LATER `addWriter` re-admit, with no denylist? | **Yes.** |
+
+So the denylist is not what makes removal stick. It is a **policy**: it refuses a
+*future* re-admission. That is a choice, and the two bases in this app already
+choose differently:
+
+- **personal base** - keeps `revokedWriter:` rows, refuses forever
+- **shared spaces** - keep no such record, so a later `addWriter` re-admits today
+
+Believing the wrong version made the change look far more dangerous than it is, and
+it went into a merged commit message and PR body before being checked. The lesson
+is the same one this repo keeps relearning: assert nothing about Autobase semantics
+without a real base under it.
+
+### What follows from the correction
+
+**The scope shrinks a lot.** Shared spaces need nothing at all - re-admitting a
+removed phone there is an ordinary `addWriter` from a device that may append, which
+is exactly what pairing already does. Only the **personal base** refuses.
+
+So the question narrows to: how does a phone get back onto the personal base?
 
 ## Two designs
 
@@ -51,14 +75,20 @@ again. Ordered apply makes this coherent (admit at 5, revoke at 20, un-revoke at
 
 Rejected on cost, not on correctness:
 
-- It is **consensus state**, so a peer that does not understand `unrevokeWriter`
-  computes a different writer set and SILENTLY FORKS. That means a third capability
-  after `revoke1` and `revoke2`, with the same "every member must advertise it
-  first" gate and the same long tail before it can ever be armed. See
+- It is **consensus state** - it changes what the view contains and therefore which
+  keys are writers - so a peer that does not understand `unrevokeWriter` computes a
+  different writer set and SILENTLY FORKS. That means a third capability after
+  `revoke1` and `revoke2`, with the same "every member must advertise it first"
+  gate and the same long tail before it can ever be armed. See
   `test/forkSafety.test.js` for what that failure actually looks like.
 - It makes a security-relevant rule conditional, and the rule is currently
-  absolute and easy to reason about: a revoked key is dead everywhere, forever.
+  absolute and easy to reason about: a revoked key is dead on the personal base,
+  forever.
 - It buys nothing the alternative does not.
+
+Note this survives the correction above. The denylist turning out to be policy
+rather than load-bearing makes it *easier* to change, but changing it is still a
+change to replicated view content, which is still a fork risk on old peers.
 
 ### Proposed: rotate the phone's writer key, then pair normally
 
@@ -88,9 +118,17 @@ handshake. Nothing else changes.
 
 ## Scope
 
-1. `device:rotateLocalWriter` in the worklet: mint a keypair, `setLocal`, persist.
-2. The personal base is the only base that must admit the new key at pairing time -
-   the existing `grantGroupWriter` already re-grants per space.
+Narrowed by the correction above - spaces need no change at all.
+
+1. `device:rotateLocalWriter` in the worklet: mint a keypair, `setLocal` on the
+   PERSONAL base, persist. Only that base refuses re-admission.
+2. Shared spaces: nothing. A removed phone is re-admitted to a space by an ordinary
+   `addWriter`, which the existing `grantGroupWriter` already appends. Verified in
+   `test/readmission.test.js`.
+   ONE THING TO CHECK: `seedGroups` SKIPS a space the device is already in ("the
+   common case for a re-pair"), so nothing currently re-grants a space writer for a
+   space the phone never left. That skip is right for joining and wrong for
+   re-admission, and it is the likeliest place for this to half-work.
 3. UI: when pairing fails because this device was removed, offer "set this phone up
    again" rather than an error. That is the whole user-facing surface.
 
