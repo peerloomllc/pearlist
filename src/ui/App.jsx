@@ -3123,6 +3123,10 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       const blocked = (sp.blocked || []).length
       if (!blocked) {
         alert(`Done. That phone can no longer edit your shared lists${sp.revoked > 1 ? ` (${sp.revoked} spaces)` : ''}.`)
+      } else if ((sp.blocked || []).some((b) => b.why === 'target-owns-space')) {
+        // Distinct message, because the reason is not "update everyone" and telling
+        // someone to do that would send them off to fix the wrong thing.
+        alert('That phone still runs one or more of your spaces, so it keeps access to those - cutting it off would leave nobody able to manage them. Move those spaces to another phone first.')
       } else if (!sp.revoked) {
         alert('That phone is off your account, but it can still edit your shared lists. Everyone in a space has to be on the latest version before it can be cut off there.')
       } else {
@@ -3304,7 +3308,19 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
         </Group>
       ) : null}
-      <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); call('device:cancelPairing', {}).catch(() => {}); loadDevices() }} />
+      {/* CLOSING THIS DOES NOT CANCEL THE PAIRING, and that is deliberate.
+          It used to call device:cancelPairing here, which made "Copy link"
+          almost useless: the only reason to copy a pair link is to send it from
+          another app, and doing that means leaving this screen, which killed the
+          session. Found the hard way 2026-07-29 - a link copied and pasted
+          seconds later never completed, and the log stopped at
+          dl:pairingStarted{role:secondary} with the other phone listening to a
+          topic nobody was serving.
+          The session is already time-bounded by its own `expires` (~15 min) and
+          the LINK is the secret, so whether this sheet is on screen changes who
+          can use it not at all. Cancelling on close bought no safety and cost the
+          whole copy-and-send path. */}
+      <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); loadDevices() }} />
       <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
       <DeviceRosterSheet open={roster} onClose={() => setRoster(false)} devices={dl?.devices}
         onRename={renameThisDevice} onRemove={removeDevice} />

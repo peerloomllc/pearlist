@@ -439,6 +439,22 @@ async function revokeDeviceFromSpaces (ctx, appPubkey) {
       if (!(meta && meta.revokeV1 === true && meta.revokeV2 === true)) {
         out.blocked.push({ groupId, why: 'not-armed' }); continue
       }
+      // NEVER revoke the OWNER of a space, even though the rule would allow it.
+      //
+      // Demonstrated on hardware 2026-07-29 and it is worse than it sounds: the
+      // owner's device is the only one that may rename, delete, evict or arm, so
+      // revoking its writer leaves the space permanently unmanageable - and the
+      // owner is a phone of MINE, so I have locked myself out of my own space with
+      // a button labelled "remove this phone".
+      //
+      // The merged proposal's answer is same-identity ownership TRANSFER first, and
+      // that is not built. Until it is, skipping is the honest behaviour: the phone
+      // keeps write access to that one space and the caller says so, which is a
+      // smaller harm than a space nobody can administer. See
+      // proposals/2026-07-29-removing-a-phone-should-remove-it.md open question 3.
+      if (meta.owner === appPubkey) {
+        out.blocked.push({ groupId, why: 'target-owns-space' }); continue
+      }
       const row = await readRow(base, memberKey(appPubkey))
       const writerKey = row && typeof row._w === 'string' ? row._w : null
       if (!writerKey) { out.blocked.push({ groupId, why: 'no-writer-binding' }); continue }
