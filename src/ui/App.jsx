@@ -3060,6 +3060,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   async function linkThisDevice (url) {
     await onLinkDevice(url)
     await loadDevices()
+    // Pairing SEEDS the other phone's spaces onto this one, so the spaces list is
+    // stale the moment this returns - same reason removeDevice re-reads it.
+    await onSpacesChanged?.()
     setLinking(false)
   }
 
@@ -3108,6 +3111,14 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     let res
     try { res = await call('device:remove', { writerKey: d.writerKey }) } catch (e) { alert(problem('Could not remove that phone', e)); return }
     await loadDevices()
+    // AND RE-READ THE SPACES, because removal can change who OWNS one: if the phone
+    // being removed owned a space, this device takes it over first (see
+    // revokeDeviceFromSpaces). `spaces:list` computes each space's `owner` flag from
+    // the applied view, and the Spaces sheet swaps its trash/leave icon on it - so
+    // without this the row keeps offering "leave" a space this phone now owns.
+    // Cost real confusion during the 2026-07-29 hardware run: the stale icon read
+    // exactly like the ownership transfer having been rejected when it had applied.
+    await onSpacesChanged?.()
     if (res && res.ok === false) {
       alert(res.self
         ? 'That is this phone. To sign this phone out, remove it from one of your other phones.'
