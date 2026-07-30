@@ -871,6 +871,22 @@ const methods = {
     const bound = !!(mine && typeof mine._w === 'string' && (!myWriter || mine._w === myWriter))
     if (armed && mine && !bound) publishMember(ctx, groupId).catch(() => {})
 
+    // CATCH UP LATER CAPABILITIES ON AN ALREADY-ARMED SPACE, or they are unreachable.
+    //
+    // The Turn-on control disappears once a space is armed - correctly, it is one
+    // way - so nothing ever calls armRevocation again. Any capability added AFTER a
+    // space was armed would therefore never turn on for it, no matter how long
+    // everyone waited or how many times they updated. promoteV1 was the first to hit
+    // this and it would have been silently unreachable on every existing space.
+    //
+    // Owner-only, best-effort and idempotent: armRevocation itself re-checks the
+    // gate, and it only ever ADDS a flag once every member advertises the capability.
+    if (armed && meta?.owner === me && (meta.revokeV2 !== true || meta.promoteV1 !== true)) {
+      if (allMembersSupportSelfRevoke(rows, evicted) || allMembersSupportPromote(rows, evicted)) {
+        armRevocation(ctx, groupId).catch(() => {})
+      }
+    }
+
     return {
       armed,
       isOwner: meta?.owner === me,
