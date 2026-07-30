@@ -207,7 +207,15 @@ test('device-link rotates on a RE-pair, defers the reconnect, and re-applies on 
   // Rotates when re-pairing, because the denylist row may not have replicated yet
   // and checking would be a race.
   assert.match(src, /const rejoining = !!\(prevBoot && prevBoot\.key === parsed\.personalBaseKey\)/)
-  assert.match(src, /if \(rejoining\) \{ await rotateLocalWriter\(\{ reconnect: false \}\)/,
+  // Assert the PROPERTY, not one exact line. The first version of this pinned
+  // `if (rejoining) { await rotateLocalWriter({ reconnect: false })` verbatim and
+  // broke the moment that grew a try/catch - a legitimate improvement, flagged as a
+  // failure. Same trap as the stale-comment test in deviceRoster.test.js: an
+  // over-specific source pin costs more than it protects.
+  const rejoinAt = src.indexOf('if (rejoining)')
+  assert.ok(rejoinAt > 0, 'the re-pair branch exists')
+  const rejoinBlock = src.slice(rejoinAt, rejoinAt + 700)
+  assert.match(rejoinBlock, /rotateLocalWriter\(\{ reconnect: false \}\)/,
     'rotates mid-handshake WITHOUT dropping the connection the reply goes out on')
 
   // ...and the deferred reconnect actually happens.
