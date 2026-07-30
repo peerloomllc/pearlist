@@ -142,12 +142,37 @@ function writerKeyOf (node) {
 // that will never advertise support (it is dead or on an old build), so requiring
 // IT to advertise would mean the gate never opens and the feature is useless.
 const REVOKE_CAP = 'revoke1'
+
+// SELF-REVOCATION support: a device may revoke ANOTHER OF ITS OWN, proven by the
+// identity attestation on the member rows rather than by being the space owner.
+// See proposals/2026-07-29-removing-a-phone-should-remove-it.md.
+//
+// A SEPARATE capability from revoke1, and it has to be. An old peer that
+// understands revoke1 accepts an owner-signed revocation but would REJECT a
+// same-identity one, so the two compute different writer sets and the space forks -
+// exactly what the capability system exists to prevent. Widening revoke1 in place
+// would have been the silent-fork bug, not a shortcut.
+const REVOKE_SELF_CAP = 'revoke2'
+
 function hasCap (row, cap) { return !!(row && Array.isArray(row.caps) && row.caps.includes(cap)) }
-function allMembersSupportRevoke (memberRows, except = []) {
+
+// Do all members (bar the eviction target) advertise `cap`?
+//
+// `except` is the eviction target: the device being removed is precisely the one
+// that will never advertise support (it is dead or on an old build), so requiring IT
+// to advertise would mean the gate never opens and the feature is useless.
+function allMembersSupportCap (memberRows, cap, except = []) {
   const skip = new Set(except)
   const rows = memberRows.filter((r) => r && r.pubkey && !skip.has(r.pubkey) && r.deleted !== true && r.left !== true)
   if (!rows.length) return false
-  return rows.every((r) => hasCap(r, REVOKE_CAP))
+  return rows.every((r) => hasCap(r, cap))
+}
+// Kept as-is so every existing caller and test is untouched.
+function allMembersSupportRevoke (memberRows, except = []) {
+  return allMembersSupportCap(memberRows, REVOKE_CAP, except)
+}
+function allMembersSupportSelfRevoke (memberRows, except = []) {
+  return allMembersSupportCap(memberRows, REVOKE_SELF_CAP, except)
 }
 
 // engine applyOps: one op at a time, in linearized order. A delete is a put of
@@ -531,4 +556,4 @@ function isReminderPending (item, list, selfKey, now) {
 // fire. 32 leaves generous headroom, plus a slot for the daily digest.
 const MAX_SCHEDULED_REMINDERS = 32
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }

@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
@@ -315,7 +315,11 @@ async function publishMember (ctx, onlyGroupId) {
   // advertises REVOKE_CAP, because a peer that does not understand a revokeWriter op
   // keeps accepting the revoked writer's blocks and SILENTLY forks the space.
   // Additive field -> old peers store it verbatim and ignore it. No fork.
-  const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP] }
+  // REVOKE_SELF_CAP is advertised alongside it for the same reason one step later:
+  // honouring a SAME-IDENTITY revocation is a rule an old peer decides differently,
+  // so the owner may only arm revokeV2 once everyone advertises revoke2. Advertising
+  // it is free and additive; it does nothing until a space is armed.
+  const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP, REVOKE_SELF_CAP] }
   if (prof?.avatarBlob) { value.avatarBlob = prof.avatarBlob; value.avatarHash = prof.avatarHash; value.avatarType = prof.avatarType || 'image/png' }
   else if (prof?.avatar) value.avatar = prof.avatar // legacy inline (pre-blob profiles)
 
@@ -407,14 +411,29 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
 // test/writer-revocation.test.js). The already-evicted are excluded on purpose: the
 // stale device we want gone is exactly the one that will never advertise support, so
 // requiring it would mean the gate never opens.
+// ALSO ARMS revokeV2 when everyone advertises revoke2, so that "remove my lost
+// phone" works without a second trip through this gate. They are separate flags
+// because they are separate rules an old peer decides differently, but there is no
+// reason to make the owner arm twice: if the space can honour a same-identity
+// revocation it should, and if it cannot, revokeV1 alone still arms.
 async function armRevocation (ctx, groupId) {
   const base = viewFor(ctx, groupId)
   const meta = await readRow(base, 'space')
   if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can arm revocation')
-  if (meta.revokeV1 === true) return { ok: true, armed: true, already: true }
   const rows = []
   for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) rows.push(value)
   const evicted = Object.keys(meta.evicted || {})
+  const selfOk = allMembersSupportSelfRevoke(rows, evicted)
+
+  // Already armed for v1: still worth a pass to add v2 if everyone has since updated.
+  if (meta.revokeV1 === true) {
+    if (meta.revokeV2 === true || !selfOk) {
+      return { ok: true, armed: true, already: true, selfRevoke: meta.revokeV2 === true }
+    }
+    await putRow(ctx, groupId, 'space', { ...meta, revokeV2: true })
+    return { ok: true, armed: true, already: true, selfRevoke: true }
+  }
+
   if (!allMembersSupportRevoke(rows, evicted)) {
     const missing = rows
       .filter((r) => r.pubkey && !evicted.includes(r.pubkey) && r.deleted !== true && r.left !== true)
@@ -422,8 +441,10 @@ async function armRevocation (ctx, groupId) {
       .map((r) => r.displayName || 'Member')
     throw new Error('every member must update first. Still on an old version: ' + (missing.join(', ') || 'unknown'))
   }
-  await putRow(ctx, groupId, 'space', { ...meta, revokeV1: true })
-  return { ok: true, armed: true }
+  const next = { ...meta, revokeV1: true }
+  if (selfOk) next.revokeV2 = true
+  await putRow(ctx, groupId, 'space', next)
+  return { ok: true, armed: true, selfRevoke: !!selfOk }
 }
 
 function viewFor (ctx, groupId) {
