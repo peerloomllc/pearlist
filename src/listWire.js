@@ -54,7 +54,31 @@ function itemKey (listId, itemId) { return 'item:' + listId + ':' + itemId }
 function memberKey (pubkey) { return 'member:' + pubkey }
 const LIST_RANGE = { gt: 'list:', lt: 'list:~' }
 const MEMBER_RANGE = { gt: 'member:', lt: 'member:~' }
-const { sameIdentityKeys } = require('./memberIdentity')
+const { sameIdentityKeys, identityRootOf } = require('./memberIdentity')
+
+// Does `candidate` prove the same identity root as `ownerPubkey`? Used only by the
+// same-identity ownership transfer in the `space` branch.
+//
+// DETERMINISTIC: both proofs come from replicated member rows and identityRootOf is
+// pure crypto over those bytes, so every peer reaches the same answer. An ABSENT
+// proof on either side is never a match - the same rule the members collapse follows,
+// because treating two absences as equal would let any member take the space.
+async function sameIdentityAsOwner (view, candidate, ownerPubkey) {
+  if (typeof candidate !== 'string' || typeof ownerPubkey !== 'string') return false
+  if (candidate === ownerPubkey) return true
+  let candProof = null
+  let ownerProof = null
+  try {
+    for await (const { value } of view.createReadStream(MEMBER_RANGE)) {
+      if (!value || typeof value.pubkey !== 'string') continue
+      if (value.pubkey === candidate) candProof = value.identityProof
+      if (value.pubkey === ownerPubkey) ownerProof = value.identityProof
+    }
+  } catch { return false }
+  if (!candProof || !ownerProof) return false
+  const [a, b] = await Promise.all([identityRootOf(candProof), identityRootOf(ownerProof)])
+  return !!(a && b && a === b)
+}
 function itemRange (listId) { return { gt: 'item:' + listId + ':', lt: 'item:' + listId + ':~' } }
 
 const NAMESPACES = ['list:', 'item:', 'member:']
@@ -142,12 +166,37 @@ function writerKeyOf (node) {
 // that will never advertise support (it is dead or on an old build), so requiring
 // IT to advertise would mean the gate never opens and the feature is useless.
 const REVOKE_CAP = 'revoke1'
+
+// SELF-REVOCATION support: a device may revoke ANOTHER OF ITS OWN, proven by the
+// identity attestation on the member rows rather than by being the space owner.
+// See proposals/2026-07-29-removing-a-phone-should-remove-it.md.
+//
+// A SEPARATE capability from revoke1, and it has to be. An old peer that
+// understands revoke1 accepts an owner-signed revocation but would REJECT a
+// same-identity one, so the two compute different writer sets and the space forks -
+// exactly what the capability system exists to prevent. Widening revoke1 in place
+// would have been the silent-fork bug, not a shortcut.
+const REVOKE_SELF_CAP = 'revoke2'
+
 function hasCap (row, cap) { return !!(row && Array.isArray(row.caps) && row.caps.includes(cap)) }
-function allMembersSupportRevoke (memberRows, except = []) {
+
+// Do all members (bar the eviction target) advertise `cap`?
+//
+// `except` is the eviction target: the device being removed is precisely the one
+// that will never advertise support (it is dead or on an old build), so requiring IT
+// to advertise would mean the gate never opens and the feature is useless.
+function allMembersSupportCap (memberRows, cap, except = []) {
   const skip = new Set(except)
   const rows = memberRows.filter((r) => r && r.pubkey && !skip.has(r.pubkey) && r.deleted !== true && r.left !== true)
   if (!rows.length) return false
-  return rows.every((r) => hasCap(r, REVOKE_CAP))
+  return rows.every((r) => hasCap(r, cap))
+}
+// Kept as-is so every existing caller and test is untouched.
+function allMembersSupportRevoke (memberRows, except = []) {
+  return allMembersSupportCap(memberRows, REVOKE_CAP, except)
+}
+function allMembersSupportSelfRevoke (memberRows, except = []) {
+  return allMembersSupportCap(memberRows, REVOKE_SELF_CAP, except)
 }
 
 // engine applyOps: one op at a time, in linearized order. A delete is a put of
@@ -171,7 +220,35 @@ async function applyListOp (op, ctx) {
       if (v.owner !== v.pubkey) return // the claimant must name themselves owner
       await view.put('space', v)
     } else {
-      if (v.pubkey !== existing.owner) return // only the established owner
+      // Normally only the established owner may touch this row. The ONE exception is
+      // a same-identity OWNERSHIP TRANSFER: another of the owner's own phones may
+      // take it over, proven by the identity attestation on the member rows.
+      //
+      // WHY THIS IS NOT A SEIZURE BUTTON, which is what got ownership recovery
+      // declined in July (proposals/2026-07-28-space-ownership-recovery.md): that
+      // was about letting SOMEBODY ELSE claim a space when the owner is gone, and
+      // nothing can tell a legitimate claim from a grab. This is the same person's
+      // other device, and it is checkable - so both the writer AND the new owner
+      // must prove the same identity root as the CURRENT owner. A space therefore
+      // cannot be handed to a stranger, only moved between one person's phones.
+      //
+      // WHY IT EXISTS: removing a phone that owns a space used to leave that space
+      // permanently unmanageable, because the owner is the only device that may
+      // rename, delete, evict or arm. Watched on hardware 2026-07-29 - a button
+      // labelled "remove this phone" locked its own user out. Transfer first, revoke
+      // second.
+      //
+      // GATED ON revokeV2, deliberately reusing that capability rather than adding
+      // one: revokeV2 is only armed once every member advertises `revoke2`, i.e.
+      // every member runs a build that understands this rule too. An old peer would
+      // reject the new row, store a different `space` value and fork - and indexers
+      // sign the view, so that is not a soft failure.
+      let allowed = v.pubkey === existing.owner
+      if (!allowed && existing.revokeV2 === true && typeof existing.owner === 'string') {
+        allowed = await sameIdentityAsOwner(view, v.pubkey, existing.owner) &&
+                  await sameIdentityAsOwner(view, v.owner, existing.owner)
+      }
+      if (!allowed) return
       if (typeof existing.updatedAt === 'number' && v.updatedAt <= existing.updatedAt) return
       await view.put('space', v)
       if (v.deleted && !existing.deleted && typeof emit === 'function') { try { emit('space:deleted', { groupId }) } catch {} }
@@ -531,4 +608,4 @@ function isReminderPending (item, list, selfKey, now) {
 // fire. 32 leaves generous headroom, plus a slot for the daily digest.
 const MAX_SCHEDULED_REMINDERS = 32
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, hasCap, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
+module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }

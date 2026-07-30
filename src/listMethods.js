@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, allMembersSupportRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
+const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
@@ -315,7 +315,11 @@ async function publishMember (ctx, onlyGroupId) {
   // advertises REVOKE_CAP, because a peer that does not understand a revokeWriter op
   // keeps accepting the revoked writer's blocks and SILENTLY forks the space.
   // Additive field -> old peers store it verbatim and ignore it. No fork.
-  const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP] }
+  // REVOKE_SELF_CAP is advertised alongside it for the same reason one step later:
+  // honouring a SAME-IDENTITY revocation is a rule an old peer decides differently,
+  // so the owner may only arm revokeV2 once everyone advertises revoke2. Advertising
+  // it is free and additive; it does nothing until a space is armed.
+  const value = { displayName: prof?.displayName || 'Member', caps: [REVOKE_CAP, REVOKE_SELF_CAP] }
   if (prof?.avatarBlob) { value.avatarBlob = prof.avatarBlob; value.avatarHash = prof.avatarHash; value.avatarType = prof.avatarType || 'image/png' }
   else if (prof?.avatar) value.avatar = prof.avatar // legacy inline (pre-blob profiles)
 
@@ -398,6 +402,82 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
   return { ok: true, evicted, revoked }
 }
 
+// Revoke ONE OF MY OWN DEVICES from every space it can write to.
+//
+// This is the space half of "remove this phone": device-link revokes it on the
+// personal base, and this cuts it off from the shared lists, which is the part a
+// person actually cares about after losing a phone.
+//
+// `appPubkey` is the removed device's CORE identity key, carried on its roster row
+// precisely so this lookup is possible - see the comment in device-meta.js for why
+// self-attesting it is safe.
+//
+// WE DO NOT NEED TO OWN THE SPACE. authorizeRevoke accepts a revocation from a device
+// that proves the same identity root as the target, which is exactly this case - my
+// phone revoking my other phone. That is what makes removal work in a housemate's
+// space at all. See proposals/2026-07-29-removing-a-phone-should-remove-it.md.
+//
+// BEST-EFFORT PER SPACE, and it reports which ones it could not do rather than
+// pretending. A space is skipped when:
+//   - it is not armed for revokeV2 (an old member has not updated, so honouring a
+//     same-identity revocation would fork it)
+//   - the device has no `_w` binding, i.e. it never wrote while the space was armed,
+//     so there is nothing to name
+//   - this device cannot write to that space
+// The caller surfaces `blocked` so the UI can say "3 of 4 spaces" instead of implying
+// a clean sweep.
+async function revokeDeviceFromSpaces (ctx, appPubkey) {
+  const out = { revoked: 0, blocked: [] }
+  if (typeof appPubkey !== 'string' || !appPubkey) return out
+  const me = pubkeyHex(ctx)
+  if (appPubkey === me) return out // never revoke the phone we are holding
+
+  for (const [groupId, base] of ctx.bases) {
+    try {
+      if (!base.writable) { out.blocked.push({ groupId, why: 'not-writable' }); continue }
+      const meta = await readRow(base, 'space')
+      if (!(meta && meta.revokeV1 === true && meta.revokeV2 === true)) {
+        out.blocked.push({ groupId, why: 'not-armed' }); continue
+      }
+      // If the phone being removed OWNS this space, take ownership first.
+      //
+      // Revoking an owner without this leaves the space permanently unmanageable -
+      // the owner is the only device that may rename, delete, evict or arm. Watched
+      // on hardware 2026-07-29: a button labelled "remove this phone" locked its own
+      // user out of their own space.
+      //
+      // Legitimate because it is the SAME PERSON: applyListOp only honours a
+      // same-identity owner change, so this cannot hand a space to anyone else. And
+      // it must land BEFORE the revocation, because once the old owner's writer is
+      // gone it can no longer sign anything - including a handover.
+      if (meta.owner === appPubkey) {
+        try {
+          await putRow(ctx, groupId, 'space', { ...meta, owner: me })
+          _dlTrace('dl:ownershipTaken', { gid: String(groupId).slice(0, 8) })
+        } catch {
+          // Could not take it over, so do NOT revoke - that is the state that
+          // bricks the space. Report it instead.
+          out.blocked.push({ groupId, why: 'owner-transfer-failed' }); continue
+        }
+      }
+      const row = await readRow(base, memberKey(appPubkey))
+      const writerKey = row && typeof row._w === 'string' ? row._w : null
+      if (!writerKey) { out.blocked.push({ groupId, why: 'no-writer-binding' }); continue }
+
+      await ctx.append(groupId, signValue({
+        type: 'revokeWriter', pubkey: writerKey, by: me, groupId,
+      }, ctx.identity.secretKey))
+      out.revoked++
+      _dlTrace('dl:revokedFromSpace', { gid: String(groupId).slice(0, 8), writer: writerKey.slice(0, 8) })
+    } catch (e) {
+      // One bad space must not stop the others - the same reasoning as the backup
+      // fan-out. A phone cut off from three of four spaces is far better than none.
+      out.blocked.push({ groupId, why: 'error' })
+    }
+  }
+  return out
+}
+
 // Arm hard revocation for a space. Owner only, and ONE WAY - it changes how every
 // peer applies writer ops, so there is no un-arming without re-forking.
 //
@@ -407,14 +487,29 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
 // test/writer-revocation.test.js). The already-evicted are excluded on purpose: the
 // stale device we want gone is exactly the one that will never advertise support, so
 // requiring it would mean the gate never opens.
+// ALSO ARMS revokeV2 when everyone advertises revoke2, so that "remove my lost
+// phone" works without a second trip through this gate. They are separate flags
+// because they are separate rules an old peer decides differently, but there is no
+// reason to make the owner arm twice: if the space can honour a same-identity
+// revocation it should, and if it cannot, revokeV1 alone still arms.
 async function armRevocation (ctx, groupId) {
   const base = viewFor(ctx, groupId)
   const meta = await readRow(base, 'space')
   if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can arm revocation')
-  if (meta.revokeV1 === true) return { ok: true, armed: true, already: true }
   const rows = []
   for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) rows.push(value)
   const evicted = Object.keys(meta.evicted || {})
+  const selfOk = allMembersSupportSelfRevoke(rows, evicted)
+
+  // Already armed for v1: still worth a pass to add v2 if everyone has since updated.
+  if (meta.revokeV1 === true) {
+    if (meta.revokeV2 === true || !selfOk) {
+      return { ok: true, armed: true, already: true, selfRevoke: meta.revokeV2 === true }
+    }
+    await putRow(ctx, groupId, 'space', { ...meta, revokeV2: true })
+    return { ok: true, armed: true, already: true, selfRevoke: true }
+  }
+
   if (!allMembersSupportRevoke(rows, evicted)) {
     const missing = rows
       .filter((r) => r.pubkey && !evicted.includes(r.pubkey) && r.deleted !== true && r.left !== true)
@@ -422,8 +517,10 @@ async function armRevocation (ctx, groupId) {
       .map((r) => r.displayName || 'Member')
     throw new Error('every member must update first. Still on an old version: ' + (missing.join(', ') || 'unknown'))
   }
-  await putRow(ctx, groupId, 'space', { ...meta, revokeV1: true })
-  return { ok: true, armed: true }
+  const next = { ...meta, revokeV1: true }
+  if (selfOk) next.revokeV2 = true
+  await putRow(ctx, groupId, 'space', next)
+  return { ok: true, armed: true, selfRevoke: !!selfOk }
 }
 
 function viewFor (ctx, groupId) {
@@ -916,8 +1013,12 @@ const methods = {
   'device:remove': async ({ writerKey }, ctx) => {
     const dl = await getDeviceLink(ctx)
     const res = await dl.removeDevice(String(writerKey || ''))
-    _dlTrace('dl:removeDevice', { hidden: !!res?.hidden, revoked: !!res?.revoked, self: !!res?.self })
-    return { ok: !!(res && (res.hidden || res.revoked)), ...res }
+    const spaces = res?.appPubkey ? await revokeDeviceFromSpaces(ctx, res.appPubkey) : { revoked: 0, blocked: [] }
+    _dlTrace('dl:removeDevice', {
+      hidden: !!res?.hidden, revoked: !!res?.revoked, self: !!res?.self,
+      mapped: !!res?.appPubkey, spacesRevoked: spaces.revoked, spacesBlocked: spaces.blocked.length,
+    })
+    return { ok: !!(res && (res.hidden || res.revoked)), ...res, spaces }
   },
 
   // --- backup export / import ----------------------------------------------

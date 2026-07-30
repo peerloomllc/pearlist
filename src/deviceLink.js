@@ -243,6 +243,18 @@ function getDeviceLink (ctx) {
       mirror: makeMirror(),
       groupPlugin: makeGroupPlugin(ctx),
       platform: '',
+      // This device's CORE identity key, recorded on its roster row so "remove this
+      // phone" can find that phone in the shared spaces too. The roster is keyed by
+      // personal-base writer key and space member rows are keyed by identity pubkey;
+      // nothing else joins the two, so without this removal can only ever revoke on
+      // the personal base. See proposals/2026-07-29-removing-a-phone-should-remove-it.md.
+      //
+      // A FUNCTION, not a value: device-link is constructed inside the first method
+      // call, and reading ctx.identity eagerly here would capture whatever was ready
+      // at that instant. Resolved at write time instead.
+      appPubkey: () => {
+        try { return ctx.identity?.publicKey ? b4a.toString(ctx.identity.publicKey, 'hex') : null } catch { return null }
+      },
       onEvent: (event, data) => {
         _trace('dl:' + event, safeEventData(data))
         try { ctx.emit(event, data) } catch {}
