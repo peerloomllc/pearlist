@@ -116,24 +116,68 @@ handshake. Nothing else changes.
   the key store, which is a key rotation with extra steps. This makes the working
   path deliberate instead of folklore.
 
+## Rotation, MEASURED 2026-07-30
+
+Proved on a real Autobase carrying the personal base's denylist model, before
+writing any feature code. Results in order:
+
+| Step | Result |
+| --- | --- |
+| Admit, then revoke the peer | works, `base.writable` goes false |
+| Re-admit the OLD key | **refused** - the denylist holds |
+| Rotate via `setLocal(newKey)` | **works**, `base.local.key` changes |
+| Admit the NEW key | **works**, `base.writable` goes true again |
+| The rotated peer writes | lands in its OWN view |
+| ...does it reach the other peer? | **NO** |
+| ...after re-establishing the connection? | **YES** |
+| Old key still denied at the end | yes |
+
+**The mechanism.** `setLocal(key)` resolves the key through `store.get({ key })`,
+which only yields a SIGNABLE core if the corestore already holds that keypair. So
+the new key must come from a named core in the base's own namespace
+(`store.namespace(ns).get({ name: 'local-2' })`), not be generated freely. Confirmed
+working.
+
+### THE TRAP, and it is the whole reason this was measured first
+
+A rotated peer reports `writable: true` and writes happily into its own view, while
+its edits reach **nobody**, until the replication connection is re-established. The
+other peer never picks up a writer core that was created after the stream was
+opened.
+
+In the app that is the worst shape a bug can take: the re-paired phone looks
+completely healthy - it is on the roster, it is writable, its own screen updates -
+and the household simply never sees anything it does. It would present exactly like
+the "silently half-working" failure this proposal already flagged for `seedGroups`,
+and it would be blamed on sync.
+
+**So rotation MUST be followed by a reconnect of that base's peers**, not treated as
+a local operation that completes when `setLocal` resolves. That is a hard
+requirement on the implementation, not a nicety, and it needs its own test: assert a
+rotated peer's write reaches another peer *without* the test manually reconnecting.
+
 ## Scope
 
 Narrowed by the correction above - spaces need no change at all.
 
-1. `device:rotateLocalWriter` in the worklet: mint a keypair, `setLocal` on the
-   PERSONAL base, persist. Only that base refuses re-admission.
-2. Shared spaces: nothing. A removed phone is re-admitted to a space by an ordinary
+1. `device:rotateLocalWriter` in the worklet: take a fresh NAMED core from the
+   base's own namespace, `setLocal` on the PERSONAL base, persist which name is in
+   use so a later rotation does not collide. Only that base refuses re-admission.
+2. **Reconnect that base's peers after rotating.** Non-negotiable - see the trap
+   above. A rotation that is not followed by a reconnect produces a phone that
+   looks healthy and is invisible to everyone else.
+3. Shared spaces: nothing. A removed phone is re-admitted to a space by an ordinary
    `addWriter`, which the existing `grantGroupWriter` already appends. Verified in
    `test/readmission.test.js`.
    ONE THING TO CHECK: `seedGroups` SKIPS a space the device is already in ("the
    common case for a re-pair"), so nothing currently re-grants a space writer for a
    space the phone never left. That skip is right for joining and wrong for
    re-admission, and it is the likeliest place for this to half-work.
-3. **Fix the `_w` staleness check** - compare against the base's current local key
+4. **Fix the `_w` staleness check** - compare against the base's current local key
    instead of testing presence (see answer 1). This is not optional garnish: without
    it a re-paired phone cannot be removed again properly, which turns a recovery
    feature into a way to defeat the removal feature.
-4. UI: when pairing fails because this device was removed, offer "set this phone up
+5. UI: when pairing fails because this device was removed, offer "set this phone up
    again" rather than an error. That is the whole user-facing surface.
 
 ## Open questions - ANSWERED 2026-07-30
