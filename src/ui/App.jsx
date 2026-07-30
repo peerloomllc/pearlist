@@ -3125,9 +3125,18 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       : ready === total
         ? `It will also be cut off from your shared lists${total > 1 ? ` (${total} spaces)` : ''}, so it can no longer change them. It keeps your recovery phrase and can still SEE what it already has.`
         : `It will also be cut off from ${ready} of your ${total} shared spaces. In the rest it can still edit, because everyone there has to be on the latest version first. It keeps your recovery phrase and can still SEE what it already has.`
+    // PERMANENCE IS ITS OWN SENTENCE, and it is not optional. Removal writes a
+    // `revokedWriter:` record into the personal base's view and the admission path
+    // refuses that key forever, on every device (peerloom-device-link
+    // src/personal.js). So there is no un-remove, and the ONLY way that phone can
+    // be used again is a fresh install, which gives it a key that was never
+    // revoked. Tim tried to re-pair a removed iPhone from Settings within an hour
+    // of the feature working and could not - if the person who built it expects a
+    // way back, a user hunting a lost phone certainly will.
+    const forever = `This cannot be undone. To use that phone again you would have to delete PearList on it and set it up from scratch.`
     const ok = await askConfirm({
       title: `Remove ${label}?`,
-      message: `It stops showing in this list and can no longer change your own account. ${spaceLine}`,
+      message: `It stops showing in this list and can no longer change your own account. ${spaceLine} ${forever}`,
       confirmLabel: 'Remove',
       danger: true,
     })
