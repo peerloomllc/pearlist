@@ -3065,17 +3065,31 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
 
   // Renames THIS phone. No writerKey: deviceMeta is self-attested, so a device
   // can only name itself - see device:setNickname in listMethods.js.
+  //
+  // AND IT CAN LEGITIMATELY FAIL, which it used to do in silence. If this phone has
+  // been removed from the account on another device, its writer key is revoked and
+  // the rename is refused - correctly. But the sheet closed as though it had saved,
+  // which is how it looked on hardware 2026-07-29: type a name, tap Save, nothing
+  // happens, no reason given. Say what happened instead.
   async function renameThisDevice (nickname) {
-    await call('device:setNickname', { nickname })
+    const res = await call('device:setNickname', { nickname }).catch(() => null)
     await loadDevices()
+    if (res && !res.ok) {
+      alert(res.writable === false
+        ? 'This phone was removed from your account on another phone, so it can no longer change it. Link it again to use it as yours.'
+        : 'Could not save that name. Try again in a moment.')
+    }
   }
 
-  // Takes another phone off the roster. The confirm has to be honest about how
-  // little this does, because "Remove" on a device list reads as "cut it off"
-  // and it is not that: there is no writer revocation in device-link, the other
-  // phone keeps the recovery phrase, keeps the spaces, and can still edit them.
-  // Saying otherwise would be reassuring someone about a lost phone that is in
-  // fact still fully in their account.
+  // Takes another phone off the roster AND revokes its writer key on the personal
+  // base. The confirm still has to be honest about the part that has NOT changed:
+  // the removed phone keeps the recovery phrase, keeps the shared spaces, and can
+  // still edit those. Saying otherwise would reassure someone about a lost phone
+  // that is still able to change the household's lists.
+  //
+  // This can also be REFUSED, and used to be refused in silence: a phone that has
+  // itself been removed cannot write to the personal base, so it cannot remove
+  // anything either. Correct, but it needs saying.
   async function removeDevice (d) {
     const label = deviceLabel(d)
     const ok = await askConfirm({
@@ -3091,8 +3105,14 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       danger: true,
     })
     if (!ok) return
-    try { await call('device:remove', { writerKey: d.writerKey }) } catch (e) { alert(problem('Could not remove that phone', e)); return }
+    let res
+    try { res = await call('device:remove', { writerKey: d.writerKey }) } catch (e) { alert(problem('Could not remove that phone', e)); return }
     await loadDevices()
+    if (res && res.ok === false) {
+      alert(res.self
+        ? 'That is this phone. To sign this phone out, remove it from one of your other phones.'
+        : 'This phone was removed from your account on another phone, so it can no longer change it.')
+    }
   }
   const fileRef = useRef(null)
   const [name, setName] = useState('')

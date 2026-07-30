@@ -870,10 +870,16 @@ const methods = {
   // the writer key - a 64-char hex string - and the real nickname was dropped.
   // Nothing caught it because no UI could reach this method (see the roster sheet
   // in App.jsx, added the same day).
+  // `ok` is now the REAL result, not a constant. It used to hard-code true, which
+  // became a lie once revocation existed: a device removed from the account is no
+  // longer writable, so the rename was refused while the UI closed as if it had
+  // worked. Seen on hardware 2026-07-29 from the revoked side. `writable` lets the
+  // UI say WHY rather than just failing quietly.
   'device:setNickname': async ({ nickname }, ctx) => {
     const dl = await getDeviceLink(ctx)
-    await dl.setDeviceNickname(String(nickname || ''))
-    return { ok: true }
+    const saved = await dl.setDeviceNickname(String(nickname || ''))
+    const writable = typeof dl.isWritable === 'function' ? dl.isWritable() : true
+    return { ok: !!saved, writable }
   },
 
   // Takes a device off the roster AND revokes its writer key on the personal base.
