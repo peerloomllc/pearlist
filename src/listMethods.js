@@ -870,33 +870,54 @@ const methods = {
   // the writer key - a 64-char hex string - and the real nickname was dropped.
   // Nothing caught it because no UI could reach this method (see the roster sheet
   // in App.jsx, added the same day).
+  // `ok` is now the REAL result, not a constant. It used to hard-code true, which
+  // became a lie once revocation existed: a device removed from the account is no
+  // longer writable, so the rename was refused while the UI closed as if it had
+  // worked. Seen on hardware 2026-07-29 from the revoked side. `writable` lets the
+  // UI say WHY rather than just failing quietly.
   'device:setNickname': async ({ nickname }, ctx) => {
     const dl = await getDeviceLink(ctx)
-    await dl.setDeviceNickname(String(nickname || ''))
-    return { ok: true }
+    const saved = await dl.setDeviceNickname(String(nickname || ''))
+    const writable = typeof dl.isWritable === 'function' ? dl.isWritable() : true
+    return { ok: !!saved, writable }
   },
 
-  // Takes a device OFF THE ROSTER. Read what this does and does not do before
-  // writing copy for it, because the obvious reading is wrong:
+  // Takes a device off the roster AND revokes its writer key on the personal base.
+  // Read what this does and does not do before writing copy for it, because the
+  // obvious reading is still too generous:
   //
   //   it does     drop the deviceMeta row and leave a `deviceMetaHidden:`
   //               tombstone, so the device stops appearing on every device that
   //               applies the op
-  //   it does NOT revoke anything. There is no removeWriter in device-link
-  //               (grepped 2026-07-29). The removed phone keeps the mnemonic,
-  //               keeps its spaces, and can still write to them.
-  //   it does NOT even remove itself: `decideDeviceMetaDel` returns `self: true`
-  //               for the target's own row, so the removed phone's own list is
-  //               unchanged. Only the OTHER devices stop showing it.
+  //   it does     revoke the device's writer key on the PERSONAL base, as of
+  //               peerloom-device-link PR #6, so it can no longer write there and
+  //               cannot be silently re-admitted by a replayed addWriter
+  //   it does NOT touch the SHARED SPACES. The removed phone keeps the per-space
+  //               writer keys it was granted at pairing (grantGroupWriter) and can
+  //               still edit those lists. That is the space-side half of
+  //               proposals/2026-07-29-removing-a-phone-should-remove-it.md, which
+  //               needs a same-identity authorisation change in core behind a
+  //               `revoke2` gate, and is NOT built yet.
+  //   it does NOT stop the device READING. Core replicates to anyone holding the
+  //               topic and key, and the removed phone has both on disk. Cutting
+  //               reads off means a new space (DECISIONS.md 2026-07-28).
+  //   it does NOT un-know the recovery phrase.
   //
-  // This comment used to assert that removal stopped the other device writing.
-  // It does not, and the UI copy must not imply it either - telling someone a
-  // lost phone has been shut out when it has not is the worst possible thing to
-  // be wrong about on this screen.
+  // So the honest promise today is "off your device list, and it can no longer
+  // write to your own account - but it can still change shared lists until the
+  // space-side half ships". Do not let the copy round that up. Telling someone a
+  // lost phone has been shut out when it has not is the worst possible thing to be
+  // wrong about on this screen.
+  //
+  // Returns device-link's own { hidden, revoked, self? } verbatim rather than a flat
+  // ok:true, because those can differ - a revocation that would leave no indexer is
+  // skipped, and removing the phone you are holding is refused - and the UI needs to
+  // be able to say which happened.
   'device:remove': async ({ writerKey }, ctx) => {
     const dl = await getDeviceLink(ctx)
-    await dl.removeDevice(String(writerKey || ''))
-    return { ok: true }
+    const res = await dl.removeDevice(String(writerKey || ''))
+    _dlTrace('dl:removeDevice', { hidden: !!res?.hidden, revoked: !!res?.revoked, self: !!res?.self })
+    return { ok: !!(res && (res.hidden || res.revoked)), ...res }
   },
 
   // --- backup export / import ----------------------------------------------
