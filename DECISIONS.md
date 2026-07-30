@@ -2,6 +2,67 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-31 - 'Invalid checkout' is an upstream silent skip, not a PearList bug
+Tier: T1 for the code (a test only), but recorded here because the earlier
+diagnosis in TODO.md was WRONG and a wrong diagnosis that stays on file gets
+retried.
+
+WHAT IT IS. `ERR_ASSERTION: Invalid checkout 16 for batch, length is 0` is three
+lines in two upstream libraries:
+
+  hypercore/lib/copy-prologue.js:17
+    if (src.length < prologue.length || prologue.length === 0) return
+  autobase/index.js:1570 (_migrateView) and :1522 (_applyFastForwardMigration)
+    const batch = next.session({ name: 'batch', overwrite: true, checkout: N })
+  hypercore/index.js:420
+    if (checkout > this.state.length) throw ASSERTION(...)
+
+copyPrologue copies nothing when the source is shorter than the prologue, and
+says nothing about it - no throw, no warning, no return value. Autobase then
+checks the fresh core out to N anyway. Nothing was copied, so its length is 0,
+and N > 0.
+
+The fast-forward caller is the worse of the two. It wraps the copy in
+`try {} catch {}` commented "we might be missing some nodes for this, just
+ignore, only an optimisation", and the very next line makes it mandatory.
+
+WHY IT LOOKED LIKE A PAIRING BUG. A view migration triggers it; an indexer-set
+change triggers a view migration; and `addWriter` with `indexer: true` is an
+indexer-set change. `ctx.append(groupId, {type:'addWriter'})` was the messenger,
+not the cause. The FIRST diagnosis - apply-context reentrancy - was wrong, and
+deferring the append could never have helped.
+
+WHY THE NUMBER MOVED 15 -> 16. It is the view length being migrated to, so it
+tracks the space's state. Not a race. It is NOT the fast-forward minimum, which
+is also 16 (autobase/lib/fast-forward.js:8) and is a coincidence worth naming
+because it invites exactly the wrong conclusion.
+
+WHY IT TOOK THE APP DOWN RATHER THAN FAILING THE PAIRING. Measured, and it is the
+part that matters most: the assertion escapes TWICE. `ready()` rejects, AND the
+same error surfaces again outside that promise. A caller that awaits in a
+try/catch and reports cleanly still dies. So no try/catch at any call site could
+have saved the app - only the Bare-level guard added in PR #147, which is now
+load-bearing rather than belt-and-braces.
+
+RULED OUT, measured rather than reasoned:
+  - Retention pruning. `clear()` leaves the Merkle tree intact and drops only
+    block data, and copyPrologue reads straight through it. PearList prunes every
+    30 minutes, so this was the obvious suspect and it is not the cause.
+  - Ordinary replication lag. A peer whose system core is at 91 and whose view is
+    at 41 migrates safely, because it only ever migrates to what IT has indexed.
+
+STILL OPEN. Which app-level sequence puts a peer into the precondition - a local
+view core behind the length being migrated to. Four in-process Autobase harnesses
+failed to produce it, because in-process peers replicate fully and instantly and
+so never fast-forward. The remaining suspect is the fast-forward path, the one
+place a system is adopted from a remote peer WITHOUT the matching view blocks and
+the one place the missing-node error is deliberately swallowed.
+
+THE MITIGATION NOT TAKEN. Passing `fastForward: false` to Autobase would remove
+that path outright. Not done: it is a T2 call that trades catch-up speed for it,
+on a suspicion rather than a reproduction. Decide it if the fast-forward repro
+lands.
+
 ## 2026-07-28 - Recovery phrases are English only, and the other eleven wordlists
 ## are dropped from the bundle
 Tier: T2. The size change is mechanical, but it narrows what a restore will
