@@ -1796,10 +1796,36 @@ export default function App () {
   // Nothing tells the UI about them, so without the reload the pairing looks like
   // it did nothing until the next launch - measured on hardware 2026-07-28, six
   // spaces joined and none on screen. Same shape as the restored-templates gap.
+  // Poll rather than fire once: `device:announceSpaceWriters` returns
+  // { why: 'not-writable' } until the other phone's addWriter has replicated back,
+  // and that is the normal case immediately after pairing. Bounded, and it stops
+  // the moment anything is announced - a phone with nothing to announce simply
+  // exhausts the attempts quietly, which costs one no-op IPC call a second.
+  function announceSpaceWriters (attempts = 8) {
+    let left = attempts
+    const tick = async () => {
+      if (left-- <= 0) return
+      const r = await call('device:announceSpaceWriters', {}).catch(() => null)
+      if (r && r.ok) return
+      setTimeout(tick, 1500)
+    }
+    setTimeout(tick, 1500)
+  }
+
   async function linkThisDevice (url) {
     const problem = pairLinkProblem(url)
     if (problem) throw new Error(problem)
     await call('device:consumePairLink', { url })
+    // ANNOUNCE OUR PER-SPACE WRITER KEYS. Only matters for a phone that was
+    // REMOVED and is coming back: its space writer key was revoked, and seedGroups
+    // skips a space it never left, so nothing would ever re-grant it. It would land
+    // in the space able to read and silently unable to write.
+    //
+    // Retried because it needs this device to be a writer on the PERSONAL base
+    // first, which happens when the other phone's addWriter replicates back - a
+    // moment after the handshake returns, not during it. Best-effort: a phone that
+    // was never removed loses nothing if every attempt is a no-op.
+    announceSpaceWriters()
     const sp = await loadSpaces()
     setSheet(null)
     // Navigate ONLY from onboarding, where there is nowhere to be. A phone that
