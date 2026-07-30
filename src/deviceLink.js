@@ -166,6 +166,37 @@ function makeMirror () { return async () => {} }
 //                    is already in is skipped rather than re-joined.
 //   grantGroupWriter primary: admit the new device's per-group writer key, the
 //                    same addWriter op the normal pair channel appends.
+// Pending per-space writer grants, keyed groupId:writerKey. Deduped, because the
+// deviceGroupWriter op is applied on every device and can replay.
+const _pendingGrants = new Map()
+
+// Perform a space-side addWriter OUTSIDE the personal base's apply. See the comment
+// on grantGroupWriter for why it cannot be done inline.
+//
+// RETRIED, because the failure it exists for is timing-dependent: the space base may
+// be mid-update when the first attempt lands. Backs off, gives up after a handful,
+// and TRACES the outcome either way - the original bug was invisible precisely
+// because a swallowed rejection looked identical to success.
+function scheduleGroupWriterGrant (ctx, groupId, writerKey) {
+  const key = groupId + ':' + writerKey
+  if (_pendingGrants.has(key)) return
+  _pendingGrants.set(key, 0)
+  const attempt = async () => {
+    const n = (_pendingGrants.get(key) || 0) + 1
+    _pendingGrants.set(key, n)
+    try {
+      await ctx.append(groupId, { type: 'addWriter', pubkey: writerKey })
+      _pendingGrants.delete(key)
+      _trace('dl:grantGroupWriter', { gid: short(groupId), writer: short(writerKey), attempt: n })
+    } catch (e) {
+      _trace('dl:grantGroupWriter-failed', { gid: short(groupId), err: e?.message, attempt: n })
+      if (n < 5) { const t = setTimeout(attempt, 400 * n); if (t && t.unref) t.unref() } else _pendingGrants.delete(key)
+    }
+  }
+  const t = setTimeout(attempt, 0)
+  if (t && t.unref) t.unref()
+}
+
 function makeGroupPlugin (ctx) {
   return {
     async collectGroups () {
@@ -213,12 +244,23 @@ function makeGroupPlugin (ctx) {
       _trace('dl:seedGroups-done', { joined })
     },
 
-    async grantGroupWriter (groupId, writerKey) {
+    // NOT AWAITED, AND NOT DONE HERE. This runs inside the PERSONAL base's apply,
+    // and the append it needs goes to a DIFFERENT base - the space. Appending to one
+    // base from inside another's apply asserts deep in Hyperbee:
+    //
+    //   ERR_ASSERTION: Invalid checkout 15 for batch, length is 0
+    //
+    // Caught on the TCL 2026-07-30 mid re-pair. It was swallowed by the .catch, so
+    // it degraded to "the space grant silently did not happen" - and it did NOT
+    // reproduce on the iPhone minutes earlier, so it is timing-dependent, which
+    // makes it worse to rely on rather than better.
+    //
+    // So the grant is QUEUED and performed on a later turn, from an ordinary
+    // context, with retries. The caller gets an immediate return, which is all
+    // device-link's apply branch wants.
+    grantGroupWriter (groupId, writerKey) {
       if (!groupId || !/^[0-9a-f]{64}$/i.test(String(writerKey || ''))) return
-      // Exactly what the group pair channel appends when it admits a joiner; the
-      // apply branch is shared, so nothing new has to understand this op.
-      _trace('dl:grantGroupWriter', { gid: short(groupId), writer: short(String(writerKey)) })
-      await ctx.append(groupId, { type: 'addWriter', pubkey: String(writerKey) }).catch((e) => _trace('dl:grantGroupWriter-failed', { err: e?.message }))
+      scheduleGroupWriterGrant(ctx, groupId, String(writerKey))
     },
   }
 }
