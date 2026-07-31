@@ -24,8 +24,17 @@ if (typeof window !== 'undefined') {
     const p = pending.get(msg.id)
     if (!p) return
     pending.delete(msg.id)
-    if (msg.error) p.reject(new Error(msg.error))
-    else p.resolve(msg.result)
+    if (msg.error) {
+      // `error` is the message and only the message - core keeps the stack on a
+      // separate field precisely so this line cannot put it in front of a user
+      // (see peerloom-core engine.js dispatch). Carry the extras onto the Error
+      // so the WebView console still has them, without them reaching the UI: the
+      // UI renders `.message` via userText, never the whole Error.
+      const err = new Error(msg.error)
+      if (msg.code) err.code = msg.code
+      if (msg.stack) { err.workletStack = msg.stack; console.warn('[worklet] ' + msg.stack) }
+      p.reject(err)
+    } else p.resolve(msg.result)
   }
   window.__pearEvent = (name, data) => {
     const set = listeners.get(name)
