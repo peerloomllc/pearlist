@@ -1989,8 +1989,8 @@ export default function App () {
       // Honest: re-inviting them is NOT enough on its own, because only the owner
       // can clear an eviction. "Add back" on this screen is the way back.
       message: hideOnly
-        ? `${name} stops showing as a member, but they can still add and change things here. To stop that too, turn on Stronger removal at the bottom of this screen${revoke && !revoke.canArm ? ' - it needs everyone on the latest version first' : ''}. Anything they added stays, and you can add them back from this screen.`
-        : `${name} stops showing as a member of this space and their device can no longer change anything here. Anything they added stays, and you can add them back from this screen.`,
+        ? `${name} stops showing as a member, but can still change things here${revoke && !revoke.canArm ? ' until everyone updates to the latest version' : ' until you turn on Stronger removal below'}. Their lists stay and you can add them back.`
+        : `${name} stops showing as a member and can no longer change anything here. Their lists stay and you can add them back.`,
       confirmLabel: 'Remove',
       danger: true,
     })
@@ -2007,16 +2007,16 @@ export default function App () {
       // because it is the owner's, but cutting a member's device off is still the
       // founding phone's job (see setEvicted). Telling them to wait for updates here
       // would send them to fix something that is not broken.
-      setBanner(`${name} removed from the list. To cut their device off completely, do it on the phone that created this space.`)
+      setBanner(`${name} removed. To cut their device off, use the phone that created this space.`)
     } else if (revoke?.armed && res && res.revoked === false) {
-      setBanner(`${name} removed from the list, but their device could not be cut off (it has not been online since Stronger removal was turned on).`)
+      setBanner(`${name} removed. Their device could not be cut off - it has not been online since Stronger removal was turned on.`)
     } else if (!revoke?.armed) {
       // The plain "X removed." that used to fire here was true and misleading at the
       // same time. It is the last thing the user sees, so it is where the limit has to
       // be repeated - a confirm dialog is read once and dismissed.
       setBanner(revoke?.canArm
-        ? `${name} removed from the list. They can still change things here until you turn on Stronger removal.`
-        : `${name} removed from the list. They can still change things here until everyone is on the latest version.`)
+        ? `${name} removed, but can still change things until you turn on Stronger removal.`
+        : `${name} removed, but can still change things until everyone updates.`)
     } else {
       setBanner(`${name} removed.`)
     }
@@ -2338,7 +2338,7 @@ export default function App () {
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: `${sp.xl}px ${sp.xl}px 80px`, textAlign: 'center' }}>
               <div style={{ color: c.text.primary, fontSize: 17, marginBottom: sp.sm }}>You are not in a space yet</div>
               <p style={{ color: c.text.muted, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.lg}px`, maxWidth: 320 }}>
-                A space holds your shared lists. Make one for your household, or join one you have been invited to.
+                A space holds your shared lists. Create one, or join one you have been invited to.
               </p>
               <div style={{ width: '100%', maxWidth: 320 }}>
                 <Button onClick={() => setSheet('start')}>Create a space</Button>

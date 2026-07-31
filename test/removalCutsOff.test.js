@@ -232,11 +232,11 @@ test('the removal flow tells the truth on an UN-ARMED space', () => {
   // The CONFIRM has to differ, because that is the last moment the user can decide
   // not to bother - being told afterwards is being told too late.
   assert.match(body, /revoke\?\.armed/, 'the confirm has to know whether this space is armed')
-  assert.match(body, /still add and change things/, 'and say what removal will not do')
+  assert.match(body, /still change things/, 'and say what removal will not do')
   assert.match(body, /Stronger removal/, 'and name the control that fixes it')
 
   // The BANNER too: a confirm is read once and dismissed, and the banner is what is
   // still on screen when they look at the members list and see the person gone.
   const after = body.slice(body.indexOf('setBanner'))
-  assert.match(after, /can still change things here/, 'the result must repeat the limit')
+  assert.match(after, /still change things/, 'the result must repeat the limit')
 })
