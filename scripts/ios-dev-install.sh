@@ -76,16 +76,27 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
   npm run build:ui
 fi
 
-# ── 0b. Ensure the iOS native project exists ────────────────────────────────
+# ── 0b. Regenerate the iOS native project from app.json ─────────────────────
 # ios/ is gitignored (PearList regenerates native projects from app.json +
-# config plugins; no custom native code). Generate it if a fresh checkout is
-# missing it so this script is self-contained. --no-install skips pod install
-# (that runs on the Mac mini in step 2).
-if [ ! -d "$REPO_ROOT/ios" ]; then
-  step "generate ios/ (expo prebuild)"
-  cd "$REPO_ROOT"
-  CI=1 npx expo prebuild -p ios --no-install
-fi
+# config plugins; no custom native code). --no-install skips pod install (that
+# runs on the Mac mini in step 2).
+#
+# ALWAYS, not only when ios/ is missing. It used to be `if [ ! -d ios ]`, which
+# meant a native project generated BEFORE a capability was added to app.json kept
+# shipping without it, silently, forever. That cost a real debugging session on
+# 2026-07-31: `ios.associatedDomains` was set in app.json and the Apple Developer
+# portal had Associated Domains enabled, but ios/PearList/PearList.entitlements
+# was an EMPTY dict because it predated the setting - so the signed app carried no
+# associated-domains entitlement, Universal Links never fired, and every invite
+# fell through to Safari and then offered to open Keet.
+#
+# prebuild is idempotent and cheap ("reusing /ios"), so running it every time
+# costs a second and removes a whole class of "the config says X but the build
+# does Y" bug. If a future change makes it expensive, gate it on a config hash -
+# not on the directory existing.
+step "regenerate ios/ from app.json (expo prebuild)"
+cd "$REPO_ROOT"
+CI=1 npx expo prebuild -p ios --no-install
 
 # ── 1. Sync workspace to Mac mini ───────────────────────────────────────────
 # Excludes: anything regenerated on the build host (node_modules, Pods,

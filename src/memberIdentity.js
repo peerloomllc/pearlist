@@ -33,6 +33,30 @@ const { verifyDeviceProof } = require('@peerloom/device-link/identity')
 const _cache = new Map()
 const CACHE_MAX = 512
 
+// Diagnostic trace for the collapse (2026-07-31). Wired from listMethods to the
+// same channel as the pairing marks.
+//
+// WHY IT EXISTS: Tim joined a space as a housemate and saw TWO rows for one
+// person - his two linked phones showing as two people, which is the exact thing
+// this file exists to prevent. From outside, "the proofs did not verify" and "the
+// proofs verify to DIFFERENT roots" look identical: both end as two unmerged
+// rows. They need opposite fixes, so the log has to name which.
+//
+// EMITS ON CHANGE ONLY, not on every call. collapseMembers runs on every roster
+// refresh - space open, every group:updated, every peer:connected and a 15s
+// backstop - so an unconditional mark would flood the trace buffer that bare.js
+// re-ships whole on each mark. One line per distinct outcome answers the question
+// and then goes quiet.
+let _trace = () => {}
+let _lastCollapse = ''
+function setTrace (fn) { if (typeof fn === 'function') _trace = fn }
+function traceCollapse (summary) {
+  const line = JSON.stringify(summary)
+  if (line === _lastCollapse) return
+  _lastCollapse = line
+  try { _trace('collapse:members', summary) } catch {}
+}
+
 // Identity root this proof attests to, or null if it does not verify.
 //
 // NEVER THROWS. Every caller is handling a row written by another device, and a
@@ -69,9 +93,18 @@ async function collapseMembers (members) {
   const rows = Array.isArray(members) ? members : []
   const byRoot = new Map()
   const out = []
+  // What each row resolved to, for the trace below. Short prefixes only: an
+  // identity root is a public key, and this line reaches a log file that gets
+  // pulled off the device. Enough to tell "same" from "different" and no more.
+  const seenRoots = []
 
   for (const m of rows) {
     const root = await identityRootOf(m && m.identityProof)
+    seenRoots.push({
+      pk: (m && typeof m.pubkey === 'string') ? m.pubkey.slice(0, 8) : null,
+      proof: !!(m && m.identityProof),
+      root: root ? root.slice(0, 8) : null,
+    })
     if (!root) { out.push(strip(m)); continue }
 
     const seen = byRoot.get(root)
@@ -102,6 +135,11 @@ async function collapseMembers (members) {
       out[seen.index] = row
     }
   }
+  // `in` vs `out` is the headline: equal means nothing merged. `rows` then says
+  // WHY - a null root is a proof that did not verify (or was absent), and two
+  // different roots mean the devices genuinely do not share an identity, which
+  // would point at pairing rather than at this file.
+  traceCollapse({ in: rows.length, out: out.length, rows: seenRoots })
   return out
 }
 
@@ -142,4 +180,4 @@ function stamp (m) {
   return (m && typeof m.updatedAt === 'number') ? m.updatedAt : 0
 }
 
-module.exports = { identityRootOf, collapseMembers, sameIdentityKeys, _cache }
+module.exports = { identityRootOf, collapseMembers, sameIdentityKeys, setTrace, _cache }
