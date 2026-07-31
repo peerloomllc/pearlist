@@ -1177,6 +1177,19 @@ function NameSetup ({ profile, onDone, onLink }) {
   )
 }
 
+// HAVE WE EVER FINISHED FIRST RUN? The tour key doubles as that flag: it is written
+// once, when the tour is dismissed, and never cleared (replaying from Settings does
+// not clear it). So its presence means "this phone has been through the front door".
+//
+// WHY THE QUESTION EXISTS. Being in no space used to mean the full-screen door,
+// always. Tim deleted every space to test something and the app threw him back onto
+// the onboarding page with no navbar, no Settings and no way out but to create or
+// join - on a phone he had been using for weeks. First run needs that screen; a
+// returning user needs their app back. See the empty Lists state below.
+function hasFinishedFirstRun () {
+  try { return !!localStorage.getItem(TOUR_KEY) } catch { return false }
+}
+
 // A brief once-only tour. On a first run it comes BEFORE the space exists (it is
 // what explains what a space even is), so its last step is the create/join
 // hand-off; onCreate/onJoin are passed only on that path. Returning users (a
@@ -1447,8 +1460,8 @@ export default function App () {
         const saved = BOOT_PLACE.groupId
         setActiveSpaceId(sp.some((s) => s.groupId === saved) ? saved : sp[0].groupId)
         setPhase('home')
-      } else setPhase('onboarding')
-    })().catch((e) => { console.error(e); setPhase('onboarding') })
+      } else setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding')
+    })().catch((e) => { console.error(e); setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding') })
   }, [loadSpaces])
 
   // Remember where we are, so a reload (notably the WebView freeze recovery) can
@@ -1590,7 +1603,7 @@ export default function App () {
         const sp = await loadSpaces()
         setOpenListId(null)
         setActiveSpaceId((cur) => (cur === groupId ? (sp[0]?.groupId || null) : cur))
-        if (sp.length === 0) setPhase('onboarding')
+        if (sp.length === 0) setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding')
         setBanner('That space was deleted by its owner.')
       })()
     })
@@ -1852,7 +1865,11 @@ export default function App () {
     // failed pairing. From Settings the user is already somewhere they chose to
     // be, and yanking them into a space would be the app losing their place.
     const first = sp && sp[0]
-    if (first && phase === 'onboarding') { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home') }
+    // `!activeSpaceId` as well as the door: a returning phone with no spaces now sits
+    // on the normal interface rather than onboarding, and it is just as true there
+    // that the user is nowhere and landing them in the linked space is the proof it
+    // worked.
+    if (first && (phase === 'onboarding' || !activeSpaceId)) { setActiveSpaceId(first.groupId); setOpenListId(null); setPhase('home') }
     setBanner(first
       ? 'Linked. This phone now shares your spaces.'
       : 'Linked. No spaces on the other phone yet, so there is nothing to show.')
@@ -1946,7 +1963,7 @@ export default function App () {
     const sp = await loadSpaces()
     // Only move off if we deleted the space we were viewing.
     if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
-    if (sp.length === 0) setPhase('onboarding')
+    if (sp.length === 0) setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding')
     setBanner('Space deleted.')
   }
   // Owner-only: drop a member from the space (the stale-device case). Reversible
@@ -1954,11 +1971,26 @@ export default function App () {
   // still holds the space, and the copy is careful not to imply otherwise.
   async function removeMember (m) {
     const name = m.displayName || 'this member'
+    // SAY WHAT REMOVAL DOES *NOW*, on this space, before they tap it. Removing
+    // someone only HIDES them until Stronger removal is armed - the arming gate exists
+    // because a peer that does not understand a revocation would keep accepting the
+    // removed device and fork the space, so it cannot simply be on by default. That is
+    // defensible. Saying nothing about it is not.
+    //
+    // Tim, 2026-07-31, having removed a phone from an un-armed space: "it still had
+    // read and write permissions (hidden from members list but could still create
+    // lists, update lists, etc)." He had every reason to expect otherwise: the confirm
+    // said "stops showing as a member" and then said nothing at all about editing.
+    // Proven by test/removalCutsOff.test.js, which pins both halves - armed really
+    // does cut them off, un-armed really does not.
+    const hideOnly = !revoke?.armed
     const ok = await askConfirm({
       title: `Remove ${name}?`,
       // Honest: re-inviting them is NOT enough on its own, because only the owner
       // can clear an eviction. "Add back" on this screen is the way back.
-      message: `${name} stops showing as a member of this space. Anything they added stays, and you can add them back from this screen.`,
+      message: hideOnly
+        ? `${name} stops showing as a member, but can still change things here${revoke && !revoke.canArm ? ' until everyone updates to the latest version' : ' until you turn on Stronger removal below'}. Their lists stay and you can add them back.`
+        : `${name} stops showing as a member and can no longer change anything here. Their lists stay and you can add them back.`,
       confirmLabel: 'Remove',
       danger: true,
     })
@@ -1975,9 +2007,16 @@ export default function App () {
       // because it is the owner's, but cutting a member's device off is still the
       // founding phone's job (see setEvicted). Telling them to wait for updates here
       // would send them to fix something that is not broken.
-      setBanner(`${name} removed from the list. To cut their device off completely, do it on the phone that created this space.`)
+      setBanner(`${name} removed. To cut their device off, use the phone that created this space.`)
     } else if (revoke?.armed && res && res.revoked === false) {
-      setBanner(`${name} removed from the list, but their device could not be cut off (it has not been online since Stronger removal was turned on).`)
+      setBanner(`${name} removed. Their device could not be cut off - it has not been online since Stronger removal was turned on.`)
+    } else if (!revoke?.armed) {
+      // The plain "X removed." that used to fire here was true and misleading at the
+      // same time. It is the last thing the user sees, so it is where the limit has to
+      // be repeated - a confirm dialog is read once and dismissed.
+      setBanner(revoke?.canArm
+        ? `${name} removed, but can still change things until you turn on Stronger removal.`
+        : `${name} removed, but can still change things until everyone updates.`)
     } else {
       setBanner(`${name} removed.`)
     }
@@ -2017,7 +2056,7 @@ export default function App () {
     try { await call('space:leave', { groupId: space.groupId }) } catch (e) { alert(problem('Could not leave', e)); return }
     const sp = await loadSpaces()
     if (!sp.some((s) => s.groupId === activeSpaceId)) { setOpenListId(null); setActiveSpaceId(sp[0]?.groupId || null) }
-    if (sp.length === 0) setPhase('onboarding')
+    if (sp.length === 0) setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding')
     setBanner('You left the space.')
   }
   async function assignList (listId, assignee) {
@@ -2285,6 +2324,29 @@ export default function App () {
         <AboutView onWallet={(detected) => { setLnDetected(detected); setSheet('wallet') }} />
       ) : (
         // ===== Lists overview: all lists in the space + persistent add-list bar =====
+        // NO SPACE AT ALL is its own screen now, and it is deliberately still THIS
+        // screen: same TopBar, same TabBar, so Settings and About stay one tap away
+        // and the app does not vanish out from under someone who just deleted their
+        // last space. The full-screen door is reserved for a phone that has never
+        // finished first run - see hasFinishedFirstRun.
+        //
+        // No MembersBar, no invite button and no composer: each of those acts on a
+        // space, and offering a control that cannot work is worse than omitting it.
+        !activeSpace ? (
+          <>
+            <TopBar title='PearList' />
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: `${sp.xl}px ${sp.xl}px 80px`, textAlign: 'center' }}>
+              <div style={{ color: c.text.primary, fontSize: 17, marginBottom: sp.sm }}>You are not in a space yet</div>
+              <p style={{ color: c.text.muted, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.lg}px`, maxWidth: 320 }}>
+                A space holds your shared lists. Create one, or join one you have been invited to.
+              </p>
+              <div style={{ width: '100%', maxWidth: 320 }}>
+                <Button onClick={() => setSheet('start')}>Create a space</Button>
+                <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={() => setSheet('join')}>Join a space</Button>
+              </div>
+            </div>
+          </>
+        ) : (
         <>
           <TopBar
             title={<button onClick={() => setSheet('spaces')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 20, fontWeight: 400, fontFamily: FONT, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSpace?.name || 'Space'}</span><CaretDown size={16} color={c.text.muted} weight='regular' /></button>}
@@ -2304,6 +2366,7 @@ export default function App () {
           ) : null}
           <ComposerBar inputRef={listComposer} value={listDraft} onChange={setListDraft} onSubmit={beginAddList} placeholder='Add a list' disabled={!!syncTrouble(syncStatus)} />
         </>
+        )
       )}
       {openListId === null ? <TabBar active={view === 'profile' ? 'settings' : view === 'about' ? 'about' : 'lists'} onChange={goTab} /> : null}
 

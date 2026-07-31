@@ -115,11 +115,25 @@ test('both entry points go through the same link handler', () => {
   assert.equal(consumeCalls.length, 1, 'consumePairLink should be called from exactly one place')
 })
 
-test('linking navigates only out of onboarding', () => {
+test('linking navigates only when the user is NOWHERE', () => {
   const src = app()
   // From Settings the user is already somewhere they chose to be; yanking them
   // into a space would be the app losing their place.
-  assert.match(src, /if \(first && phase === 'onboarding'\)/, 'navigation must be conditional on onboarding')
+  //
+  // REPINNED 2026-07-31 to the property rather than the formatting. This used to
+  // match `if (first && phase === 'onboarding')` literally and broke the moment
+  // "in no space" stopped meaning "on the onboarding door" - a legitimate edit, and
+  // the fourth over-specific source pin in this repo to fail that way. What matters
+  // is that the navigation is CONDITIONAL and that the condition is "the user is not
+  // anywhere yet", however that comes to be spelled.
+  const start = src.indexOf('Linked. This phone now shares your spaces.')
+  assert.ok(start > 0, 'the link handler still exists')
+  const handler = src.slice(src.lastIndexOf('async function', start), start)
+  const line = handler.split('\n').find((l) => l.includes('setActiveSpaceId(first.groupId)'))
+  assert.ok(line, 'linking still lands the user in the first space')
+  assert.match(line, /if \(first &&/, 'navigation must be conditional, never unconditional')
+  assert.match(line, /phase === 'onboarding'/, 'a user who is already somewhere is left there')
+  assert.match(line, /!activeSpaceId/, 'and a returning phone in no space is landed too')
 })
 
 // A pairing that never finishes blocks every LATER one, because device-link keeps
