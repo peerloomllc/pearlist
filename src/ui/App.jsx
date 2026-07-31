@@ -1816,7 +1816,24 @@ export default function App () {
   async function linkThisDevice (url) {
     const problem = pairLinkProblem(url)
     if (problem) throw new Error(problem)
-    await call('device:consumePairLink', { url })
+    // A PAIRING THAT NEVER FINISHED BLOCKS EVERY LATER ONE, and only until the app
+    // is force-quit - which is not a recovery anyone should have to discover.
+    // device-link keeps the session in worklet MEMORY and rejects a second consume
+    // while it is set (peerloom-device-link src/personal.js:482). A scan that
+    // starts a session and never completes therefore wedges this screen.
+    //
+    // `canStartOver` lets the sheet offer the way out. The wording stays here,
+    // because this function is the only thing that knows which failure it was.
+    try {
+      await call('device:consumePairLink', { url })
+    } catch (e) {
+      if (/another pair session in progress/i.test(e?.message || '')) {
+        const err = new Error('A previous pairing attempt is still open on this phone. Start over to cancel it and try this link again.')
+        err.canStartOver = true
+        throw err
+      }
+      throw e
+    }
     // ANNOUNCE OUR PER-SPACE WRITER KEYS. Only matters for a phone that was
     // REMOVED and is coming back: its space writer key was revoked, and seedGroups
     // skips a space it never left, so nothing would ever re-grant it. It would land
@@ -2566,11 +2583,16 @@ function LinkDeviceSheet ({ open, onClose, onLink }) {
   const [busy, setBusy] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState(null)
-  useEffect(() => { if (open) { setUrl(''); setBusy(false); setScanning(false); setError(null) } }, [open])
+  // A pairing that never finished blocks every later one until the app is
+  // force-quit. `stuck` turns that dead end into a button. `tried` is the value to
+  // retry with - NOT `url`, because a scanned link never lands in the field.
+  const [stuck, setStuck] = useState(false)
+  const [tried, setTried] = useState('')
+  useEffect(() => { if (open) { setUrl(''); setBusy(false); setScanning(false); setError(null); setStuck(false); setTried('') } }, [open])
 
   const link = async (value) => {
     const v = (value ?? url).trim(); if (!v) return
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setStuck(false); setTried(v)
     // Errors render INSIDE the sheet, not through alert(). An Android WebView
     // titles alert() "JavaScript" exactly as it does prompt(), so routing the
     // failure through it would reintroduce the thing this screen exists to fix -
@@ -2580,7 +2602,20 @@ function LinkDeviceSheet ({ open, onClose, onLink }) {
     //
     // onLink owns the wording: it is the only thing that knows whether this was
     // the wrong kind of link, an expired one, or a pairing that never completed.
-    try { await onLink(v) } catch (e) { setBusy(false); setError(terminated(e.message || String(e))) }
+    try { await onLink(v) } catch (e) {
+      setBusy(false)
+      setError(terminated(e.message || String(e)))
+      setStuck(!!e?.canStartOver)
+    }
+  }
+
+  // Cancel the half-open session and retry the same link. The expiry timer does
+  // clear it eventually, but "wait about fifteen minutes" is not a recovery, and
+  // "force-quit the app" is not one a user should have to guess at.
+  const startOver = async () => {
+    setBusy(true); setError(null); setStuck(false)
+    await call('device:cancelPairing', {}).catch(() => {})
+    await link(tried)
   }
 
   return (
@@ -2595,7 +2630,9 @@ function LinkDeviceSheet ({ open, onClose, onLink }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
           <Field value={url} onChange={(v) => { setUrl(v); if (error) setError(null) }} placeholder='Paste the pairing link' autoFocus />
           {error ? <span role='alert' style={{ color: c.warn, fontSize: 13, fontWeight: 300, lineHeight: 1.45 }}>{error}</span> : null}
-          <Button disabled={busy || !url.trim()} style={{ opacity: busy || !url.trim() ? 0.5 : 1 }} onClick={() => link()}>{busy ? 'Linking…' : 'Link this phone'}</Button>
+          {stuck
+            ? <Button disabled={busy} style={{ opacity: busy ? 0.5 : 1 }} onClick={startOver}>{busy ? 'Linking…' : 'Start over'}</Button>
+            : <Button disabled={busy || !url.trim()} style={{ opacity: busy || !url.trim() ? 0.5 : 1 }} onClick={() => link()}>{busy ? 'Linking…' : 'Link this phone'}</Button>}
           <Button variant='secondary' onClick={() => setScanning(true)}>Scan QR code</Button>
         </div>
       </BottomSheet>
