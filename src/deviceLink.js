@@ -23,6 +23,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const { createPairLinks } = require('@peerloom/device-link/pair-link')
 const { validateMnemonic, attestDeviceKey } = require('@peerloom/device-link/identity')
 const b4a = require('b4a')
+const { isProfileRecord, profileRecordOf } = require('./profileSync')
 
 // The pair link's own scheme. NOT the invite path: pear://pearlist/join is a
 // space invite, safe to forward to anyone, and this is the opposite - a link that
@@ -137,19 +138,66 @@ async function migrateLegacyMnemonic (ctx) {
 function hasMnemonicInMemory () { return !!_mnemonic }
 
 // Personal-scope record types the personal base accepts and mirrors locally.
-// EMPTY on purpose: PearList has no personal-scope data today. Lists and items
-// belong to a SPACE (a shared group), not to a person, so nothing existing moves
-// here. The obvious future candidates are the device-local things that used to
-// vanish with a phone - Learned Aisles, custom aisle names, saved lists - but
-// moving them is a second migration and a separate decision (TODO).
+//
+// `profile` is the first and, so far, only one: the display name and avatar
+// reference belong to the PERSON, not to the phone that last published them - see
+// src/profileSync.js and proposals/2026-07-29-profile-belongs-to-the-person.md.
+//
+// Still NOT here, and deliberately: lists and items belong to a SPACE, not to a
+// person, so nothing existing moves. The remaining candidates are the device-local
+// things that vanish with a phone - Learned Aisles, custom aisle names, saved
+// lists - and moving them is a second migration and a separate decision (TODO).
 //
 // The linked-device roster does NOT need registering: device-link owns deviceMeta
 // and listLinkedDevices natively.
-function makeRecords () { return {} }
+function makeRecords () { return { profile: { validate: isProfileRecord } } }
 
-// Where applied personal-base rows land locally. A no-op while `records` is
-// empty, and the seam to fill when personal-scope data arrives.
-function makeMirror () { return async () => {} }
+// Where applied personal-base rows land locally.
+//
+// INVERTED, rather than requiring listMethods from here: listMethods already
+// requires this module, so the handler is REGISTERED into us the way `setTrace`
+// is. Applying a profile needs localDb, publishMember and emit, all of which live
+// over there.
+// The handler takes `ctx` as its first argument rather than reading a stashed one:
+// makeMirror is built inside getDeviceLink, where the method ctx is already in
+// scope, so the right one is passed in instead of a module-level "last ctx" that
+// would be a guess about ordering.
+let _profileMirror = null
+function setProfileMirror (fn) { if (typeof fn === 'function') _profileMirror = fn }
+function makeMirror (ctx) {
+  return async (type, key, value) => {
+    if (type !== 'profile' || !_profileMirror) return
+    // Never let a mirror failure escape into device-link's apply: an unhandled
+    // rejection there takes down the WHOLE worklet, and the app then dies on every
+    // launch forever (see the guard in src/bare.js and the 2026-07-30 bricking).
+    try { await _profileMirror(ctx, value) } catch (e) { _trace('dl:profileMirrorFailed', { err: (e && e.message) || String(e) }) }
+  }
+}
+
+// Publish this person's profile to their own other devices. False - never a throw -
+// when there is no personal base (an unlinked phone, the common case) or this
+// device is not a writer on it yet, both of which are ordinary rather than errors.
+//
+// IT MUST NEVER BE THE THING THAT STARTS DEVICE LINKING. `getDeviceLink` is
+// flag-agnostic by design, so calling it constructs and starts the engine whether
+// or not the feature is on - and this is called from `member:getAll`, which runs
+// on every roster refresh in every build. The first version had neither guard and
+// turned linking on for everybody: four tests went red because member rows
+// suddenly carried identity proofs and bases were being written mid-test. Caught
+// by the suite, which is the only reason it is not in a release.
+//
+// So: the flag must be on, AND the engine must already have been constructed by
+// something that legitimately wanted it. This never initiates, it only joins in.
+async function putProfileRecord (ctx, profile) {
+  if (!DEVICE_LINK_ENABLED || !isDeviceLinkStarted()) return false
+  const record = profileRecordOf(profile)
+  if (!record) return false
+  try {
+    const dl = await getDeviceLink(ctx)
+    if (!dl || typeof dl.putRecord !== 'function') return false
+    return await dl.putRecord('profile', 'profile', record)
+  } catch { return false }
+}
 
 // The group plugin: what makes a linked device useful in PearList, and the piece
 // PearPetal does NOT have (partner sharing stays on core there, so it injects
@@ -269,6 +317,9 @@ function makeGroupPlugin (ctx) {
 // engine's runtime via the method ctx. Flag-agnostic on purpose so a test can
 // drive it directly without touching the constant.
 let _dlPromise = null
+// Has something already constructed it? Asked by callers that may only JOIN an
+// active device-link session, never start one - see putProfileRecord.
+function isDeviceLinkStarted () { return !!_dlPromise }
 function getDeviceLink (ctx) {
   if (_dlPromise) return _dlPromise
   _dlPromise = (async () => {
@@ -282,7 +333,7 @@ function getDeviceLink (ctx) {
       localDb: ctx.localDb,
       keystore: makeKeystore(),
       records: makeRecords(),
-      mirror: makeMirror(),
+      mirror: makeMirror(ctx),
       groupPlugin: makeGroupPlugin(ctx),
       platform: '',
       // This device's CORE identity key, recorded on its roster row so "remove this
@@ -344,4 +395,4 @@ async function attestSelf (devicePubkeyHex) {
   return proofHex
 }
 
-module.exports = { attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }
+module.exports = { setProfileMirror, putProfileRecord, isDeviceLinkStarted, attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }

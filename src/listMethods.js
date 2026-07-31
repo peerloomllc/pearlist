@@ -16,7 +16,8 @@ const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
 const { collapseMembers, sameIdentityKeys, identityRootOf } = require('./memberIdentity')
-const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, _trace: _dlTrace } = require('./deviceLink')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, _trace: _dlTrace } = require('./deviceLink')
+const { decideProfileMirror } = require('./profileSync')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -206,6 +207,67 @@ function backfillIdentityProof (ctx, groupId, publishedProof) {
     return publishMember(ctx, groupId)
   }).catch(() => {})
 }
+
+// SEED the personal profile from this device's local one.
+//
+// Without this the feature only works for people who rename AFTER it ships:
+// `profile:set` is the only thing that writes the record, so a person already
+// linked, already named, who never renames again, has no personal profile at all
+// and nothing to sync. That is the "already-linked pair needs a one-time
+// migration" line in the proposal's Compat section, and today's test devices are
+// exactly that case.
+//
+// SAME SHAPE AS backfillIdentityProof, for the same reason. Once per session,
+// keyed on the state we observed, so it cannot re-fire on stale state - that is
+// what made dcdb22b append eight member rows in twenty seconds. Keying on
+// updatedAt rather than on "a record exists" means a rename that happens while
+// offline still gets one attempt when the base comes back.
+//
+// Convergence between two devices that BOTH seed is last-write-wins on updatedAt,
+// decided independently on each device by decideProfileMirror, so the newer name
+// wins whichever order the two ops linearize in.
+const _personalProfileSeeded = new Set()
+function seedPersonalProfile (ctx) {
+  ;(async () => {
+    const prof = (await ctx.localDb.get('profile'))?.value
+    if (!prof || typeof prof.displayName !== 'string' || !prof.displayName) return
+    const guard = 'profile:' + (prof.updatedAt || 0)
+    if (_personalProfileSeeded.has(guard)) return
+    _personalProfileSeeded.add(guard)
+    await putProfileRecord(ctx, prof)
+  })().catch(() => {})
+}
+
+// A rename on one of this person's phones, arriving on the others.
+//
+// This is the half of proposals/2026-07-29-profile-belongs-to-the-person.md that
+// the pairing-time copy below could never do: that one runs ONCE, at pairing, so
+// renaming afterwards left the other phone publishing the old name and the
+// household seeing whichever phone was touched last.
+//
+// Registered rather than imported, because listMethods already requires
+// deviceLink and the dependency cannot run both ways. src/profileSync.js holds the
+// decision, including the two guards that keep this from becoming the third write
+// amplification bug in this file: equal timestamps are stale (the author applies
+// its own op too), and a record that changes nothing visible is dropped.
+setProfileMirror(async (ctx, incoming) => {
+  const current = (await ctx.localDb.get('profile'))?.value || null
+  const { accept, reason } = decideProfileMirror({ incoming, current })
+  if (!accept) { _dlTrace('dl:profileMirrorSkipped', { reason }); return }
+
+  // Preserve the legacy inline avatar if the incoming record has no blob
+  // reference: an old local profile carrying `avatar` as a data URL would
+  // otherwise lose its picture to a name-only sync.
+  const next = { ...incoming }
+  if (!next.avatarBlob && current && current.avatar && !incoming.avatarHash) next.avatar = current.avatar
+
+  await ctx.localDb.put('profile', next)
+  _dlTrace('dl:profileMirrored', { name: !!next.displayName, avatar: !!next.avatarBlob })
+  // Push the new name into every space, so the HOUSEHOLD sees it and not just
+  // this device's settings screen. That is the whole point of the feature.
+  await publishMember(ctx)
+  try { ctx.emit('profile:changed', { displayName: next.displayName }) } catch {}
+})
 
 // STOPGAP, and labelled as one. A phone you just linked should already be you -
 // same name, same picture - because that is what "this is my other phone" means.
@@ -758,6 +820,11 @@ const methods = {
       profile.avatar = existing.avatar // legacy inline passthrough
     }
     await ctx.localDb.put('profile', profile)
+    // ...and to this person's OTHER phones, so a rename here does not leave them
+    // publishing the old name and the household seeing whichever was touched last.
+    // Best-effort and not awaited-for-failure: an unlinked phone has no personal
+    // base and this is a no-op, which is exactly today's behaviour.
+    putProfileRecord(ctx, profile).catch(() => {})
     await publishMember(ctx) // push updated name/avatar-ref to the roster
     const out = { displayName: profile.displayName, updatedAt: profile.updatedAt, v: 1 }
     const avatar = await resolveAvatarAwait(ctx, profile)
@@ -808,6 +875,10 @@ const methods = {
     // A phone you just linked should already be you. STOPGAP until the profile
     // moves to personal scope - see the comment on the function.
     adoptProfileFromMyOtherDevice(ctx, raw)
+    // And put this device's profile on the PERSON, so a later rename on either
+    // phone reaches the other. Hangs off the same call as the two above for the
+    // same reason: it needs a moment that recurs but is not a timer.
+    seedPersonalProfile(ctx)
     // Two phones of one person become one row. Rows with no verified proof are
     // never merged - see src/memberIdentity.js for why that rule has no exception.
     return await collapseMembers(out)
