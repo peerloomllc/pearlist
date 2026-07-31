@@ -1458,6 +1458,11 @@ const methods = {
     _dlTrace('dl:removeDevice', {
       hidden: !!res?.hidden, revoked: !!res?.revoked, self: !!res?.self,
       mapped: !!res?.appPubkey, spacesRevoked: spaces.revoked, spacesBlocked: spaces.blocked.length,
+      // Whether the removal also moved us off the base the removed phone can read,
+      // and if not, why not. Silence here is the failure mode the rotation proposal
+      // calls out: a device that quietly did NOT rotate looks identical to one that
+      // did, and the difference is whether a removed phone keeps reading everything.
+      rotated: !!res?.rotated?.rotated, rotateWhy: res?.rotated?.why || null,
     })
     return { ok: !!(res && (res.hidden || res.revoked)), ...res, spaces }
   },
