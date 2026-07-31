@@ -12,7 +12,7 @@ const IdentityKey = require('../../peerloom-device-link/node_modules/keet-identi
 const sodium = require('sodium-universal')
 const b4a = require('b4a')
 
-const { identityRootOf, collapseMembers, sameIdentityKeys, _cache } = require('../src/memberIdentity.js')
+const { identityRootOf, collapseMembers, sameIdentityKeys, evictionTargets, _cache } = require('../src/memberIdentity.js')
 
 const kp = () => {
   const publicKey = b4a.alloc(32); const secretKey = b4a.alloc(64)
@@ -188,4 +188,50 @@ test('a FORGED proof does not verify', async () => {
   ])
   assert.equal(out.length, 2, 'attacker stays their own row')
   assert.equal(out[0].displayName, 'Victim')
+})
+
+// --- eviction covers the PERSON, not one phone ------------------------------
+//
+// "Remove Sam" has to mean every device Sam signs with. Eviction is keyed per ROW,
+// so removing only the merged row's representative key left Sam's other phone
+// visible as a separate member AND, on an armed space, still holding its writer.
+// That is a security property quietly not holding, and it existed because the
+// removal code predates the one-person-many-devices merge.
+
+test('evicting one of a person\'s phones covers all of them', async () => {
+  const sam = await person()
+  const [a, b] = [await sam.device(), await sam.device()]
+  const other = await (await person()).device()
+  const rows = [a, b, other]
+
+  const targets = await evictionTargets(rows, a.pubkey, 'f'.repeat(64))
+  assert.equal(targets.length, 2, 'both of Sam\'s phones')
+  assert.ok(targets.includes(a.pubkey) && targets.includes(b.pubkey))
+  assert.ok(!targets.includes(other.pubkey), 'and nobody else')
+})
+
+// Removing the owner is refused outright. Without this filter, removing one of the
+// OWNER'S own phones would evict the owner through the back door - those keys
+// share a root, so the expansion would sweep the owner up with them.
+test('the owner is never swept up by expanding to their other phone', async () => {
+  const me = await person()
+  const [phone1, phone2] = [await me.device(), await me.device()]
+  const rows = [phone1, phone2]
+
+  const targets = await evictionTargets(rows, phone2.pubkey, phone1.pubkey)
+  assert.deepEqual(targets, [phone2.pubkey], 'only the non-owner phone')
+  // And removing the owner directly resolves to nothing to evict, which the
+  // caller turns into a refusal rather than a silent no-op.
+  assert.deepEqual(await evictionTargets(rows, phone1.pubkey, phone1.pubkey), [phone2.pubkey])
+})
+
+// An unlinked device, and the ghost row a wiped phone leaves behind, have no
+// verified proof. Falling back to "match everything unproven" would sweep up
+// unrelated housemates, so it must fall back to exactly the key it was given.
+test('a member with no verified proof evicts only itself', async () => {
+  const rows = [
+    { pubkey: 'a'.repeat(64) },
+    { pubkey: 'b'.repeat(64) },
+  ]
+  assert.deepEqual(await evictionTargets(rows, 'a'.repeat(64), 'z'.repeat(64)), ['a'.repeat(64)])
 })

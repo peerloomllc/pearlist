@@ -15,7 +15,7 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
-const { collapseMembers, sameIdentityKeys, identityRootOf, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
+const { collapseMembers, sameIdentityKeys, identityRootOf, evictionTargets, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
 const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, _trace: _dlTrace } = require('./deviceLink')
 const { decideProfileMirror, shouldFetchAvatar } = require('./profileSync')
 
@@ -538,9 +538,30 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
   const meta = await readRow(base, 'space')
   if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can remove a member')
   if (pubkey === meta.owner) throw new Error('the owner cannot be removed')
+  // A PERSON, NOT A DEVICE. The members list merges someone's phones into one row
+  // (src/memberIdentity.js), so "remove Sam" means every device Sam signs with -
+  // but eviction is keyed per ROW, and this used to evict only the key the UI
+  // happened to pass. The result was a removal that half-worked: Sam's second
+  // phone stayed visible as a separate member AND, on an armed space, kept its
+  // writer, because only the first row's `_w` was revoked. That is a security
+  // property quietly not holding, not a display quirk.
+  //
+  // RESOLVED HERE RATHER THAN TAKEN FROM THE CALLER. The worklet verifies the
+  // identity proofs itself, so a caller that forgets to send the other keys - or
+  // sends the wrong ones - cannot produce a half-removal. sameIdentityKeys falls
+  // back to just this key when the target has no verified proof, which is the
+  // right answer for an unlinked device and for the ghost rows a wiped phone
+  // leaves behind.
+  const memberRows = []
+  for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) memberRows.push(value)
+  const targets = await evictionTargets(memberRows, pubkey, meta.owner)
+  if (!targets.length) throw new Error('the owner cannot be removed')
+
   const next = { ...(meta.evicted || {}) }
-  if (evicted) next[pubkey] = { at: Date.now() }
-  else delete next[pubkey]
+  for (const k of targets) {
+    if (evicted) next[k] = { at: Date.now() }
+    else delete next[k]
+  }
   await putRow(ctx, groupId, 'space', { ...meta, evicted: next })
 
   // HARD REVOCATION (proposals/2026-07-13-writer-revocation.md). Hiding a member
@@ -554,18 +575,26 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
   // Best-effort: no `_w` (member never wrote a row while armed) = nothing to revoke,
   // and they stay hidden-only. Restoring a member does NOT re-add their writer; they
   // rejoin via a fresh invite, which admits them again.
+  // Revoke EVERY device we just evicted, for the same reason we evicted them all:
+  // leaving one writer alive is the whole bug. `revoked` stays a boolean meaning
+  // "every device was cut off", so the caller's existing honest warning - "removed
+  // from the list, but their device could not be cut off" - still fires whenever
+  // ANY of them could not be, rather than only when the first could not.
   let revoked = false
   if (evicted && meta.revokeV1 === true) {
-    const row = await readRow(base, memberKey(pubkey))
-    const writerKey = row && typeof row._w === 'string' ? row._w : null
-    if (writerKey) {
+    let cut = 0
+    for (const k of targets) {
+      const row = await readRow(base, memberKey(k))
+      const writerKey = row && typeof row._w === 'string' ? row._w : null
+      if (!writerKey) continue
       await ctx.append(groupId, signValue({
         type: 'revokeWriter', pubkey: writerKey, by: pubkeyHex(ctx), groupId,
       }, ctx.identity.secretKey))
-      revoked = true
+      cut++
     }
+    revoked = cut > 0 && cut === targets.length
   }
-  return { ok: true, evicted, revoked }
+  return { ok: true, evicted, revoked, devices: targets.length }
 }
 
 // Revoke ONE OF MY OWN DEVICES from every space it can write to.

@@ -180,4 +180,23 @@ function stamp (m) {
   return (m && typeof m.updatedAt === 'number') ? m.updatedAt : 0
 }
 
-module.exports = { identityRootOf, collapseMembers, sameIdentityKeys, setTrace, _cache }
+// Every device key an eviction of `pubkey` must cover.
+//
+// "Remove Sam" means the PERSON, not the phone whose key the caller happened to
+// pass. The members list already merges Sam's phones into one row, so removing
+// only that row's representative key left Sam's other phone visible as a separate
+// member - and, on an armed space, still holding its writer. A security property
+// quietly not holding.
+//
+// NEVER THE OWNER, however the identity resolves. Removing the owner is refused
+// outright; without this filter, removing one of the owner's own phones would
+// evict the owner through the back door, since those keys share a root.
+//
+// Falls back to just `pubkey` when the target has no verified proof - the right
+// answer for an unlinked device, and for the ghost rows a wiped phone leaves.
+async function evictionTargets (memberRows, pubkey, owner) {
+  const keys = await sameIdentityKeys(memberRows, pubkey)
+  return [...keys].filter((k) => k && k !== owner)
+}
+
+module.exports = { identityRootOf, collapseMembers, sameIdentityKeys, evictionTargets, setTrace, _cache }
