@@ -1873,3 +1873,11 @@ module.exports = methods
 // profile copy is allowed to overwrite - i.e. whether the user has named this phone
 // themselves - so it is the part worth pinning down.
 module.exports._isUntouchedProfile = isUntouchedProfile
+// The multi-space half of a device removal. Exported so test/multiSpaceRemoval.test.js
+// can drive it against REAL Autobases: every removal proven before 2026-07-31 was one
+// person, two phones, ONE space, so `revoked: 1, blocked: 0` was the only result ever
+// observed and the SKIP paths had never executed. `spaceRevokeBlocker` comes with it
+// because 'sole-indexer' is answered by Autobase's own `removeable`, which a mock view
+// cannot tell the truth about.
+module.exports._revokeDeviceFromSpaces = revokeDeviceFromSpaces
+module.exports._spaceRevokeBlocker = spaceRevokeBlocker
