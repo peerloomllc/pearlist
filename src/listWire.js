@@ -224,6 +224,29 @@ function allMembersSupportPromote (memberRows, except = []) {
   return allMembersSupportCap(memberRows, PROMOTE_CAP, except)
 }
 
+// Diagnostic trace for the promotion gate. `ctx.mark` is threaded in from the
+// worklet (src/bare.js) and lands in the same pair-trace buffer as the pairing
+// marks, so one pulled log shows the pairing and what the promotion made of it.
+// Absent in tests and anywhere else that calls applyListOp directly, hence the
+// typeof guard rather than a required ctx field.
+//
+// RATE LIMITED, not deduplicated. This runs on every member write and a catch-up
+// sync applies a burst of them, while bare.js re-ships the WHOLE trace buffer on
+// each mark - so an unconditional mark is quadratic in a way the existing one-shot
+// marks are not. Marking the 1st, 2nd, 5th, 10th, 20th... occurrence of each
+// (reason, device) pair keeps that logarithmic while still showing whether a branch
+// bailed once or keeps bailing, which is exactly the open question.
+const _promoteMarks = new Map()
+function promoteMark (ctx, reason, extra) {
+  if (typeof ctx?.mark !== 'function') return
+  const key = reason + '|' + ((extra && extra.pk) || '')
+  const n = (_promoteMarks.get(key) || 0) + 1
+  _promoteMarks.set(key, n)
+  const decade = Math.pow(10, Math.floor(Math.log10(n)))
+  if (n !== decade && n !== decade * 2 && n !== decade * 5) return
+  try { ctx.mark('promote:' + reason, { n, ...extra }) } catch {}
+}
+
 // Promote a member's writer core to an INDEXER when it is one of the OWNER'S own
 // phones. Called from apply, on the member write, once promoteV1 is armed.
 //
@@ -243,20 +266,39 @@ function allMembersSupportPromote (memberRows, except = []) {
 // effect. Deliberate: there is no "is it already an indexer" read that is safe to
 // branch on inside apply, because indexed state LAGS and two peers could read it
 // differently - which would be the very fork this is gated to avoid.
+//
+// EVERY EXIT IS TRACED (2026-07-31). This ran on hardware with linking on, with
+// every precondition apparently satisfied, and promoted nothing in 15 minutes -
+// and the log could not say why, because each early return below was silent. That
+// is the house pattern: the bug is something failing quietly. `promote:*` marks
+// now name the branch that bailed, so the next run answers it. See TODO.
 async function maybePromoteOwnDevice (ctx, view, row) {
   const { base } = ctx
-  if (!base || typeof base.addWriter !== 'function') return
-  if (!row || typeof row._w !== 'string' || typeof row.pubkey !== 'string') return
+  if (!base || typeof base.addWriter !== 'function') { promoteMark(ctx, 'no-base'); return }
+  if (!row || typeof row.pubkey !== 'string') { promoteMark(ctx, 'no-pubkey'); return }
+  const pk = row.pubkey.slice(0, 8)
+  promoteMark(ctx, 'enter', { pk })
+  // Split out from the pubkey check so the log distinguishes them: no `_w` means the
+  // writer binding was never recorded, i.e. the space is not revokeV1-armed or this
+  // row predates arming - a completely different fix from a failing identity proof.
+  if (typeof row._w !== 'string') { promoteMark(ctx, 'no-writer-key', { pk }); return }
 
   const meta = (await view.get('space'))?.value
-  if (!meta || meta.promoteV1 !== true || typeof meta.owner !== 'string') return
-  if (row.pubkey === meta.owner) return               // already the indexer we have
-  if (isEvicted(meta, row.pubkey)) return             // not a device we want signing
+  if (!meta) { promoteMark(ctx, 'no-space-row', { pk }); return }
+  if (meta.promoteV1 !== true) { promoteMark(ctx, 'not-armed', { pk, revokeV1: meta.revokeV1 === true }); return }
+  if (typeof meta.owner !== 'string') { promoteMark(ctx, 'no-owner', { pk }); return }
+  if (row.pubkey === meta.owner) { promoteMark(ctx, 'is-owner', { pk }); return }        // already the indexer we have
+  if (isEvicted(meta, row.pubkey)) { promoteMark(ctx, 'evicted', { pk }); return }       // not a device we want signing
 
   // The whole gate: does this member prove the same person as the owner?
-  if (!await sameIdentityAsOwner(view, row.pubkey, meta.owner)) return
+  if (!await sameIdentityAsOwner(view, row.pubkey, meta.owner)) {
+    promoteMark(ctx, 'not-same-identity', { pk, owner: meta.owner.slice(0, 8), proof: typeof row.identityProof === 'string' })
+    return
+  }
 
+  promoteMark(ctx, 'promoting', { pk })
   await base.addWriter(b4a.from(row._w, 'hex'), { indexer: true })
+  promoteMark(ctx, 'promoted', { pk, writable: !!base.writable })
 }
 
 // engine applyOps: one op at a time, in linearized order. A delete is a put of
@@ -353,7 +395,14 @@ async function applyListOp (op, ctx) {
     // promoteV1 because a peer that does NOT do it computes a different indexer set
     // and forks - see PROMOTE_CAP.
     if (op.key.startsWith('member:')) {
-      try { await maybePromoteOwnDevice(ctx, view, value) } catch { /* never block a member write */ }
+      // Still never blocks a member write, but the failure is no longer invisible:
+      // an addWriter that throws in here used to look identical to a gate that
+      // declined, and they need opposite fixes.
+      try {
+        await maybePromoteOwnDevice(ctx, view, value)
+      } catch (e) {
+        promoteMark(ctx, 'threw', { err: (e && e.message) || String(e) })
+      }
     }
     try { await maybeNotify(ctx, op.key, op.value, existing) } catch {}
   }
