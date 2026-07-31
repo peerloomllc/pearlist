@@ -380,8 +380,29 @@ const WEBVIEW_FIRST_LOAD_TIMEOUT_MS = 15_000
 // is off by default - a phone that cannot store a phrase must still start.
 const MNEMONIC_STORE_KEY = 'pearlist.deviceLink.mnemonic'
 
-async function loadStoredMnemonic (): Promise<string | null> {
-  try { return await SecureStore.getItemAsync(MNEMONIC_STORE_KEY) } catch { return null }
+// "NOTHING STORED" AND "CANNOT READ THE STORE" ARE NOT THE SAME ANSWER, and
+// collapsing them into null was a real bug. device-link treats "no phrase" as
+// "fresh device" and MINTS a new identity - so a phone that merely could not read
+// its keystore this boot silently became a different person, losing its place in
+// every space it was in, and reappearing to the household as a stranger.
+//
+// Not hypothetical: an unsigned iOS Simulator build cannot reach the Keychain at
+// all (error -34018) and re-minted on EVERY launch, which is what made two linked
+// devices show up as two people for half a day on 2026-07-31. The cases named
+// above - no screen lock, a keystore reset after a restore - do the same thing on
+// real hardware.
+//
+// So the read reports which of the two it is, and the worklet refuses to mint when
+// the answer is "cannot tell".
+async function loadStoredMnemonic (): Promise<{ readable: boolean, mnemonic: string | null }> {
+  try {
+    return { readable: true, mnemonic: await SecureStore.getItemAsync(MNEMONIC_STORE_KEY) }
+  } catch (e: any) {
+    // LOUD, like the write failure beside it. This used to be a bare `return null`,
+    // which is why it went unnoticed for as long as it did.
+    bootLog('mnemonic not readable: ' + (e?.message ?? String(e)))
+    return { readable: false, mnemonic: null }
+  }
 }
 async function storeMnemonic (mnemonic: string) {
   try {
@@ -532,7 +553,8 @@ async function startWorklet () {
   // cannot read secure storage must still start the app - device-link is off by
   // default, and the worst case is that pairing is unavailable until next launch.
   try {
-    await callRaw('device:provisionMnemonic', { mnemonic: await loadStoredMnemonic() })
+    const stored = await loadStoredMnemonic()
+    await callRaw('device:provisionMnemonic', { mnemonic: stored.mnemonic, storeReadable: stored.readable })
   } catch (e: any) {
     bootLog('mnemonic not provisioned: ' + (e?.message ?? String(e)))
   }
