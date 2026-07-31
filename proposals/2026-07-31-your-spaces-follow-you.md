@@ -208,12 +208,15 @@ Open questions.
 
 ## Open questions
 
-1. **Do the join secrets belong on the personal base at all?** The alternative is a
-   record carrying only `groupId` and `name`, with the other phone asking a phone that
-   holds the secrets to hand them over live. That keeps secrets transient and confines
-   them to devices currently in the pair, at the cost of not working while the other
-   phone is offline. **This should be decided before implementation**, because it is
-   the one choice that cannot be rolled back.
+1. ~~**Do the join secrets belong on the personal base at all?**~~ **ANSWERED
+   2026-07-31.** Tim chose not to store them in the clear. Working out how to fetch
+   them live turned up the reason the obvious version cannot work: every linked device
+   is given the MNEMONIC (`personal.js:527`), so a removed phone proves it is you
+   perfectly, and removal denies writing but never reading. Superseded by
+   `2026-07-31-space-secrets-locked-to-your-current-phones.md` (T3), which seals the
+   secrets to the box keys of the devices you currently have, resting on the one
+   property removal really does take away: a removed device cannot append. **The record
+   shape above changes accordingly** - `sealed[]` per device rather than bare secrets.
 2. **Automatic or offered.** Recommended automatic above, on consistency grounds.
    Worth Tim confirming, since it is the question the TODO flagged as needing a call.
 3. **Per-person or per-device leave.** Recommended per person, option 1.
