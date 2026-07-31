@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { sameIdentityAsOwner, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
+const { sameIdentityAsOwner, myDeviceKeys, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
@@ -2019,9 +2019,19 @@ const methods = {
         for await (const { value } of base.view.createReadStream(LIST_RANGE)) {
           if (value && value.id) lists.set(value.id, value)
         }
+        // MY PHONES, not this phone. A reminder resolves to a DEVICE key (an
+        // assignee, or whoever set it), so a chore reminder aimed at someone with two
+        // phones was scheduled on exactly one of them - and if that was the one in a
+        // drawer it never rang at all. Same key set the assignment notification
+        // already uses, memoised per space in listWire.
+        //
+        // It does mean both phones ring for one reminder. That is the right end of
+        // the trade: a duplicate is noise, a reminder that never fires is the feature
+        // not working.
+        const myKeys = await myDeviceKeys({ view: base.view, groupId, selfKey })
         for (const [listId, list] of lists) {
           for await (const { value: it } of base.view.createReadStream(itemRange(listId))) {
-            if (!isReminderPending(it, list, selfKey, now)) {
+            if (!isReminderPending(it, list, myKeys, now)) {
               // Would have been pending for SOMEONE, just not us.
               if (it && !it.deleted && !effectiveChecked(it, now) && typeof it.remindAt === 'number' && it.remindAt > now && reminderTargetOf(it, list)) elsewhere++
               continue

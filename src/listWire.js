@@ -460,6 +460,13 @@ async function maybeNotify (ctx, key, value, existing) {
   if (typeof value.updatedAt !== 'number' || value.updatedAt < Date.now() - NOTIFY_FRESH_MS) return
   if (value.pubkey === selfKey) return // our own change never notifies us
   if (value.deleted) return
+  // NOR DOES A CHANGE WE MADE ON OUR OTHER PHONE. Same rule, one level up: with two
+  // phones linked, checking something off on one made the other announce it as if a
+  // housemate had done it - "Tim assigned you a list" about a list you just assigned
+  // yourself. The line above is kept as the cheap path, since it answers the common
+  // case without reading the view at all.
+  const mine = await myDeviceKeys(ctx)
+  if (mine.has(value.pubkey)) return
   if (key.startsWith('member:')) {
     // A member row we have never seen before = someone joined the space.
     if (!existing) { try { emit('notify:joined', { name: String(value.displayName || 'Someone'), pubkey: value.pubkey, groupId }) } catch {} }
@@ -479,7 +486,6 @@ async function maybeNotify (ctx, key, value, existing) {
   // Resolved by reading member rows and comparing verified identity roots, NOT by
   // trusting a claim on the item. Falls back to exactly `selfKey` when nothing can
   // be proven, so an unlinked device behaves precisely as it did before.
-  const mine = await myDeviceKeys(ctx)
   if ((isItem || isList) && mine.has(value.assignee)) {
     const wasMine = !!existing && mine.has(existing.assignee)
     if (!wasMine) {
@@ -500,7 +506,12 @@ async function maybeNotify (ctx, key, value, existing) {
   if (isItem && value.checked === true && !(existing && existing.checked === true) && view) {
     const listId = key.split(':')[1]
     const list = (await view.get('list:' + listId))?.value
-    if (list && !list.deleted && list.createdBy === selfKey) {
+    // THE CREATOR IS A PERSON, NOT THE PHONE THEY HAPPENED TO CREATE IT ON. This
+    // read `list.createdBy === selfKey`, so a parent who made the chore list on one
+    // phone and is holding their other one was told nothing when a kid finished it -
+    // the return leg of the exact bug the assignment notification above already
+    // fixed with the same key set.
+    if (list && !list.deleted && typeof list.createdBy === 'string' && mine.has(list.createdBy)) {
       const mode = effectiveNotifyMode(list)
       const base = { listName: String(list.name || 'a list'), kind: list.kind || 'list', by: value.pubkey, groupId, listId }
       if (mode === 'each') {
@@ -719,6 +730,21 @@ function reminderTargetOf (item, list) {
   return null
 }
 
+// Does `target` name ME? `self` is EITHER one device key or the whole set of keys
+// this person signs with - callers that can resolve the set (reminder:pending, which
+// has the space's member rows) pass it, and the pure unit tests pass a single key.
+//
+// WHY THE SET MATTERS HERE: a reminder resolves to a DEVICE key, so a chore reminder
+// aimed at someone with two phones was scheduled on exactly one of them - and if that
+// was the phone in a drawer, it simply never rang. Same shape as the assignment
+// notification, which already reasons over the key set.
+function isSelfKey (self, target) {
+  if (!self || !target) return false
+  if (typeof self === 'string') return self === target
+  if (typeof self.has === 'function') return self.has(target)
+  return Array.isArray(self) ? self.includes(target) : false
+}
+
 // Is this row one that SHOULD have a notification pending right now, for me?
 // Pure and time-injected so the boundary cases are testable without waiting.
 // A checked item never rings: finishing something early is the normal way to
@@ -729,7 +755,7 @@ function isReminderPending (item, list, selfKey, now) {
   if (!item || item.deleted === true || effectiveChecked(item, now)) return false
   if (typeof item.remindAt !== 'number' || !Number.isFinite(item.remindAt)) return false
   if (item.remindAt <= now) return false // already past; the OS has fired it or it was missed
-  return !!selfKey && reminderTargetOf(item, list) === selfKey
+  return isSelfKey(selfKey, reminderTargetOf(item, list))
 }
 
 // iOS keeps at most 64 pending local notifications per app and SILENTLY drops the
@@ -737,4 +763,4 @@ function isReminderPending (item, list, selfKey, now) {
 // fire. 32 leaves generous headroom, plus a slot for the daily digest.
 const MAX_SCHEDULED_REMINDERS = 32
 
-module.exports = { applyListOp, rowApplyDecision, sameIdentityAsOwner, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
+module.exports = { applyListOp, rowApplyDecision, sameIdentityAsOwner, myDeviceKeys, isSelfKey, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
