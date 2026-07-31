@@ -2,6 +2,47 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-30 - promote1 ships WITH device linking, not after it
+Tier: T3 (it decides when a consensus rule reaches users). No code change:
+`armRevocation` already sets revokeV1, revokeV2 and promoteV1 in a single write
+whenever every member advertises support, so "ship all three" is what the code
+does today. This records WHY that is now deliberate rather than incidental.
+
+THE QUESTION. promote1 is the THIRD capability gate, on top of revoke1 and
+revoke2. Each one is a rule every peer must apply identically: a peer that does
+not understand it computes a different indexer set or a different view, and the
+space SILENTLY FORKS. That is why each stays dormant until every member
+advertises it and the owner arms it. Shipping three such rules in one release
+has a bigger tail than shipping two, and promote1 rides on device linking, which
+has not shipped at all. The open question was whether to hold it back.
+
+WHAT DECIDED IT: THERE ARE NO ARMED SPACES IN THE FIELD. 1.0.4 is the last
+release (2026-07-26/27); every one of the removal, revocation and promotion PRs
+landed 2026-07-29/30, after it. So no user has ever armed a space, and nothing
+out there can be forked by adding a rule.
+
+That inverts the usual caution. Holding promote1 back does not avoid the risk -
+it creates the harder version of it: spaces armed WITHOUT promote1 would then
+need the flag added underneath them later, through the catch-up path at
+listMethods.js:884. That path exists precisely because an armed space otherwise
+never picks up a capability added afterwards, and it has never run in the field
+either. Deferring therefore trades one unproven mechanism for two.
+
+AND THE TRAP IS USER-VISIBLE MEANWHILE. Without promote1 the phone that created a
+space is its only indexer, Autobase will not remove the last indexer, and a button
+labelled "remove this phone" locks its own user out - watched on hardware
+2026-07-29. Shipping two gates means shipping that.
+
+WHAT THIS DOES NOT CLAIM. The rollout-tail argument against three-at-once is
+sound and is not being dismissed; it is outweighed only because the field is
+empty. If device linking slips until after a release that arms spaces, THIS
+DECISION MUST BE REVISITED - the premise is a date-sensitive fact, not a
+principle.
+
+EVIDENCE IT WORKS: hardware-proven 2026-07-30 on the TCL + an iPhone Simulator,
+in both arming orders (arm-then-link and link-then-arm), with both peers
+promoting the same key. See DONE.md of that date.
+
 ## 2026-07-31 - 'Invalid checkout' is an upstream silent skip, not a PearList bug
 Tier: T1 for the code (a test only), but recorded here because the earlier
 diagnosis in TODO.md was WRONG and a wrong diagnosis that stays on file gets
