@@ -1189,16 +1189,24 @@ echo "==> Building signed release APK (this takes a few minutes)..."
 # the right way round - the download is the part people wait on and abandon.
 #
 # Drop the -P flag to revert. The AAB below deliberately does NOT get it.
+#
+# -PreactNativeArchitectures=arm64-v8a narrows a RELEASE build back to the one ABI
+# real phones use. The committed default is arm64-v8a,x86_64 so that a DEBUG build
+# installs on an emulator without anyone remembering a flag (CLAUDE.md rule 15, and
+# plugins/with-android-abis.js). Shipping the x86_64 slice to users would roughly
+# DOUBLE the release APK - measured 2026-07-31 at 204 MB against 111 MB. It is done
+# here rather than per-build-type because ndk.abiFilters is an accumulating Set and
+# cannot narrow a variant that already has both. Both the APK and the AAB get it.
 (
   export KEYSTORE_FILE KEY_ALIAS KEYSTORE_PASSWORD KEY_PASSWORD APP_VERSION APP_VERSION_CODE
-  cd android && ./gradlew assembleRelease -q -Pexpo.useLegacyPackaging=true
+  cd android && ./gradlew assembleRelease -q -Pexpo.useLegacyPackaging=true -PreactNativeArchitectures=arm64-v8a
 )
 
 if $PUBLISH_PLAY; then
   echo "==> Building signed release AAB for Google Play..."
   (
     export KEYSTORE_FILE KEY_ALIAS KEYSTORE_PASSWORD KEY_PASSWORD APP_VERSION APP_VERSION_CODE
-    cd android && ./gradlew bundleRelease -q
+    cd android && ./gradlew bundleRelease -q -PreactNativeArchitectures=arm64-v8a
   )
 fi
 
