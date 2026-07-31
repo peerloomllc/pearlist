@@ -93,4 +93,27 @@ function decideProfileMirror ({ incoming, current }) {
   return { accept: true, reason: 'newer' }
 }
 
-module.exports = { profileRecordOf, isProfileRecord, sameProfileContent, decideProfileMirror }
+// Does a newly mirrored profile bring a picture we do not already hold?
+//
+// Fetching is worth doing EAGERLY, because a record only arrives while the other
+// device is connected and that is the one moment the bytes are certainly
+// available. But it is worth doing only ONCE per distinct image: the fetch waits
+// up to 8s for replication, and re-running it for a picture we already have is
+// the cost with none of the benefit.
+//
+// Keyed on the content HASH, not on the blob reference: two devices hold different
+// blob ids for identical bytes, so comparing references would refetch the same
+// image every time it synced.
+//
+// BLOB REACHABILITY IS NOT A PROBLEM HERE, contrary to what the proposal expected.
+// Both engines share one Corestore and one Hyperswarm, and core replicates the
+// WHOLE store on every connection (peerloom-core/src/engine.js onConnection ->
+// store.replicate). So the blob core is already served over a personal-base
+// connection, not only to space peers, and no announcing work is needed.
+function shouldFetchAvatar (next, current) {
+  if (!next || !next.avatarBlob || !next.avatarHash) return false
+  if (!next.avatarBlob.key || next.avatarBlob.id === undefined) return false
+  return next.avatarHash !== (current ? current.avatarHash : null)
+}
+
+module.exports = { profileRecordOf, isProfileRecord, sameProfileContent, decideProfileMirror, shouldFetchAvatar }

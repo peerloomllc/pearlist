@@ -17,7 +17,7 @@ const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
 const { collapseMembers, sameIdentityKeys, identityRootOf } = require('./memberIdentity')
 const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, _trace: _dlTrace } = require('./deviceLink')
-const { decideProfileMirror } = require('./profileSync')
+const { decideProfileMirror, shouldFetchAvatar } = require('./profileSync')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -261,13 +261,88 @@ setProfileMirror(async (ctx, incoming) => {
   const next = { ...incoming }
   if (!next.avatarBlob && current && current.avatar && !incoming.avatarHash) next.avatar = current.avatar
 
+  // localDb is not a base, so writing it here is safe and is what device-link's own
+  // apply does. Everything below is DEFERRED, and that distinction is the whole
+  // point of the next comment.
   await ctx.localDb.put('profile', next)
   _dlTrace('dl:profileMirrored', { name: !!next.displayName, avatar: !!next.avatarBlob })
-  // Push the new name into every space, so the HOUSEHOLD sees it and not just
-  // this device's settings screen. That is the whole point of the feature.
-  await publishMember(ctx)
+
+  // NOT INLINE. This handler runs inside the PERSONAL base's apply, and both of
+  // these reach outside it:
+  //
+  //   publishMember   appends to the SPACE bases. Appending to one base from
+  //                   inside another's apply asserts deep in Hyperbee -
+  //                   "Invalid checkout N for batch, length is 0" - which is a
+  //                   TIMING-DEPENDENT failure caught on the TCL 2026-07-30 and
+  //                   still an open item. deviceLink.js:295 documents it, and
+  //                   scheduleGroupWriterGrant exists for exactly this reason.
+  //   the blob fetch  waits up to 8s for bytes to replicate, which would stall the
+  //                   personal base's apply loop for that long.
+  //
+  // The first version of this did both inline. It was behind the off flag so it
+  // reached nobody, but it re-created a known assert in code that had already
+  // merged - found by reading the neighbouring comment, not by a test, because a
+  // swallowed assert here looks exactly like "the publish silently did not happen".
+  schedulePublishMember(ctx)
+  if (shouldFetchAvatar(next, current)) scheduleAvatarFetch(ctx, next)
   try { ctx.emit('profile:changed', { displayName: next.displayName }) } catch {}
 })
+
+// Publish our member row to every space, on a LATER TURN. See the comment above
+// for why it cannot happen inline.
+//
+// COALESCED, which is also the debounce the proposal asks for: several mirrored
+// records in a burst (a rename and an avatar change land as two ops) produce one
+// publish, not one each.
+//
+// RETRIED while it reports nothing published, because a space base can be
+// mid-update when the first attempt lands - the same reason and the same shape as
+// scheduleGroupWriterGrant. Bounded, and traced either way, since the original
+// grant bug was invisible precisely because a swallowed failure looked like success.
+let _publishQueued = false
+function schedulePublishMember (ctx, attempt = 1) {
+  if (_publishQueued) return
+  _publishQueued = true
+  const run = async () => {
+    _publishQueued = false
+    let ok = false
+    try { ok = await publishMember(ctx) } catch (e) { _dlTrace('dl:profilePublishFailed', { err: (e && e.message) || String(e), attempt }) }
+    // Only retry if there is somewhere to publish TO. A device in no spaces
+    // reports false forever, and retrying that is just noise.
+    if (!ok && attempt < 4 && ctx.bases && ctx.bases.size > 0) {
+      const t = setTimeout(() => schedulePublishMember(ctx, attempt + 1), 400 * attempt)
+      if (t && t.unref) t.unref()
+    } else if (ok && attempt > 1) {
+      _dlTrace('dl:profilePublished', { attempt })
+    }
+  }
+  const t = setTimeout(run, 0)
+  if (t && t.unref) t.unref()
+}
+
+// Pull the avatar BYTES when a mirrored profile brings a new picture.
+//
+// Same reasoning as the pairing-time fetch: a record only arrives because the
+// other device is connected RIGHT NOW, so this is the moment the bytes are
+// certainly available. `resolveAvatarCached` would otherwise fetch on the next
+// roster render, which may be after that phone is pocketed or swiped away.
+//
+// Deferred for the second reason above - it can wait 8s - and never fatal: the
+// lazy path still runs on every roster render, so a missed fetch heals the next
+// time both devices are connected.
+function scheduleAvatarFetch (ctx, profile) {
+  const t = setTimeout(async () => {
+    try {
+      const got = !!(await resolveAvatarAwait(ctx, profile))
+      if (got) {
+        await ctx.localDb.put('blobref:' + profile.avatarHash,
+          { key: profile.avatarBlob.key, id: profile.avatarBlob.id, type: profile.avatarType || 'image/png' }).catch(() => {})
+      }
+      _dlTrace('dl:profileAvatarFetched', { got })
+    } catch { _dlTrace('dl:profileAvatarFetched', { got: false }) }
+  }, 0)
+  if (t && t.unref) t.unref()
+}
 
 // STOPGAP, and labelled as one. A phone you just linked should already be you -
 // same name, same picture - because that is what "this is my other phone" means.
