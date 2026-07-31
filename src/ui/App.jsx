@@ -1970,7 +1970,13 @@ export default function App () {
     // binding, which only exists if it has been online since Stronger removal was
     // turned on. Without it the removal is hide-only, and saying otherwise would be
     // a lie about a security property.
-    if (revoke?.armed && res && res.revoked === false) {
+    if (revoke?.armed && res && res.why === 'not-owner-device') {
+      // A DIFFERENT REASON, so a different sentence. This phone can manage the space
+      // because it is the owner's, but cutting a member's device off is still the
+      // founding phone's job (see setEvicted). Telling them to wait for updates here
+      // would send them to fix something that is not broken.
+      setBanner(`${name} removed from the list. To cut their device off completely, do it on the phone that created this space.`)
+    } else if (revoke?.armed && res && res.revoked === false) {
       setBanner(`${name} removed from the list, but their device could not be cut off (it has not been online since Stronger removal was turned on).`)
     } else {
       setBanner(`${name} removed.`)

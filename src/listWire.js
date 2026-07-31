@@ -57,8 +57,14 @@ const LIST_RANGE = { gt: 'list:', lt: 'list:~' }
 const MEMBER_RANGE = { gt: 'member:', lt: 'member:~' }
 const { sameIdentityKeys, identityRootOf } = require('./memberIdentity')
 
-// Does `candidate` prove the same identity root as `ownerPubkey`? Used only by the
-// same-identity ownership transfer in the `space` branch.
+// Does `candidate` prove the same identity root as `ownerPubkey`? The gate on the
+// same-identity ownership transfer in the `space` branch, and - since 2026-07-31 -
+// the gate the CLIENT reuses to decide whether the owner's other phone may manage
+// the space at all (canActAsOwner in listMethods.js).
+//
+// EXPORTED SO THE TWO CANNOT DRIFT. The client must accept exactly what apply
+// accepts and no more: a write apply drops is not a refusal the user sees, it is a
+// success the UI reports and every peer discards.
 //
 // DETERMINISTIC: both proofs come from replicated member rows and identityRootOf is
 // pure crypto over those bytes, so every peer reaches the same answer. An ABSENT
@@ -731,4 +737,4 @@ function isReminderPending (item, list, selfKey, now) {
 // fire. 32 leaves generous headroom, plus a slot for the daily digest.
 const MAX_SCHEDULED_REMINDERS = 32
 
-module.exports = { applyListOp, rowApplyDecision, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
+module.exports = { applyListOp, rowApplyDecision, sameIdentityAsOwner, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }

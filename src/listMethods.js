@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
+const { sameIdentityAsOwner, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
@@ -532,11 +532,47 @@ async function putRow (ctx, groupId, key, value) {
 // Two owner devices evicting concurrently both RMW this row and resolve LWW, so
 // one eviction can be lost. Rare (a single owner), and re-doing it just works.
 const HEX_64 = /^[0-9a-f]{64}$/i
+
+// May THIS device manage the space - remove a member, arm, delete it? Either it is
+// the owner device itself, or it is another phone the SAME PERSON holds, on a space
+// armed for revokeV2.
+//
+// WHY IT IS NOT JUST `meta.owner === me`, which is what all three checks used to be:
+// every owner check compared DEVICE keys, so once you linked a second phone that
+// phone could not do anything its owner could - and "this phone becomes you" is the
+// entire promise of linking. Tim, from the iPhone after it linked, 2026-07-31: "the
+// iPhone doesn't inherit the Space ownership - I can't remove members on the iPhone
+// but I can on the TCL."
+//
+// THIS IS NOT A NEW CAPABILITY. applyListOp already accepts a `space` write from a
+// device that proves the owner's identity on a revokeV2 space (the ownership-transfer
+// exception, and the reasoning for why it is not a seizure button lives there). The
+// wire has permitted this since PR #150; only the client refused. So this is the
+// client catching up, and it reuses apply's OWN predicate rather than restating it.
+//
+// THE GATE MUST NOT BE WIDER THAN APPLY'S. On an un-armed space this returns false,
+// because apply would silently drop that write - the UI would report a removal that
+// no peer, including this one after a restart, ever performed. Refusing is the honest
+// answer there.
+//
+// ACTING ON THE OWNER'S BEHALF, NOT TAKING OVER: every caller does a read-modify-write
+// that spreads the existing `space` row, so `owner` is preserved and apply's second
+// condition (the NEW owner must also prove the identity) holds trivially. Transferring
+// ownership stays where it already is - the removal path in revokeDeviceFromSpaces,
+// for when the original phone is gone.
+async function canActAsOwner (ctx, base, meta) {
+  if (!meta || typeof meta.owner !== 'string') return false
+  const me = pubkeyHex(ctx)
+  if (meta.owner === me) return true
+  if (meta.revokeV2 !== true) return false
+  return await sameIdentityAsOwner(base.view, me, meta.owner)
+}
+
 async function setEvicted (ctx, groupId, pubkey, evicted) {
   if (typeof pubkey !== 'string' || !HEX_64.test(pubkey)) throw new Error('invalid pubkey')
   const base = viewFor(ctx, groupId)
   const meta = await readRow(base, 'space')
-  if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can remove a member')
+  if (!await canActAsOwner(ctx, base, meta)) throw new Error('only the owner can remove a member')
   if (pubkey === meta.owner) throw new Error('the owner cannot be removed')
   // A PERSON, NOT A DEVICE. The members list merges someone's phones into one row
   // (src/memberIdentity.js), so "remove Sam" means every device Sam signs with -
@@ -580,8 +616,27 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
   // "every device was cut off", so the caller's existing honest warning - "removed
   // from the list, but their device could not be cut off" - still fires whenever
   // ANY of them could not be, rather than only when the first could not.
+  // THE HARD HALF STAYS WITH THE OWNER'S OWN DEVICE, and this is the one place the
+  // client gate above is deliberately WIDER than what follows.
+  //
+  // Hiding a member is a `space` write, which apply accepts from any of the owner's
+  // phones. Cutting their WRITER off is a separate op with a separate apply rule:
+  // revocation.js authorizeRevoke honours it from `meta.owner` exactly, or from a
+  // device proving it is the same person as the TARGET (that is "remove my own
+  // phone"). The owner's second phone is neither, so a revokeWriter it appended would
+  // be dropped by every peer while we counted it as a clean cut - the precise failure
+  // this whole change exists to avoid, one layer down.
+  //
+  // So do not append it, and say so: `why` reaches the UI, which otherwise blames the
+  // member for not having been online since arming and sends the user to fix the
+  // wrong thing. Widening authorizeRevoke would need its own capability flag and its
+  // own arming round, since peers that disagree about the writer set FORK. Left as a
+  // TODO rather than smuggled in here.
   let revoked = false
-  if (evicted && meta.revokeV1 === true) {
+  let why = null
+  const ownerDevice = meta.owner === pubkeyHex(ctx)
+  if (evicted && meta.revokeV1 === true && !ownerDevice) why = 'not-owner-device'
+  if (evicted && meta.revokeV1 === true && ownerDevice) {
     let cut = 0
     for (const k of targets) {
       const row = await readRow(base, memberKey(k))
@@ -594,7 +649,7 @@ async function setEvicted (ctx, groupId, pubkey, evicted) {
     }
     revoked = cut > 0 && cut === targets.length
   }
-  return { ok: true, evicted, revoked, devices: targets.length }
+  return { ok: true, evicted, revoked, devices: targets.length, why }
 }
 
 // Revoke ONE OF MY OWN DEVICES from every space it can write to.
@@ -723,7 +778,11 @@ async function revokeDeviceFromSpaces (ctx, appPubkey) {
 async function armRevocation (ctx, groupId) {
   const base = viewFor(ctx, groupId)
   const meta = await readRow(base, 'space')
-  if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can arm revocation')
+  // The owner's other phone can only ever reach the catch-up path below: canActAsOwner
+  // requires revokeV2, and revokeV2 implies revokeV1, so the FIRST arming of a space
+  // is still the owner device's alone. That is not a limitation to work around - an
+  // un-armed space is exactly the one whose peers would drop the write.
+  if (!await canActAsOwner(ctx, base, meta)) throw new Error('only the owner can arm revocation')
   const rows = []
   for await (const { value } of base.view.createReadStream(MEMBER_RANGE)) if (value) rows.push(value)
   const evicted = Object.keys(meta.evicted || {})
@@ -825,7 +884,11 @@ const methods = {
             await base.update()
             meta = (await base.view.get('space'))?.value
           }
-          owner = meta?.owner === pubkeyHex(ctx)
+          // "owner" here means MAY MANAGE, not "is the owner device" - the Spaces
+          // sheet swaps trash for leave on it, and the Members sheet gates Remove and
+          // Add back on it. Without this the server would allow the owner's other
+          // phone to remove a member and the UI would still not offer the button.
+          owner = await canActAsOwner(ctx, base, meta)
         } catch {}
       }
       out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0, owner })
@@ -886,7 +949,7 @@ const methods = {
   'space:delete': async ({ groupId }, ctx) => {
     const base = viewFor(ctx, groupId)
     const meta = await readRow(base, 'space')
-    if (!meta || meta.owner !== pubkeyHex(ctx)) throw new Error('only the owner can delete a space')
+    if (!await canActAsOwner(ctx, base, meta)) throw new Error('only the owner can delete a space')
     await putRow(ctx, groupId, 'space', { ...meta, deleted: true, deletedAt: Date.now() })
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
     setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
@@ -1085,7 +1148,11 @@ const methods = {
     //
     // Owner-only, best-effort and idempotent: armRevocation itself re-checks the
     // gate, and it only ever ADDS a flag once every member advertises the capability.
-    if (armed && meta?.owner === me && (meta.revokeV2 !== true || meta.promoteV1 !== true)) {
+    // canManage, not `meta.owner === me`: the owner's other phone may run the
+    // catch-up too. It can only ever ADD promoteV1 - reaching here at all means
+    // revokeV2 is already on - and armRevocation re-checks the capability gate.
+    const canManage = await canActAsOwner(ctx, base, meta)
+    if (armed && canManage && (meta.revokeV2 !== true || meta.promoteV1 !== true)) {
       if (allMembersSupportSelfRevoke(rows, evicted) || allMembersSupportPromote(rows, evicted)) {
         armRevocation(ctx, groupId).catch(() => {})
       }
@@ -1093,7 +1160,7 @@ const methods = {
 
     return {
       armed,
-      isOwner: meta?.owner === me,
+      isOwner: canManage,
       canArm: allMembersSupportRevoke(rows, evicted),
       total: active.length,
       ready: active.length - missing.length,
