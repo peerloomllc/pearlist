@@ -227,15 +227,39 @@ function backfillIdentityProof (ctx, groupId, publishedProof) {
 // decided independently on each device by decideProfileMirror, so the newer name
 // wins whichever order the two ops linearize in.
 const _personalProfileSeeded = new Set()
+// MARKED ON SUCCESS, NOT ON ATTEMPT, and that distinction is the whole function.
+//
+// The first version marked the guard before trying, copying backfillIdentityProof.
+// It is the wrong shape here: putProfileRecord returns false whenever device-link
+// has not been constructed yet, and that is the NORMAL state at boot - member:getAll
+// runs on the first roster refresh, device-link starts later. So the single
+// per-session attempt was spent on a guaranteed no-op and the profile was never
+// published at all.
+//
+// Caught on hardware 2026-07-31 with two linked signed devices holding two
+// different names indefinitely, neither converging. Silent, of course: the failed
+// attempt returned false and nothing said so. Hence the trace below.
+//
+// Retrying costs a localDb read and two boolean checks - putProfileRecord bails
+// before touching anything when linking is off or not started - so there is no
+// append to amplify. `_seedInFlight` keeps two overlapping refreshes from both
+// publishing, which is the concurrency the old comment was really guarding.
+let _seedInFlight = false
 function seedPersonalProfile (ctx) {
+  if (_seedInFlight) return
+  _seedInFlight = true
   ;(async () => {
-    const prof = (await ctx.localDb.get('profile'))?.value
-    if (!prof || typeof prof.displayName !== 'string' || !prof.displayName) return
-    const guard = 'profile:' + (prof.updatedAt || 0)
-    if (_personalProfileSeeded.has(guard)) return
-    _personalProfileSeeded.add(guard)
-    await putProfileRecord(ctx, prof)
-  })().catch(() => {})
+    try {
+      const prof = (await ctx.localDb.get('profile'))?.value
+      if (!prof || typeof prof.displayName !== 'string' || !prof.displayName) return
+      const guard = 'profile:' + (prof.updatedAt || 0)
+      if (_personalProfileSeeded.has(guard)) return
+      if (await putProfileRecord(ctx, prof)) {
+        _personalProfileSeeded.add(guard)
+        _dlTrace('dl:profileSeeded', { at: prof.updatedAt || 0 })
+      }
+    } finally { _seedInFlight = false }
+  })().catch(() => { _seedInFlight = false })
 }
 
 // A rename on one of this person's phones, arriving on the others.
