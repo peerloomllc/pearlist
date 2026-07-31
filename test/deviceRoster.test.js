@@ -53,50 +53,38 @@ test('the roster offers rename for this phone and remove for others', () => {
   assert.match(src, /call\('device:remove', \{ writerKey: d\.writerKey \}\)/)
 })
 
-// THE IMPORTANT ONE, and the truth it guards MOVED on 2026-07-29.
+// THE IMPORTANT ONE, and the truth it guards has MOVED TWICE.
 //
-// Removal now revokes the device's writer key on the PERSONAL base
-// (peerloom-device-link PR #6), so it really can no longer change your own
-// account. It still does NOT touch the shared spaces - the removed phone keeps the
-// per-space writer keys granted at pairing and can edit those lists until the
-// space-side half of the revocation proposal ships.
+// Removal revokes the device's writer key on the PERSONAL base (device-link PR #6)
+// AND, in every armed space, cuts it off there too (revokeDeviceFromSpaces). It
+// does not stop the phone READING what it already holds, and re-pairing brings the
+// phone back on a fresh key with no reinstall (pearlist #140, hardware-proven).
 //
-// So the copy has to hit the middle: more than "hides a row", less than a lockout.
-// Rounding it UP tells someone their lost phone is shut out when it is not, which
-// is the worst thing to be wrong about here. Rounding it DOWN understates a real
-// protection and pushes people to recreate spaces they did not need to.
-test('the removal confirm claims exactly what removal now does, no more', () => {
+// The copy now lives in src/removalText.js and is tested against its OUTPUT in
+// test/removalText.test.js. This test used to assert the shape of App.jsx's string
+// interpolation (`${spaceLine} ${forever}`, `ready === 0`) - which pinned the
+// formatting rather than the claim, broke the moment the copy was extracted, and
+// had frozen `delete PearList on it` in place after that stopped being true. So
+// what stays here is only what is genuinely about the SCREEN: that removeDevice
+// asks the worklet first and renders the derived message.
+test('the removal confirm is derived, not hand-written at the call site', () => {
   const src = app()
   const at = src.indexOf('async function removeDevice')
   assert.ok(at > 0, 'removeDevice should exist')
-  const body = src.slice(at, at + 1600)
+  const body = src.slice(at, at + 900)
 
   assert.match(body, /askConfirm\(/, 'removal must be confirmed')
-  // The protection it DOES now give, stated in every branch.
-  assert.match(body, /can no longer change your own account/i, 'must state the account-level revocation')
-  assert.match(body, /recovery phrase/i, 'naming why it is not a full lockout: it still holds the phrase')
+  assert.match(body, /device:removalPreview/, 'and must ask what will actually happen first')
+  assert.match(body, /message: deviceRemovalMessage\(preview\)/,
+    'the message comes from the tested module, built from that preview')
+  assert.match(src, /import \{ deviceRemovalMessage \} from '\.\.\/removalText\.js'/,
+    'imported rather than reimplemented')
 
-  // THE LIMIT IS NOW CONDITIONAL. It used to be one fixed sentence, and this test
-  // used to REQUIRE that sentence - which is how the copy stayed wrong on an armed
-  // space long after removal started cutting those off. So: the pessimistic line
-  // must still exist, but only as the branch for "no space is ready".
-  assert.match(body, /ready === 0[\s\S]{0,120}does NOT lock that phone out of your shared lists/i,
-    'the old promise survives only as the zero-ready branch')
-
-  // Claims that would over-promise in the branches that DO cut it off. A lockout of
-  // shared lists is now sayable; a lockout full stop, or of reading, is not.
-  for (const claim of [/revokes? (its|the) access/i, /shut out/i, /can no longer (see|read)/i, /loses? (the )?recovery phrase/i]) {
-    assert.doesNotMatch(body, claim, `removal copy must not over-promise: ${claim}`)
-  }
-  // Reading survives in every branch that claims a cut-off, and it must say so.
-  assert.match(body, /can still SEE what it already has/, 'the cut-off branches must still scope it to writes')
-
-  // PERMANENCE, in every branch. Removal cannot be undone - the revokedWriter
-  // record refuses that key forever - and the confirm said nothing about it until
-  // Tim tried to re-pair a removed iPhone and could not (2026-07-30).
-  assert.match(body, /cannot be undone/i, 'the confirm must say removal is permanent')
-  assert.match(body, /delete PearList on it/i, 'and name the only way back: a fresh install')
-  assert.match(body, /\$\{spaceLine\} \$\{forever\}/, 'permanence is appended to EVERY branch, not one of them')
+  // No hand-written removal copy may creep back in beside it.
+  assert.doesNotMatch(body, /does NOT lock that phone out/,
+    'the branch wording belongs in removalText.js, not here')
+  assert.doesNotMatch(body, /cannot be undone/i,
+    'and so does the permanence sentence')
 })
 
 test('listMethods describes device:remove as it now behaves', () => {
@@ -119,18 +107,11 @@ test('listMethods describes device:remove as it now behaves', () => {
   assert.match(raw, /does NOT stop the device READING/i, 'and what it still does not')
 })
 
-test('the removal confirm is built from a PREVIEW, not a fixed sentence', () => {
-  // The regression this exists for: a single hardcoded line promising the phone was
-  // NOT locked out of shared lists, shown seconds before the app said it had been.
-  const src = app()
-  assert.match(src, /device:removalPreview/, 'the confirm asks what will actually happen')
-  // The old unconditional promise must not come back as the only wording.
-  const bare = src.match(/It does NOT lock that phone out of your shared lists/g) || []
-  assert.equal(bare.length, 1, 'that sentence is now ONE branch of a choice, not the message')
-  assert.match(src, /cut off from \$\{ready\} of your \$\{total\} shared spaces/, 'partial case is stated with counts')
-
-  // And the preview must run the SAME predicate the removal runs, or the two drift
-  // apart again the moment either is edited.
+test('the preview and the removal share one predicate, so they cannot drift', () => {
+  // The regression this exists for: the confirm promised the phone was NOT locked
+  // out of shared lists, seconds before the app said it had been. The fix was to
+  // ask the worklet - which only helps if the preview runs the SAME test the
+  // removal runs.
   const raw = read('src/listMethods.js')
   assert.match(raw, /async function spaceRevokeBlocker /, 'the predicate is its own function')
   const calls = raw.match(/await spaceRevokeBlocker\(/g) || []
