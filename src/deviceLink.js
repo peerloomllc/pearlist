@@ -104,7 +104,17 @@ function makeKeystore () {
 // Called by the shell at boot through device:provisionMnemonic. `null` on a
 // device that has never had one; device-link mints it on first enable and the
 // event carries it back out.
-function provisionMnemonic (m) { _mnemonic = (typeof m === 'string' && m.trim()) ? m.trim() : null; return !!_mnemonic }
+//
+// `storeReadable: false` means the shell could not READ secure storage - which is a
+// completely different thing from "there is no phrase yet", and must not be treated
+// as one. See the comment on loadStoredMnemonic in app/index.tsx.
+let _keystoreUnreadable = false
+function provisionMnemonic (m, storeReadable = true) {
+  _mnemonic = (typeof m === 'string' && m.trim()) ? m.trim() : null
+  _keystoreUnreadable = storeReadable === false && !_mnemonic
+  return !!_mnemonic
+}
+function isKeystoreUnreadable () { return _keystoreUnreadable }
 
 // A device that ran the slice-1 build has its phrase sitting in localDb, in
 // plaintext. Adopt it, hand it to the shell to put in the keystore, and DELETE
@@ -321,6 +331,21 @@ let _dlPromise = null
 // active device-link session, never start one - see putProfileRecord.
 function isDeviceLinkStarted () { return !!_dlPromise }
 function getDeviceLink (ctx) {
+  // REFUSE TO START WHEN THE KEYSTORE IS UNREADABLE, because starting is what mints.
+  //
+  // device-link has no "I do not know" state: `hasMnemonic()` returning false means
+  // "fresh device", and it responds by minting a new identity. If the phrase is
+  // actually sitting in a keystore we merely could not read this boot, that mint
+  // REPLACES the person - they lose their place in every space and reappear to the
+  // household as a stranger, silently.
+  //
+  // Refusing means linking is unavailable until the keystore works, and says so.
+  // That is strictly better than becoming someone else: an unavailable feature is
+  // recoverable on the next boot, a discarded identity is not.
+  if (isKeystoreUnreadable()) {
+    _trace('dl:keystore-unreadable-refusing-to-start')
+    return Promise.reject(new Error('secure storage is unavailable, so device linking is off this session'))
+  }
   if (_dlPromise) return _dlPromise
   _dlPromise = (async () => {
     // The shell persists it; see makeKeystore. Wired here because ctx.emit is
@@ -359,7 +384,7 @@ function getDeviceLink (ctx) {
   return _dlPromise
 }
 
-function _resetForTest () { _dlPromise = null; _attestCache = null; _mnemonic = null }
+function _resetForTest () { _dlPromise = null; _attestCache = null; _mnemonic = null; _keystoreUnreadable = false }
 // The plugin is otherwise only reachable through device-link's internals; tests
 // drive it directly because its three legs are PearList's code, not the engine's.
 function _groupPluginForTest (ctx) { return makeGroupPlugin(ctx) }
@@ -395,4 +420,4 @@ async function attestSelf (devicePubkeyHex) {
   return proofHex
 }
 
-module.exports = { setProfileMirror, putProfileRecord, isDeviceLinkStarted, attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }
+module.exports = { setProfileMirror, putProfileRecord, isDeviceLinkStarted, isKeystoreUnreadable, attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }

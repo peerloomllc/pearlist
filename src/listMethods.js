@@ -1155,10 +1155,13 @@ const methods = {
   // owns the only copy at rest. `null` on a device that has never had one - the
   // engine mints it on first enable and the deviceLink:mnemonic event carries it
   // back to the shell to store.
-  'device:provisionMnemonic': async ({ mnemonic }, _ctx) => {
-    const had = provisionMnemonic(mnemonic)
-    _dlTrace('dl:provisioned', { had })
-    return { had }
+  'device:provisionMnemonic': async ({ mnemonic, storeReadable = true }, _ctx) => {
+    const had = provisionMnemonic(mnemonic, storeReadable)
+    // `readable:false` is the interesting case and the reason this trace exists:
+    // it means the phrase may still be sitting in a keystore we could not open, so
+    // device linking refuses to start rather than minting a replacement identity.
+    _dlTrace('dl:provisioned', { had, readable: storeReadable !== false })
+    return { had, storeReadable: storeReadable !== false }
   },
 
   // Start pairing on the device that ALREADY has the identity (the "primary").
