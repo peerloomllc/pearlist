@@ -10,6 +10,7 @@ import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
+import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
@@ -3125,44 +3126,22 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   }
 
   // Takes another phone off the roster AND revokes its writer key on the personal
-  // base. The confirm still has to be honest about the part that has NOT changed:
-  // the removed phone keeps the recovery phrase, keeps the shared spaces, and can
-  // still edit those. Saying otherwise would reassure someone about a lost phone
-  // that is still able to change the household's lists.
+  // base.
   //
   // This can also be REFUSED, and used to be refused in silence: a phone that has
   // itself been removed cannot write to the personal base, so it cannot remove
   // anything either. Correct, but it needs saying.
   async function removeDevice (d) {
     const label = deviceLabel(d)
-    // ASK THE WORKLET WHAT THIS WILL ACTUALLY DO before promising anything. The
-    // message used to be a single fixed sentence saying the phone would NOT be
-    // locked out of shared lists - written when that was true of every space, and
-    // left behind when the space-side revocation shipped. On an armed space the
-    // user was told it kept access and then, seconds later, told it had been cut
-    // off. Both dialogs, one flow, watched on the TCL 2026-07-30.
+    // ASK THE WORKLET WHAT THIS WILL ACTUALLY DO before promising anything, because
+    // how much a removal cuts off depends on which spaces are armed and ready.
     const preview = await call('device:removalPreview', { writerKey: d.writerKey }).catch(() => null)
-    const ready = preview?.ready || 0
-    const total = preview?.total || 0
-    // Never promise a clean sweep: `ready` is a floor (the owner-transfer step can
-    // still fail) and the result message reports what actually landed.
-    const spaceLine = ready === 0
-      ? `It does NOT lock that phone out of your shared lists - it still has your recovery phrase and your spaces, and can still edit them. To take it off those for real you would need to move them to a new space.`
-      : ready === total
-        ? `It will also be cut off from your shared lists${total > 1 ? ` (${total} spaces)` : ''}, so it can no longer change them. It keeps your recovery phrase and can still SEE what it already has.`
-        : `It will also be cut off from ${ready} of your ${total} shared spaces. In the rest it can still edit, because everyone there has to be on the latest version first. It keeps your recovery phrase and can still SEE what it already has.`
-    // PERMANENCE IS ITS OWN SENTENCE, and it is not optional. Removal writes a
-    // `revokedWriter:` record into the personal base's view and the admission path
-    // refuses that key forever, on every device (peerloom-device-link
-    // src/personal.js). So there is no un-remove, and the ONLY way that phone can
-    // be used again is a fresh install, which gives it a key that was never
-    // revoked. Tim tried to re-pair a removed iPhone from Settings within an hour
-    // of the feature working and could not - if the person who built it expects a
-    // way back, a user hunting a lost phone certainly will.
-    const forever = `This cannot be undone. To use that phone again you would have to delete PearList on it and set it up from scratch.`
+    // The wording itself lives in src/removalText.js, derived and tested rather
+    // than written here. It drifted out of step with the code twice in one day on
+    // 2026-07-30, in opposite directions, which is what moved it out.
     const ok = await askConfirm({
       title: `Remove ${label}?`,
-      message: `It stops showing in this list and can no longer change your own account. ${spaceLine} ${forever}`,
+      message: deviceRemovalMessage(preview),
       confirmLabel: 'Remove',
       danger: true,
     })
