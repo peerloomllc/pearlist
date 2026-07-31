@@ -51,7 +51,13 @@ async function person () {
 // The engine's apply loop, with PearList's admitWriter policy: once armed, new
 // writers are admitted as NON-indexers. That policy is what creates the trap, so the
 // test has to reproduce it rather than assume indexers everywhere.
-function makeApply (groupId, selfKey) {
+//
+// `marks` is the worklet's trace hook, which src/bare.js threads into the apply ctx
+// for real. Collecting it here is how the tests can assert the promotion gate says
+// WHY it declined - the thing whose absence made a 15-minute hardware run
+// uninterpretable.
+function makeApply (groupId, selfKey, marks) {
+  const mark = marks && ((name, extra) => { marks.push({ self: selfKey.slice(0, 8), name, extra }) })
   return async (nodes, view, base) => {
     for (const node of nodes) {
       const op = node.value
@@ -71,15 +77,15 @@ function makeApply (groupId, selfKey) {
         try { await base.removeWriter(key) } catch {}
         continue
       }
-      await CURRENT.applyListOp(op, { view, base, groupId, node, emit () {}, selfKey })
+      await CURRENT.applyListOp(op, { view, base, groupId, node, emit () {}, selfKey, mark })
     }
   }
 }
-async function mkPeer ({ bootstrap, selfKey }) {
+async function mkPeer ({ bootstrap, selfKey, marks }) {
   const store = new Corestore(tmpDir())
   await store.ready()
   const base = new Autobase(store.namespace('g'), bootstrap, {
-    open: openView, apply: makeApply('g', selfKey), valueEncoding: 'json',
+    open: openView, apply: makeApply('g', selfKey, marks), valueEncoding: 'json',
   })
   await base.ready()
   return { store, base }
@@ -105,9 +111,10 @@ async function household (t, { promote }) {
   const mkTim = await person(); const mkSam = await person()
   const A = await mkTim(); const B = await mkTim(); const C = await mkSam()
 
-  const owner = await mkPeer({ bootstrap: null, selfKey: A.pubkey })
-  const mine = await mkPeer({ bootstrap: owner.base.key, selfKey: B.pubkey })
-  const mate = await mkPeer({ bootstrap: owner.base.key, selfKey: C.pubkey })
+  const marks = []
+  const owner = await mkPeer({ bootstrap: null, selfKey: A.pubkey, marks })
+  const mine = await mkPeer({ bootstrap: owner.base.key, selfKey: B.pubkey, marks })
+  const mate = await mkPeer({ bootstrap: owner.base.key, selfKey: C.pubkey, marks })
   const stops = [connect(owner, mine), connect(owner, mate), connect(mine, mate)]
   t.after(() => stops.forEach((s) => s()))
 
@@ -131,22 +138,35 @@ async function household (t, { promote }) {
   await settle([owner, mine, mate], 3000)
   await settle([owner, mine, mate], 2000)
 
-  return { A, B, C, owner, mine, mate }
+  return { A, B, C, owner, mine, mate, marks }
 }
+const reasons = (marks) => new Set(marks.filter((m) => m.name.startsWith('promote:')).map((m) => m.name.slice(8)))
 
 test('WITHOUT promoteV1 the creator is stuck as the only indexer - the trap', async (t) => {
   t.after(cleanup)
-  const { owner } = await household(t, { promote: false })
+  const { owner, marks } = await household(t, { promote: false })
   assert.equal(owner.base.removeable(owner.base.local.key), false,
     'the space creator cannot be removed, which is what made the removal lie on hardware')
+
+  // AND IT SAYS SO. A gate that declines silently is indistinguishable on a pulled
+  // log from one that never ran, which is what left "promoteV1 does not fire" open.
+  assert.ok(reasons(marks).has('not-armed'),
+    `an un-armed space must name that as the reason it declined (saw ${[...reasons(marks)].join(', ') || 'nothing'})`)
 })
 
 test('WITH promoteV1 the owner\'s own second phone signs, and the creator becomes removeable', async (t) => {
   t.after(cleanup)
-  const { A, B, C, owner, mine, mate } = await household(t, { promote: true })
+  const { A, B, C, owner, mine, mate, marks } = await household(t, { promote: true })
 
   assert.equal(owner.base.removeable(owner.base.local.key), true,
     'promoting the owner\'s other phone frees the creator')
+
+  // The happy path is traced too, so a hardware log that shows nothing is genuinely
+  // "the gate never ran" and not "the gate ran and only failure is visible".
+  const seen = reasons(marks)
+  assert.ok(seen.has('promoted'), `a real promotion is marked (saw ${[...seen].join(', ') || 'nothing'})`)
+  // The housemate is declined for the one reason that must decline them.
+  assert.ok(seen.has('not-same-identity'), 'and the housemate\'s refusal is named')
 
   // NARROW: the housemate must NOT have been promoted. Keeping a housemate a
   // non-indexer is the whole reason post-arming writers are admitted that way, so
@@ -174,7 +194,7 @@ test('WITH promoteV1 the owner\'s own second phone signs, and the creator become
 
 test('re-publishing a member row does not run away - the promotion is idempotent', async (t) => {
   t.after(cleanup)
-  const { B, mine, mate, owner } = await household(t, { promote: true })
+  const { B, mine, mate, owner, marks } = await household(t, { promote: true })
 
   // The promotion fires on EVERY member write, by design: there is no safe "is it
   // already an indexer" read to branch on inside apply, because indexed state lags
@@ -182,6 +202,7 @@ test('re-publishing a member row does not run away - the promotion is idempotent
   // avoid. So it must be genuinely idempotent. This app has already had one write
   // amplification loop; a re-admit that appends every time would be another.
   const before = mine.base.view.core.length
+  const marksBefore = marks.length
   for (let i = 0; i < 6; i++) {
     await put(mine, B, 'member:' + B.pubkey, { displayName: 'Tim', caps: CAPS, identityProof: B.identityProof })
   }
@@ -195,6 +216,14 @@ test('re-publishing a member row does not run away - the promotion is idempotent
     `six member re-publishes must not amplify (grew ${after - before} blocks)`)
   assert.equal(mine.base.writable, true, 'and the base is still healthy')
   assert.equal(owner.base.removeable(owner.base.local.key), true, 'creator still removeable')
+
+  // The TRACE must not run away either, and here that is only a smoke check: the
+  // gate's mark counters are module-level and shared by all three in-process peers,
+  // so how many marks a given window emits depends on replication timing. Tuning a
+  // number against that is how you get a test that fails one run in two - it did.
+  // The deterministic bound is asserted in listWire.test.js, over a fixed apply count.
+  assert.ok(marks.length - marksBefore < 18,
+    `six republishes across three peers must not mark per apply (grew ${marks.length - marksBefore})`)
 })
 
 test('the gate refuses to arm promoteV1 while any member lacks the capability', () => {
@@ -225,7 +254,11 @@ test('promote1 is advertised and armed alongside the other capabilities', () => 
   // the cap says a peer UNDERSTANDS it, the flag says the space has turned it on.
   assert.match(wire, /meta\.promoteV1 !== true/, 'dormant until the space arms it')
   // ...and it must never promote a housemate.
-  assert.match(wire, /if \(!await sameIdentityAsOwner\(view, row\.pubkey, meta\.owner\)\) return/,
+  // Pinned as a PROPERTY, not as one formatting of the line: the gate must consult
+  // sameIdentityAsOwner and bail when it says no. An earlier version of this pin
+  // spelled out the whole `... )) return` and broke the moment the branch grew a
+  // trace call, which is the failure mode CLAUDE.md warns about.
+  assert.match(wire, /!await sameIdentityAsOwner\(view, row\.pubkey, meta\.owner\)/,
     'only the owner\'s own devices')
 
   // AND IT MUST BE REACHABLE ON AN ALREADY-ARMED SPACE. The Turn-on control

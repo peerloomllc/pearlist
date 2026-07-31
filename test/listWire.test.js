@@ -574,3 +574,45 @@ test('normalizeRepeat is an allowlist, so junk never becomes a schedule', () => 
   assert.equal(normalizeRepeat(undefined), null)
   assert.equal(normalizeRepeat({}), null)
 })
+
+// --- the promotion gate's trace --------------------------------------------
+//
+// `maybePromoteOwnDevice` had NO trace on any branch, so a 15-minute hardware run
+// where it promoted nothing could not say which of its eight exits it took - and the
+// house pattern is that the bug is something failing QUIETLY. Two properties matter:
+// it must name the exit, and it must not name it once per apply. It runs on EVERY
+// member write while the worklet re-ships its whole trace buffer on each mark, so an
+// unconditional mark is quadratic in a catch-up burst: a write-amplification bug
+// wearing a diagnostic's clothes.
+
+test('apply: the promotion gate names the exit it took', async () => {
+  const marks = []
+  const view = mockView({ space: spaceRow({ revokeV1: true, promoteV1: true }) })
+  const ctx = { base: { addWriter: async () => {} }, mark: (name, extra) => marks.push({ name, extra }) }
+  // No `_w` on the row: the writer binding was never recorded. A real reason to
+  // decline, and precisely the one a silent return made indistinguishable from
+  // "the gate never ran at all".
+  await applyListOp({ type: 'put', key: memberKey(OTHERPUB), value: memberRow(OTHERPUB, OTHER, { updatedAt: 2000 }) },
+    { view, groupId: 'g', selfKey: PUB, emit () {}, ...ctx })
+
+  assert.ok(marks.some((m) => m.name === 'promote:enter'), 'that the gate ran at all is visible')
+  assert.ok(marks.some((m) => m.name === 'promote:no-writer-key'), 'and so is the branch it left on')
+})
+
+test('apply: the promotion gate\'s trace does not scale with member writes', async () => {
+  const marks = []
+  const view = mockView({ space: spaceRow({ revokeV1: true, promoteV1: true }) })
+  const ctx = { base: { addWriter: async () => {} }, mark: (name) => marks.push(name) }
+
+  const N = 200
+  for (let i = 1; i <= N; i++) {
+    await applyListOp({ type: 'put', key: memberKey(OTHERPUB), value: memberRow(OTHERPUB, OTHER, { updatedAt: 2000 + i }) },
+      { view, groupId: 'g', selfKey: PUB, emit () {}, ...ctx })
+  }
+
+  // Marks land on the 1st, 2nd, 5th, 10th, 20th... occurrence of each (reason,
+  // device), so 200 further applies can add at most ~9 marks per reason no matter
+  // what the shared counters started at. Two reasons fire on this path. The bound is
+  // deliberately loose - what it forbids is the linear case.
+  assert.ok(marks.length <= 24, `${N} applies must not produce ${N} marks (got ${marks.length})`)
+})

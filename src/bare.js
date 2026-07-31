@@ -68,7 +68,11 @@ mark('worklet:loaded')
 
 const engine = createGroupEngine({
   appId: 'pearlist',
-  applyOps: applyListOp,
+  // Wrapped rather than passed bare so the apply rules can trace too: core builds
+  // the applyOps ctx itself and does not put `mark` in it, and the promotion gate
+  // in listWire is unanswerable from a log without one. Threading it here keeps
+  // the core signature alone and leaves every other caller (the tests) mark-free.
+  applyOps: (op, ctx) => applyListOp(op, { ...ctx, mark }),
   methods: listMethods,
   mark,
   // Writer revocation (proposals/2026-07-13-writer-revocation.md). Both are inert
