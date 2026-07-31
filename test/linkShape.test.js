@@ -121,3 +121,32 @@ test('linking navigates only out of onboarding', () => {
   // into a space would be the app losing their place.
   assert.match(src, /if \(first && phase === 'onboarding'\)/, 'navigation must be conditional on onboarding')
 })
+
+// A pairing that never finishes blocks every LATER one, because device-link keeps
+// the session in worklet memory and rejects a second consume while it is set. The
+// only escape used to be force-quitting the app, which is not a recovery a user
+// should have to discover. Tim hit exactly this.
+//
+// Pinned as PROPERTIES, not as one formatting - four over-specific source pins
+// have already broken on legitimate edits in this repo.
+test('a half-open pair session offers a way out instead of a dead end', () => {
+  const src = app()
+  const start = src.indexOf('function LinkDeviceSheet')
+  const body = src.slice(start, src.indexOf('\nfunction ', start + 1))
+
+  // The sheet must be able to CLEAR the stuck session, not merely describe it.
+  assert.match(body, /device:cancelPairing/, 'it should cancel the half-open session')
+  // ...and retry afterwards, or cancelling just leaves the user where they were.
+  assert.match(body, /startOver/, 'and retry the link once it is cancelled')
+  // The retry must use the value that was ATTEMPTED. A scanned link never reaches
+  // the text field, so retrying `url` would silently retry nothing.
+  assert.match(body, /setTried\(/, 'it should remember what was tried, not read the field')
+})
+
+test('the failure that can be recovered from is distinguished from the ones that cannot', () => {
+  const src = app()
+  // linkThisDevice owns the wording - it is the only thing that knows which
+  // failure occurred - and flags the recoverable one for the sheet.
+  assert.match(src, /canStartOver/, 'the in-progress failure is marked as recoverable')
+  assert.match(src, /another pair session in progress/i, 'matched on the error device-link actually throws')
+})
