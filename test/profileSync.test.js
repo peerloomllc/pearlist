@@ -8,7 +8,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { profileRecordOf, isProfileRecord, sameProfileContent, decideProfileMirror } = require('../src/profileSync')
+const { profileRecordOf, isProfileRecord, sameProfileContent, decideProfileMirror, shouldFetchAvatar } = require('../src/profileSync')
 
 const AV = { avatarBlob: { key: 'k', id: 7 }, avatarHash: 'h1', avatarType: 'image/png' }
 
@@ -155,4 +155,34 @@ test('it stays false for a junk profile too, without reaching the flag check', a
   const ctx = new Proxy({}, { get () { throw new Error('touched ctx') } })
   assert.equal(await deviceLink.putProfileRecord(ctx, null), false)
   assert.equal(deviceLink.isDeviceLinkStarted(), false)
+})
+
+// --- the eager avatar fetch ---------------------------------------------------
+//
+// A mirrored record only arrives while the other device is CONNECTED, so that is
+// the moment its picture is certainly available - the same reasoning as the
+// pairing-time fetch. But the fetch waits up to 8s for replication, so it must
+// run once per distinct image and not once per sync.
+
+test('a new picture is fetched, the same one is not fetched twice', () => {
+  const withAv = { displayName: 'Tim', updatedAt: 2, ...AV }
+  assert.equal(shouldFetchAvatar(withAv, { displayName: 'Tim', updatedAt: 1 }), true, 'gaining a picture')
+  assert.equal(shouldFetchAvatar(withAv, { displayName: 'Tim', updatedAt: 1, ...AV }), false, 'already have it')
+  assert.equal(shouldFetchAvatar(withAv, null), true, 'nothing local at all')
+})
+
+// Keyed on the content HASH: two devices legitimately hold different blob ids for
+// identical bytes, so comparing references would refetch the same image forever.
+test('the same bytes under a different blob id are not refetched', () => {
+  const mine = { displayName: 'Tim', avatarBlob: { key: 'k1', id: 1 }, avatarHash: 'h1' }
+  const theirs = { displayName: 'Tim', updatedAt: 9, avatarBlob: { key: 'k2', id: 9 }, avatarHash: 'h1' }
+  assert.equal(shouldFetchAvatar(theirs, mine), false)
+  assert.equal(shouldFetchAvatar({ ...theirs, avatarHash: 'h2' }, mine), true, 'a genuinely different picture is fetched')
+})
+
+test('nothing to fetch when there is no usable reference', () => {
+  assert.equal(shouldFetchAvatar({ displayName: 'Tim' }, null), false)
+  assert.equal(shouldFetchAvatar({ displayName: 'Tim', avatarHash: 'h1' }, null), false, 'hash without a reference')
+  assert.equal(shouldFetchAvatar({ displayName: 'Tim', avatarBlob: { key: 'k' }, avatarHash: 'h' }, null), false, 'reference without an id')
+  assert.equal(shouldFetchAvatar(null, null), false)
 })
