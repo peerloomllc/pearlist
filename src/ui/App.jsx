@@ -10,6 +10,7 @@ import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
+import { isMyRow, isMine } from '../selfKeys.js'
 import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
@@ -349,8 +350,7 @@ function memberLabel (members, pubkey, selfPubkey) {
   const base = m?.displayName || 'Unknown'
   // "(You)" must follow the PERSON, not the device: a list assigned to your other
   // phone is still assigned to you.
-  const mine = m && (m.pubkey === selfPubkey || (m.keys && m.keys.includes(selfPubkey)))
-  return (pubkey === selfPubkey || mine) ? base + ' (You)' : base
+  return (pubkey === selfPubkey || isMyRow(m, selfPubkey)) ? base + ' (You)' : base
 }
 
 // Pick a household member (or nobody) to assign an item or list to.
@@ -370,7 +370,7 @@ function AssigneePickerSheet ({ open, onClose, members, selfPubkey, current, onP
       {members.map((m) => (
         <Row key={m.pubkey} pubkey={m.pubkey}>
           <Avatar name={m.displayName} avatar={m.avatar} size={32} />
-          <span style={{ flex: 1, textAlign: 'left' }}>{m.pubkey === selfPubkey ? m.displayName + ' (You)' : m.displayName}</span>
+          <span style={{ flex: 1, textAlign: 'left' }}>{isMyRow(m, selfPubkey) ? m.displayName + ' (You)' : m.displayName}</span>
         </Row>
       ))}
     </BottomSheet>
@@ -2869,7 +2869,11 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped,
   // Chore lists are a parent/child setup: only the creator (owner) may delete
   // one, so a child cannot remove a parent-managed list. Other kinds keep the
   // egalitarian model (anyone may delete). Falls open if createdBy is missing.
-  const canDelete = list.kind !== 'chore' || !list.createdBy || list.createdBy === selfPubkey
+  // A PERSON CREATED IT, not a phone. This compared createdBy to THIS device's key,
+  // so a parent who made the chore list on their other phone could not delete it from
+  // this one - the child rule applied to the parent.
+  const canDelete = list.kind !== 'chore' || !list.createdBy ||
+    isMine(members, selfPubkey, list.createdBy)
   return (
     <BottomSheet open={open} onClose={onClose} title={list.name}>
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename</span></Row>
@@ -2996,7 +3000,11 @@ function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner,
       {members.length === 0
         ? <p style={{ color: c.text.muted, fontSize: 14, textAlign: 'center', padding: `${sp.base}px 0` }}>Just you so far.</p>
         : members.map((m) => {
-            const isSelf = m.pubkey === selfPubkey
+            // isMyRow, not a key comparison: on a linked phone your own collapsed row
+            // often carries your OTHER phone's key, and the sheet then offered YOU a
+            // Remove button on yourself. Since PR #162 the owner's second phone can
+            // actually carry that out, so this stopped being cosmetic.
+            const isSelf = isMyRow(m, selfPubkey)
             return (
               <div key={m.pubkey} style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.xs}px`, borderTop: `1px solid ${c.divider}` }}>
                 <Avatar name={m.displayName} avatar={m.avatar} size={40} />
