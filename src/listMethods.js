@@ -15,7 +15,7 @@ const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
-const { collapseMembers, sameIdentityKeys, identityRootOf } = require('./memberIdentity')
+const { collapseMembers, sameIdentityKeys, identityRootOf, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
 const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, _trace: _dlTrace } = require('./deviceLink')
 const { decideProfileMirror, shouldFetchAvatar } = require('./profileSync')
 
@@ -250,6 +250,11 @@ function seedPersonalProfile (ctx) {
 // decision, including the two guards that keep this from becoming the third write
 // amplification bug in this file: equal timestamps are stale (the author applies
 // its own op too), and a record that changes nothing visible is dropped.
+// The collapse traces through the same channel as the pairing marks, so one
+// pulled log shows the pairing, the profile sync, and what the members list made
+// of both. See src/memberIdentity.js for why this exists.
+setMemberIdentityTrace((name, extra) => _dlTrace(name, extra))
+
 setProfileMirror(async (ctx, incoming) => {
   const current = (await ctx.localDb.get('profile'))?.value || null
   const { accept, reason } = decideProfileMirror({ incoming, current })
