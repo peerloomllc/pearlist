@@ -16,7 +16,7 @@ const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
 const { collapseMembers, sameIdentityKeys, identityRootOf, evictionTargets, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
-const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, _trace: _dlTrace } = require('./deviceLink')
+const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, setSpaceMirror, putSpaceRecord, delSpaceRecord, _trace: _dlTrace } = require('./deviceLink')
 const { decideProfileMirror, shouldFetchAvatar } = require('./profileSync')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
@@ -316,6 +316,83 @@ setProfileMirror(async (ctx, incoming) => {
   if (shouldFetchAvatar(next, current)) scheduleAvatarFetch(ctx, next)
   try { ctx.emit('profile:changed', { displayName: next.displayName }) } catch {}
 })
+
+// A SPACE ARRIVING FROM ANOTHER OF THIS PERSON'S PHONES.
+//
+// `value` is the record for a join, or null for a DELETE - which is how leaving
+// travels, because leaving is per person (see delSpaceRecord). Both are DEFERRED for
+// exactly the reason the profile handler spells out above: this runs inside the
+// PERSONAL base's apply, and joining or destroying a space reaches a DIFFERENT base.
+// Doing that inline is the "Invalid checkout N for batch" assert, which is timing
+// dependent and therefore the kind of thing that passes in a test and fails on a
+// phone. Nothing here touches a space base directly.
+setSpaceMirror(async (ctx, key, value) => {
+  const groupId = typeof key === 'string' && key.startsWith('space:') ? key.slice('space:'.length) : null
+  if (!groupId) return
+
+  if (!value) {
+    // Someone left on another phone. Leave here too - unless we are already out,
+    // which is the common case: the phone that pressed Leave wrote this delete and
+    // then removed its own row, so the mirror comes straight back to it.
+    const existing = await ctx.localDb.get('groups:joined:' + groupId).catch(() => null)
+    if (!existing?.value) return
+    _dlTrace('dl:spaceMirrorLeave', { gid: groupId.slice(0, 8) })
+    scheduleSpaceWork(ctx, { leave: groupId })
+    return
+  }
+
+  // Already in it is the ordinary case - every announce re-puts every space, and a
+  // re-pair replays the lot. Joining twice would mount a second base for one space,
+  // which is why seedGroups skips the same way.
+  const existing = await ctx.localDb.get('groups:joined:' + groupId).catch(() => null)
+  if (existing?.value) return
+  _dlTrace('dl:spaceMirrorJoin', { gid: groupId.slice(0, 8) })
+  scheduleSpaceWork(ctx, { join: value })
+})
+
+// Deferred space mounting/unmounting, off the personal base's apply loop.
+//
+// A QUEUE rather than the single coalescing flag schedulePublishMember uses: those
+// are all "publish the same row", so collapsing them is right. These are distinct
+// spaces, and dropping one because another was pending would silently lose a space -
+// the exact failure this feature exists to fix.
+const _spaceWork = []
+let _spaceWorkRunning = false
+function scheduleSpaceWork (ctx, item) {
+  _spaceWork.push(item)
+  if (_spaceWorkRunning) return
+  _spaceWorkRunning = true
+  setTimeout(async () => {
+    while (_spaceWork.length) {
+      const next = _spaceWork.shift()
+      try {
+        if (next.join) {
+          await ctx.joinGroup({
+            inviteKey: defaultEncodeInvite({
+              groupId: next.join.groupId,
+              groupKey: next.join.groupKey,
+              encryptionKey: next.join.encryptionKey,
+              bootstrap: next.join.bootstrap,
+              name: next.join.name,
+            }),
+          })
+          _dlTrace('dl:spaceJoined', { gid: next.join.groupId.slice(0, 8) })
+          try { ctx.emit('spaces:changed', { groupId: next.join.groupId }) } catch {}
+        } else if (next.leave) {
+          await ctx.localDb.del('groups:joined:' + next.leave).catch(() => {})
+          setTimeout(() => { ctx.destroyGroup(next.leave).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
+          _dlTrace('dl:spaceLeft', { gid: next.leave.slice(0, 8) })
+          try { ctx.emit('spaces:changed', { groupId: next.leave }) } catch {}
+        }
+      } catch (e) {
+        // ONE BAD SPACE MUST NOT ABORT THE REST, the same rule seedGroups follows: a
+        // phone that gets four of five spaces is far better than one that gets none.
+        _dlTrace('dl:spaceWorkFailed', { err: (e && e.message) || String(e) })
+      }
+    }
+    _spaceWorkRunning = false
+  }, 0)
+}
 
 // Publish our member row to every space, on a LATER TURN. See the comment above
 // for why it cannot happen inline.
@@ -1274,9 +1351,36 @@ const methods = {
       await putRow(ctx, groupId, memberKey(pubkeyHex(ctx)), { ...(mine || {}), left: true })
       retracted = true
     }
+    // LEAVING IS PER PERSON, so retract the record before forgetting locally. If it
+    // stayed on the personal base, apply would mirror it straight back and this phone
+    // would rejoin the space it just left - a leave button that undoes itself. See
+    // proposals/2026-07-31-your-spaces-follow-you.md, "the lifecycle".
+    await delSpaceRecord(ctx, groupId)
     await ctx.localDb.del('groups:joined:' + groupId).catch(() => {})
     setTimeout(() => { ctx.destroyGroup(groupId).catch(() => {}) }, SPACE_DELETE_GRACE_MS)
     return { ok: true, retracted }
+  },
+
+  // WHICH SPACES THIS PERSON IS IN, announced to their other phones.
+  //
+  // Shaped after `device:announceSpaceWriters` below, and for the same reason: the
+  // thing being announced becomes true at a moment the pairing handshake has long
+  // passed. collectGroups/seedGroups already carry spaces across, but only inside the
+  // handshake, so a space created afterwards was never going to arrive.
+  //
+  // IDEMPOTENT AND BEST-EFFORT. putSpaceRecord is a last-writer-wins put on a key
+  // derived from the groupId, so re-announcing is free; it returns false rather than
+  // throwing when this device is not a personal-base writer yet, which is the routine
+  // case immediately after linking.
+  'device:announceSpaces': async (_args, ctx) => {
+    if (!DEVICE_LINK_ENABLED) return { ok: false, announced: 0, why: 'not-enabled' }
+    let announced = 0
+    for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
+      if (!value || !value.groupId || !value.groupKey) continue
+      if (await putSpaceRecord(ctx, value)) announced++
+    }
+    _dlTrace('dl:announceSpaces', { announced })
+    return { ok: announced > 0, announced }
   },
 
   // --- device linking (SLICE 1, dark) --------------------------------------
