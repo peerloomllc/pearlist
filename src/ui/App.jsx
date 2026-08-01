@@ -766,7 +766,7 @@ function ConfirmHost () {
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.base}px` }}>{state?.message}</p>
       {/* Equal-width buttons: the confirm and Cancel carry the same weight, so one
           does not read as the obvious choice by size alone. Applies to every
-          askConfirm (Remove, Stronger removal, Leave, Clear learned aisles...). */}
+          askConfirm (Remove, Leave, Clear learned aisles...). */}
       <div style={{ display: 'flex', gap: sp.sm }}>
         <button onClick={() => done(true)} style={{ flex: 1, padding: '11px 14px', borderRadius: r.md, border: 'none', background: state?.danger ? c.error : c.primary, color: state?.danger ? '#000' : c.text.onPrimary, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{state?.confirmLabel || 'Confirm'}</button>
         {/* `noCancel` makes this an acknowledgement rather than a choice. Offering
@@ -1972,10 +1972,11 @@ export default function App () {
   async function removeMember (m) {
     const name = m.displayName || 'this member'
     // SAY WHAT REMOVAL DOES *NOW*, on this space, before they tap it. Removing
-    // someone only HIDES them until Stronger removal is armed - the arming gate exists
-    // because a peer that does not understand a revocation would keep accepting the
-    // removed device and fork the space, so it cannot simply be on by default. That is
-    // defensible. Saying nothing about it is not.
+    // someone only HIDES them until the space is armed, and a space arms itself only
+    // once every member advertises support - a peer that does not understand a
+    // revocation would keep accepting the removed device and fork the space, so it
+    // cannot simply be on from the start. That is defensible. Saying nothing about it
+    // is not.
     //
     // Tim, 2026-07-31, having removed a phone from an un-armed space: "it still had
     // read and write permissions (hidden from members list but could still create
@@ -1988,8 +1989,13 @@ export default function App () {
       title: `Remove ${name}?`,
       // Honest: re-inviting them is NOT enough on its own, because only the owner
       // can clear an eviction. "Add back" on this screen is the way back.
+      // NO LONGER OFFERS AN ACTION FOR THE HIDE-ONLY CASE. It used to say "until you
+      // turn on Stronger removal below", which is now impossible advice: there is no
+      // control to turn on. Whether a space is armed is decided by whether everyone
+      // has updated, so that is the only thing left to tell them, and it is the same
+      // sentence in both branches now.
       message: hideOnly
-        ? `${name} stops showing as a member, but can still change things here${revoke && !revoke.canArm ? ' until everyone updates to the latest version' : ' until you turn on Stronger removal below'}. Their lists stay and you can add them back.`
+        ? `${name} stops showing as a member, but can still change things here until everyone updates to the latest version. Their lists stay and you can add them back.`
         : `${name} stops showing as a member and can no longer change anything here. Their lists stay and you can add them back.`,
       confirmLabel: 'Remove',
       danger: true,
@@ -1999,9 +2005,9 @@ export default function App () {
     try { res = await call('member:remove', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert(problem('Could not remove', e)); return }
     await loadMembers(gid, selfPubkey)
     // Be honest when we could only HIDE them. Cutting a device off needs its writer
-    // binding, which only exists if it has been online since Stronger removal was
-    // turned on. Without it the removal is hide-only, and saying otherwise would be
-    // a lie about a security property.
+    // binding, which only exists if it has been online since the space armed itself.
+    // Without it the removal is hide-only, and saying otherwise would be a lie about
+    // a security property.
     if (revoke?.armed && res && res.why === 'not-owner-device') {
       // A DIFFERENT REASON, so a different sentence. This phone can manage the space
       // because it is the owner's, but cutting a member's device off is still the
@@ -2009,34 +2015,30 @@ export default function App () {
       // would send them to fix something that is not broken.
       setBanner(`${name} removed. To cut their device off, use the phone that created this space.`)
     } else if (revoke?.armed && res && res.revoked === false) {
-      setBanner(`${name} removed. Their device could not be cut off - it has not been online since Stronger removal was turned on.`)
+      // NAMES A MOMENT, NOT A FEATURE, now that the feature has no name. "Since this
+      // space was set up" is not right either, because a space can arm later than it
+      // was made - the moment everyone finishes updating. "Has not been online
+      // recently" is the honest version and is what the user can act on: open the app
+      // on that phone, then remove it again.
+      setBanner(`${name} removed. Their device could not be cut off - it has not been online recently enough. Open the app on that phone, then remove them again.`)
     } else if (!revoke?.armed) {
       // The plain "X removed." that used to fire here was true and misleading at the
       // same time. It is the last thing the user sees, so it is where the limit has to
       // be repeated - a confirm dialog is read once and dismissed.
-      setBanner(revoke?.canArm
-        ? `${name} removed, but can still change things until you turn on Stronger removal.`
-        : `${name} removed, but can still change things until everyone updates.`)
+      setBanner(`${name} removed, but can still change things until everyone updates.`)
     } else {
       setBanner(`${name} removed.`)
     }
   }
-  // Turn on hard revocation for this space. ONE WAY, and the copy says so: it
-  // changes how every peer applies writer ops, and a peer that has not updated would
-  // silently fork the space, which is why it stays off until everyone has.
-  // It stops a removed device WRITING. It cannot stop it READING - no design can
-  // (it keeps the space's key), so the copy must not imply otherwise.
-  async function armRevocation () {
-    const ok = await askConfirm({
-      title: 'Stronger removal?',
-      message: 'Removed devices will also lose the ability to CHANGE anything in this space, not just disappear from the member list. They can still see what they already have: turning this on cannot take that away. This cannot be undone, and every member has to have updated first.',
-      confirmLabel: 'Turn on',
-    })
-    if (!ok) return
-    try { await call('space:armRevocation', { groupId: gid }) } catch (e) { alert(terminated(e.message)); return }
-    await loadMembers(gid, selfPubkey)
-    setBanner('Stronger removal is on.')
-  }
+  // armRevocation() USED TO LIVE HERE. It asked the user to confirm a condition they
+  // had no way to evaluate ("every member has updated"), under a name that described
+  // the implementation rather than what they got. The space arms itself now, from
+  // space:revocationStatus, the moment the gate passes - see
+  // proposals/2026-07-31-arming-should-not-be-a-user-decision.md.
+  //
+  // `space:armRevocation` is deliberately KEPT on the IPC surface with no UI caller.
+  // It is what the automatic path calls, it re-checks the gate itself, and the tests
+  // drive it directly.
   async function restoreMember (m) {
     try { await call('member:restore', { groupId: gid, pubkey: m.pubkey }) } catch (e) { alert(problem('Could not add back', e)); return }
     await loadMembers(gid, selfPubkey)
@@ -2392,7 +2394,7 @@ export default function App () {
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
       <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
-      <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner} onRemove={removeMember} removed={removedMembers} onRestore={restoreMember} revoke={revoke} onArm={armRevocation} />
+      <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner} onRemove={removeMember} removed={removedMembers} onRestore={restoreMember} revoke={revoke} />
       <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => { setSheet(null); setDeleteTarget(null) }} spaceName={deleteTarget?.name} onConfirm={() => deleteSpace(deleteTarget?.groupId)} />
       <LightningWalletModal open={sheet === 'wallet'} detected={lnDetected} onClose={() => setSheet(null)} />
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); goTab('about') }} />
@@ -3057,7 +3059,7 @@ function Banner ({ text, onClose }) {
 // the roster forever with no way out. Removal hides them and is reversible with
 // a fresh invite; it does not revoke a device that still holds the space, which
 // is why the copy says "remove", never "block".
-function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner, onRemove, removed = [], onRestore, revoke, onArm }) {
+function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner, onRemove, removed = [], onRestore, revoke }) {
   return (
     <BottomSheet open={open} onClose={onClose} title={`In ${spaceName || 'this space'}`}>
       {members.length === 0
@@ -3095,18 +3097,26 @@ function MembersSheet ({ open, onClose, members, selfPubkey, spaceName, isOwner,
         </>
       ) : null}
 
-      {/* Stronger removal (hard writer revocation), owner only. Off until EVERY member
-          has updated: a peer that does not understand it would keep accepting a removed
-          device's changes and silently drift out of sync with everyone else. */}
-      {isOwner && revoke && !revoke.armed ? (
+      {/* THE "Stronger removal / Turn on" CONTROL IS GONE. It turns itself on now, as
+          soon as every member is on a build that understands it - see
+          proposals/2026-07-31-arming-should-not-be-a-user-decision.md.
+
+          It was never a decision the user could make. The safety condition is "every
+          member runs a build that understands the new apply rules", which the code
+          computes from replicated state and a person cannot evaluate. Worse, it was
+          the hidden prerequisite for something it never mentioned: until a space is
+          armed, your OWN other phone inherits none of your ownership.
+
+          WHAT SURVIVES is the only part that was ever actionable: somebody has not
+          updated. That is a fact about other people, it is not something arming can
+          fix, and the roster is where you would look for it. When everyone HAS
+          updated there is nothing to show, because by then it has already happened. */}
+      {isOwner && revoke && !revoke.armed && !revoke.canArm ? (
         <div style={{ marginTop: sp.lg, paddingTop: sp.base, borderTop: `1px solid ${c.divider}` }}>
-          <div style={{ color: c.text.primary, fontSize: 15, marginBottom: 4 }}>Stronger removal</div>
-          <p style={{ color: c.text.muted, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: `0 0 ${sp.base}px` }}>
-            {revoke.canArm
-              ? 'Removed devices also lose the ability to change anything here, not just disappear from the list. They can still see what they already have.'
-              : `Everyone has to update first (${revoke.ready} of ${revoke.total} done${revoke.waitingOn?.length ? `, waiting on ${revoke.waitingOn.join(', ')}` : ''}).`}
+          <div style={{ color: c.text.primary, fontSize: 15, marginBottom: 4 }}>Waiting on updates</div>
+          <p style={{ color: c.text.muted, fontSize: 13, fontWeight: 300, lineHeight: 1.45, margin: 0 }}>
+            {`Until everyone is on the latest version, removing someone hides them but does not stop them changing things here (${revoke.ready} of ${revoke.total} updated${revoke.waitingOn?.length ? `, waiting on ${revoke.waitingOn.join(', ')}` : ''}).`}
           </p>
-          <Button variant='secondary' disabled={!revoke.canArm} style={{ opacity: revoke.canArm ? 1 : 0.5 }} onClick={onArm}>Turn on</Button>
         </div>
       ) : null}
     </BottomSheet>
