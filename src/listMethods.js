@@ -1151,11 +1151,36 @@ const methods = {
     // canManage, not `meta.owner === me`: the owner's other phone may run the
     // catch-up too. It can only ever ADD promoteV1 - reaching here at all means
     // revokeV2 is already on - and armRevocation re-checks the capability gate.
+    //
+    // NOW ARMS revokeV1 TOO, so nobody is asked. See
+    // proposals/2026-07-31-arming-should-not-be-a-user-decision.md.
+    //
+    // WHY THE SPLIT WAS NEVER PRINCIPLED: revokeV2 and promoteV1 have turned
+    // themselves on here with no confirm and no copy since PR #150. Only revokeV1
+    // still demanded a dialog, because it shipped first, when the capability gate was
+    // new and not yet trusted. Two capabilities later it is trusted completely, and
+    // the gate - "every member advertises support" - is the whole safety property. It
+    // is computed from replicated state and is not something a person can evaluate,
+    // so asking them to confirm it was theatre with a real cost: the control that
+    // gates whether your OWN other phone can manage a space was named after removals
+    // and nothing connected the two. Tim, 2026-07-31: "the Stronger Removal language
+    // doesn't make sense to me ... I don't think the regular user will understand it."
+    //
+    // ORDERING TRAP, and it is silent if you get it wrong: allMembersSupportCap
+    // returns FALSE on an EMPTY row set (listWire.js), so a freshly created space
+    // whose own member row has not landed yet does not arm. That is correct rather
+    // than a race to defeat - this runs on every roster refresh, so the next call
+    // once the row is applied arms it. Do NOT "fix" it by dropping the empty check.
     const canManage = await canActAsOwner(ctx, base, meta)
-    if (armed && canManage && (meta.revokeV2 !== true || meta.promoteV1 !== true)) {
-      if (allMembersSupportSelfRevoke(rows, evicted) || allMembersSupportPromote(rows, evicted)) {
-        armRevocation(ctx, groupId).catch(() => {})
-      }
+    const wantsFirstArm = !armed && allMembersSupportRevoke(rows, evicted)
+    const wantsCatchUp = armed && (meta.revokeV2 !== true || meta.promoteV1 !== true) &&
+      (allMembersSupportSelfRevoke(rows, evicted) || allMembersSupportPromote(rows, evicted))
+    // The FIRST arming is still the owner device's alone: canActAsOwner needs
+    // revokeV2, and revokeV2 implies revokeV1, so a linked phone cannot reach
+    // wantsFirstArm. That is not a gap to close - an un-armed space is exactly the one
+    // whose peers would drop the write. armRevocation enforces it either way.
+    if ((wantsFirstArm && meta?.owner === me) || (wantsCatchUp && canManage)) {
+      armRevocation(ctx, groupId).catch(() => {})
     }
 
     return {
