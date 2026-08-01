@@ -35,7 +35,14 @@ test('the readiness check compares _w against the CURRENT writer key', () => {
   const src = read('src/listMethods.js')
   const at = src.indexOf("'space:revocationStatus'")
   assert.ok(at > 0, 'found the method')
-  const body = src.slice(at, at + 2200)
+  // BOUNDED BY THE NEXT METHOD KEY, not by a character count. This was
+  // `slice(at, at + 2200)`, which made the negative below mean "the old presence-only
+  // condition is not in the first 2200 characters". The method has grown twice since
+  // (the arming catch-up, then the first-arm branch) and would have slid the tail out
+  // of range without anything failing.
+  const after = src.slice(at).search(/\n {2}'[a-z]+:[a-zA-Z]+':/)
+  assert.ok(after > 0, 'the method is followed by another')
+  const body = src.slice(at, at + after)
 
   assert.match(body, /const myWriter = localWriterHex\(base\)/, 'reads this device"s current writer key')
   assert.match(body, /mine\._w === myWriter/, 'and compares the binding against it')

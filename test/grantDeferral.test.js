@@ -24,7 +24,13 @@ test('the per-space grant is queued, not appended from inside apply', () => {
   // device-link calls from its apply loop.
   const at = src.indexOf('grantGroupWriter (groupId, writerKey)')
   assert.ok(at > 0, 'found the plugin method')
-  const method = src.slice(at, at + 400)
+  // BOUNDED BY THE METHOD, not by a character count. `slice(at, at + 400)` made the
+  // negative below mean "no ctx.append in the next 400 characters" - so an append
+  // added past that point, or simply pushed past it by an ordinary edit, would pass
+  // in silence. A negative assertion is only as good as its window.
+  const close = src.indexOf('\n    },', at)
+  assert.ok(close > at, 'the plugin method is closed')
+  const method = src.slice(at, close)
   assert.doesNotMatch(method, /await ctx\.append\(/, 'must not append from the apply context')
   assert.match(method, /scheduleGroupWriterGrant\(ctx, groupId, String\(writerKey\)\)/, 'queues instead')
 
