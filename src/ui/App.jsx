@@ -1601,6 +1601,12 @@ export default function App () {
   // screen keeps showing the old (or empty) name until something else happens to
   // re-read it, which on the onboarding path is never.
   useEffect(() => on('profile:changed', () => { call('profile:get', {}).then(setProfile).catch(() => {}) }), [])
+  // A space arrived from - or was left on - another of this person's phones. The
+  // worklet mounts or unmounts it and says so; nothing else would tell the UI, and
+  // without this the space is there but invisible until the next launch. Exactly the
+  // shape of the pairing gap measured on hardware 2026-07-28: six spaces joined by
+  // seedGroups and none on screen.
+  useEffect(() => on('spaces:changed', () => { loadSpaces() }), [loadSpaces])
 
   // Notification tap -> open the related space (and list, if any). Requested by
   // the shell (notify:open); applied once we are home and that space has loaded
@@ -1819,6 +1825,10 @@ export default function App () {
     const { groupId } = await call('group:create', { name })
     await call('space:init', { groupId, name }).catch(() => {}) // claim ownership before anyone joins
     call('member:publish', { groupId }).catch(() => {}) // owner is writable now
+    // Tell this person's OTHER phones. Without it they never hear about a space made
+    // after linking, and sending yourself an invite is the only way in - which reads
+    // as absurd once the app has said the two phones are you.
+    call('device:announceSpaces', {}).catch(() => {})
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null)
     setPhase('home'); setSheet('invite')
@@ -1830,6 +1840,7 @@ export default function App () {
     await loadSpaces()
     setActiveSpaceId(groupId); setOpenListId(null); setPhase('home'); setSheet(null)
     call('member:publish', { groupId }).catch(() => {}) // retried on each refresh until writable
+    call('device:announceSpaces', {}).catch(() => {}) // a space you JOIN follows you too
   }
 
   // Consume a pairing link: this phone adopts the identity shown on the other one
@@ -1888,6 +1899,11 @@ export default function App () {
     // moment after the handshake returns, not during it. Best-effort: a phone that
     // was never removed loses nothing if every attempt is a no-op.
     announceSpaceWriters()
+    // BACKFILL, and this is the leg that makes it work in BOTH directions. Pairing
+    // seeds the joiner with the primary's spaces, but the joiner's own spaces have
+    // never been announced - it had no personal base to announce them to until now.
+    // Without this, "your spaces follow you" would only ever be true one way.
+    call('device:announceSpaces', {}).catch(() => {})
     const sp = await loadSpaces()
     setSheet(null)
     // Navigate ONLY from onboarding, where there is nowhere to be. A phone that
