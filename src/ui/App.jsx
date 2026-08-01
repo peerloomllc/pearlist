@@ -14,7 +14,7 @@ import { isMyRow, isMine } from '../selfKeys.js'
 import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, Palette, Broadcast, Archive, Question } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -2635,69 +2635,67 @@ function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate
 //
 // So: the row for this phone is editable, the rows for other phones are
 // removable, and neither offers the control that would not work.
-function DeviceRosterSheet ({ open, onClose, devices, onRename, onRemove }) {
+// One phone on the roster, inline in Settings rather than behind a Manage sheet.
+//
+// EDIT IS ONLY EVER ON YOUR OWN ROW, and that is a wire constraint, not a layout
+// choice. deviceMeta is SELF-ATTESTED: decideDeviceMetaPut refuses any row whose
+// writerKey is not the Autobase-attested author, and device-link's setDeviceNickname
+// only ever writes `personalBase.local`. There is no API to rename another phone and
+// there cannot be one without changing that rule. A pencil on a housemate's row would
+// be a button that silently does nothing, so other rows get remove only.
+function DeviceRow ({ device, isSelf, onRename, onRemove }) {
+  const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
-  const list = devices || []
-  const self = list.find((d) => d.self || d.isThisDevice) || null
-  const others = list.filter((d) => !(d.self || d.isThisDevice))
+  const label = deviceLabel(device)
 
-  // Reset from the roster each time it opens, so a cancelled edit does not
-  // survive to look like a saved one.
-  useEffect(() => {
-    if (open) { setName(deviceLabel(self, '')); setBusy(false) }
-  }, [open, self])
-
+  const start = () => { setName(deviceLabel(device, '')); setEditing(true) }
+  const cancel = () => { setEditing(false); setName('') }
   const save = async () => {
-    const v = name.trim(); if (!v || v === deviceLabel(self, '')) return
+    const v = name.trim()
+    if (!v || v === deviceLabel(device, '')) return cancel()
     setBusy(true)
     try { await onRename(v) } catch (e) { alert(problem('Could not rename this phone', e)) }
-    setBusy(false)
+    setBusy(false); setEditing(false)
   }
 
-  return (
-    <BottomSheet open={open} onClose={onClose} title='Your devices'>
-      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>
-        Phones signed in as you. They share your spaces and can edit them.
-      </p>
-
-      <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>This phone</span>
-      <div style={{ display: 'flex', gap: sp.sm, alignItems: 'center', margin: `${sp.sm}px 0 ${sp.base}px` }}>
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', gap: sp.sm, alignItems: 'center', padding: `${sp.sm}px 0` }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <Field value={name} onChange={setName} placeholder='Name this phone' />
         </div>
-        <Button
-          variant='secondary'
-          disabled={busy || !name.trim() || name.trim() === deviceLabel(self, '')}
-          style={{ width: 'auto', flexShrink: 0, opacity: busy || !name.trim() || name.trim() === deviceLabel(self, '') ? 0.5 : 1 }}
-          onClick={save}
-        >{busy ? 'Saving…' : 'Save'}</Button>
+        <button onClick={save} disabled={busy || !name.trim()} aria-label='Save name'
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.primary, opacity: busy || !name.trim() ? 0.4 : 1 }}>
+          <Check size={20} weight='bold' />
+        </button>
+        <button onClick={cancel} disabled={busy} aria-label='Cancel rename'
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}>
+          <X size={18} weight='bold' />
+        </button>
       </div>
+    )
+  }
 
-      {others.length ? (
-        <>
-          <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Other phones</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: sp.sm }}>
-            {others.map((d) => (
-              <div key={d.writerKey} style={{ display: 'flex', alignItems: 'center' }}>
-                <span style={{ flex: 1, minWidth: 0, padding: `${sp.md}px ${sp.sm}px`, color: c.text.primary, fontSize: 16, fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {deviceLabel(d)}
-                </span>
-                <button onClick={() => onRemove(d)} aria-label={`Remove ${deviceLabel(d)}`}
-                  style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <TrashIcon size={17} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: sp.xs, padding: `${sp.xs}px 0` }}>
+      <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 15, fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}{isSelf ? <span style={{ color: c.text.muted, fontSize: 13 }}> (this phone)</span> : null}
+      </span>
+      {isSelf ? (
+        <button onClick={start} aria-label={`Rename ${label}`}
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}>
+          <PencilSimple size={18} weight='regular' />
+        </button>
       ) : (
-        <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>No other phones yet. Pair one from the previous screen.</span>
+        <button onClick={() => onRemove(device)} aria-label={`Remove ${label}`}
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}>
+          <Trash size={18} weight='regular' />
+        </button>
       )}
-    </BottomSheet>
+    </div>
   )
 }
-
 function JoinSheet ({ open, onClose, onJoin }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -3326,7 +3324,6 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   const [dl, setDl] = useState(null)          // { enabled, devices, ... } | null
   const [pairUrl, setPairUrl] = useState(null)
   const [linking, setLinking] = useState(false)
-  const [roster, setRoster] = useState(false)
   // Which sections are expanded, remembered across launches. See SETTINGS_OPEN_KEY.
   const [openSections, setOpenSections] = useState(loadSettingsOpen)
   const toggleSection = useCallback((key) => {
@@ -3620,20 +3617,37 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           people actually adjust; then the ones you set once and forget.
           Two single-row groups merged: "Tidy finished aisles" and "Learned Aisles"
           are both grocery-aisle behaviour and were four unrelated groups apart. */}
+      {/* THE ROSTER IS THE SECTION, rather than a count and a Manage button opening a
+          sheet. Tim: "what if we have the devices listed in rows underneath the header,
+          and then we have icons for edit/remove instead of under a separate Manage
+          menu?" The sheet existed when this was a dark diagnostic; now that removal and
+          renaming live here it was a second tap in front of the only place a stale
+          device is visible at all.
+          The per-row asymmetry is a WIRE constraint, not a layout choice - see
+          DeviceRow: deviceMeta is self-attested, so only your own row can be renamed. */}
       {dl?.enabled ? (
-        <Collapsible title='You &amp; your devices' icon={DeviceMobile} {...sect('devices')} maxHeight={900}>
-          <Setting onAbout={setInfo} first title='Your devices' about={ABOUT['Your devices']} alignTop
-            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{
-              (dl.devices || []).length
-                ? (dl.devices || []).map((d) => deviceLabel(d) + ((d.self || d.isThisDevice) ? ' (this phone)' : '')).join(', ')
-                : 'Only this phone so far.'
-            }</span>}
-            control={<div style={{ display: 'flex', gap: sp.sm, flexShrink: 0 }}>
-              {(dl.devices || []).length
-                ? <button onClick={() => setRoster(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Manage</button>
-                : null}
-              <button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>
-            </div>} />
+        <Collapsible title='You &amp; your devices' icon={DeviceMobile} {...sect('devices')} maxHeight={1200}>
+          <p style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.4, margin: `0 0 ${sp.sm}px` }}>
+            Phones signed in as you. They share your spaces and can edit them.
+          </p>
+          {(dl.devices || []).length
+            ? (dl.devices || []).map((d) => (
+                <DeviceRow key={d.writerKey} device={d} isSelf={!!(d.self || d.isThisDevice)}
+                  onRename={renameThisDevice} onRemove={removeDevice} />
+              ))
+            : <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>Only this phone so far.</span>}
+        </Collapsible>
+      ) : null}
+      {/* PAIRING IS ITS OWN SECTION, per Tim. It is a different job from managing the
+          phones you already have, and the two directions belong together: Pair shows a
+          link on THIS phone for another to consume, Link consumes one shown elsewhere.
+          They read as opposites and were previously split across two rows of a roster
+          section, with Pair sitting beside a Manage button it has nothing to do with. */}
+      {dl?.enabled ? (
+        <Collapsible title='Add a phone' icon={Link} {...sect('addPhone')} maxHeight={900}>
+          <Setting onAbout={setInfo} first title='Pair a phone' about={ABOUT['Your devices']} alignTop
+            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Shows a link for the other phone to open.</span>}
+            control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
           <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
@@ -3697,8 +3711,6 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           whole copy-and-send path. */}
       <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); loadDevices() }} />
       <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
-      <DeviceRosterSheet open={roster} onClose={() => setRoster(false)} devices={dl?.devices}
-        onRename={renameThisDevice} onRemove={removeDevice} />
       <TimeOfDaySheet open={pickTime} hour={reminder.hour} minute={reminder.minute}
         onClose={() => setPickTime(false)}
         onPick={(h, m) => saveReminder({ ...reminder, hour: h, minute: m })} />

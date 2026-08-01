@@ -46,11 +46,23 @@ test('the engine really does only let a device name itself', () => {
 
 test('the roster offers rename for this phone and remove for others', () => {
   const src = app()
-  assert.match(src, /function DeviceRosterSheet/, 'the roster should be a real component')
+  // The roster moved out of a Manage sheet and into rows in Settings (2026-08-01),
+  // so the component is DeviceRow rather than DeviceRosterSheet. The PROPERTY this
+  // test exists for is unchanged and is asserted harder below: rename can only ever
+  // target this phone, remove can only ever target another.
+  assert.match(src, /function DeviceRow/, 'the roster row should be a real component')
   // Rename has no writerKey - it cannot target another device.
   assert.match(src, /call\('device:setNickname', \{ nickname \}\)/)
   // Remove always targets another device's writerKey.
   assert.match(src, /call\('device:remove', \{ writerKey: d\.writerKey \}\)/)
+
+  // AND THE ASYMMETRY IS RENDERED, not just available. deviceMeta is self-attested,
+  // so a rename control on another phone's row would be a button that silently does
+  // nothing. The row must branch on isSelf to decide which control it shows.
+  const at = src.indexOf('function DeviceRow')
+  const row = src.slice(at, src.indexOf('\nfunction ', at + 1))
+  assert.match(row, /isSelf \?/, 'the row picks its control from whose row it is')
+  assert.match(row, /onRemove\(device\)/, 'and remove is on the other branch')
 })
 
 // THE IMPORTANT ONE, and the truth it guards has MOVED TWICE.
@@ -138,8 +150,15 @@ test('a device label falls back consistently, and empty nicknames do not win', (
   assert.match(src, /function deviceLabel/, 'one label helper, used by roster and summary')
   // A nickname of '   ' must not render as a blank row.
   assert.match(src, /d\.nickname && String\(d\.nickname\)\.trim\(\)/)
-  // The summary line and the roster must agree on who "this phone" is. The
-  // engine returns `self`; the old summary line only checked `isThisDevice`.
+  // WHO IS "THIS PHONE" IS DECIDED IN ONE PLACE NOW, which is what this test was
+  // really protecting. It used to require the check TWICE - a comma-joined summary
+  // line and the roster sheet had to agree, and the summary once checked only
+  // `isThisDevice` while the engine returns `self`, so they disagreed. The summary
+  // line is gone (2026-08-01): the rows ARE the roster, and the flag is resolved
+  // once at the call site and passed down as `isSelf`. One site cannot disagree with
+  // itself, so the floor is one - but it must still accept EITHER flag.
   const selfChecks = src.match(/d\.self \|\| d\.isThisDevice/g) || []
-  assert.ok(selfChecks.length >= 2, 'both places should accept either flag')
+  assert.ok(selfChecks.length >= 1, 'the self check accepts either flag')
+  assert.match(src, /isSelf=\{!!\(d\.self \|\| d\.isThisDevice\)\}/,
+    'and it is resolved once, then passed to the row')
 })
