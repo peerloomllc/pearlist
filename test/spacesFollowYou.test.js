@@ -120,5 +120,26 @@ test('the UI reloads when a space arrives on its own', () => {
   // 2026-07-28, six spaces seeded by pairing and none on screen.
   assert.match(app, /on\('spaces:changed'/, 'the UI listens for it')
   const at = app.indexOf("on('spaces:changed'")
-  assert.match(app.slice(at, at + 200), /loadSpaces\(\)/, 'and re-reads the list')
+  assert.match(app.slice(at, at + 300), /loadSpaces\(\)/, 'and re-reads the list')
+})
+
+test('and MOVES OFF a space that vanished underneath it', () => {
+  const app = src('ui/App.jsx')
+  const at = app.indexOf("on('spaces:changed'")
+  const body = app.slice(at, at + 1100)
+
+  // THE FAILURE THIS PREVENTS, found on hardware the first time this feature ran.
+  // Reloading the list is not enough: activeSpaceId still points at the space that
+  // just went, so every refresh calls member:getAll / list:getAll / space:status for a
+  // group the worklet no longer has. Each throws `unknown group`, one escapes as an
+  // uncaught rejection in the WebView, and the screen reads "You are not in a space
+  // yet" while the user's OTHER spaces sit there untouched. Tim: "it also left on the
+  // Pixel, but then left me with no spaces at all, instead of leaving me with just the
+  // Home space." The leave itself was correct - exactly one dl:spaceLeft, for the
+  // right space. The UI was pointed at a corpse.
+  assert.match(body, /setActiveSpaceId/, 'it can move the user off')
+  assert.match(body, /some\(\(s\) => s\.groupId === cur\)/,
+    'by testing MEMBERSHIP, so it covers any reason a space disappears')
+  assert.match(body, /setOpenListId\(null\)/,
+    'and drops the open list, which belonged to the space that left')
 })
