@@ -2,7 +2,7 @@
   "expo": {
     "name": "PearList",
     "slug": "pearlist",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "newArchEnabled": true,
     "orientation": "portrait",
     "scheme": "pear",
@@ -11,7 +11,9 @@
     "ios": {
       "bundleIdentifier": "com.pearlist",
       "buildNumber": "9",
-      "associatedDomains": ["applinks:peerloomllc.com"],
+      "associatedDomains": [
+        "applinks:peerloomllc.com"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan space invite QR codes.",
         "NSLocalNetworkUsageDescription": "PearList connects directly to your peers' devices on your Wi-Fi to sync lists peer-to-peer.",
@@ -26,7 +28,7 @@
     },
     "android": {
       "package": "com.pearlist",
-      "versionCode": 1000005,
+      "versionCode": 1000006,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0d0d0d"
