@@ -14,7 +14,7 @@ import { isMyRow, isMine } from '../selfKeys.js'
 import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, Palette, Broadcast, Archive, Question } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -428,12 +428,18 @@ function AislePickerSheet ({ open, onClose, current, onPick, custom = [], noun =
 // row at seven devices would be a very annoying bug to find, so callers with
 // unbounded content pass their own. Same prop and default as PearCal's Collapsible,
 // so the two stay recognisably one component.
-function Collapsible ({ title, open, onToggle, maxHeight = 600, children }) {
+function Collapsible ({ title, icon: Icon, open, onToggle, maxHeight = 600, children }) {
   return (
     <div style={{ background: c.surface.elevated, borderRadius: r.lg, overflow: 'hidden', marginBottom: sp.sm }}>
       <button onClick={onToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.base}px`, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 400 }}>
-        <span>{title}</span>
-        <CaretRight size={18} color={c.text.muted} weight='regular' style={{ transition: 'transform 0.3s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }} />
+        {/* `icon` is OPTIONAL and the prop name matches PearCal's and PearCircle's
+            Collapsible, so the three stay recognisably one component. The About page
+            passes none and is unchanged. */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, minWidth: 0 }}>
+          {Icon ? <Icon size={20} weight='regular' color={c.text.secondary} style={{ flexShrink: 0 }} /> : null}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+        </span>
+        <CaretRight size={18} color={c.text.muted} weight='regular' style={{ flexShrink: 0, transition: 'transform 0.3s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }} />
       </button>
       <div style={{ maxHeight: open ? maxHeight : 0, overflow: 'hidden', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
         <div style={{ padding: `0 ${sp.base}px ${sp.base}px` }}>{children}</div>
@@ -3573,48 +3579,49 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   const nameDirty = name.trim() && name.trim() !== profile?.displayName
   return (
     <FullScreen title='Settings'>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.base, padding: `${sp.lg}px 0` }}>
-        <Avatar name={profile?.displayName || name} avatar={profile?.avatar} size={96} />
-        <div style={{ display: 'flex', gap: sp.sm, width: '100%', maxWidth: 280 }}>
-          <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ flex: 1, padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add photo'}</button>
-          {hasAvatar ? <button onClick={() => commitAvatar(null)} disabled={busy} style={{ flex: 1, padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.error}`, background: 'transparent', color: c.error, fontSize: 14, cursor: 'pointer' }}>Remove</button> : null}
+      {/* COMPACT PROFILE ROW. It used to be three stacked blocks - a 96px avatar
+          centred, a full-width photo button under it, then a labelled name field on
+          its own row - which came to roughly 40% of the TCL's screen before a single
+          setting. Collapsing the sections helped; this is the other half, and the two
+          together are what put every section on one screen.
+          Side by side instead: a smaller avatar that IS the photo control, with the
+          name beside it. Nothing is removed - Remove only ever appeared with a photo
+          set, and still does. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp.base, marginBottom: sp.lg }}>
+        {/* The avatar is the button. A photo is the obvious thing to tap on a photo,
+            and it buys back the full-width button's height. The caption underneath
+            carries the affordance for anyone who would not think to try. */}
+        <button onClick={() => fileRef.current?.click()} disabled={busy} aria-label={hasAvatar ? 'Change photo' : 'Add photo'}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0, borderRadius: '50%' }}>
+          <Avatar name={profile?.displayName || name} avatar={profile?.avatar} size={64} />
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: sp.sm }}>
+            <input value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder='Your name'
+              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
+            <button onClick={saveName} disabled={busy || !nameDirty}
+              style={{ padding: '0 16px', flexShrink: 0, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, cursor: 'pointer', opacity: busy || !nameDirty ? 0.5 : 1 }}>Save</button>
+          </div>
+          <div style={{ display: 'flex', gap: sp.base, marginTop: 6 }}>
+            <button onClick={() => fileRef.current?.click()} disabled={busy}
+              style={{ background: 'none', border: 'none', padding: 0, color: c.text.muted, fontSize: 12, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add photo'}</button>
+            {hasAvatar ? <button onClick={() => commitAvatar(null)} disabled={busy}
+              style={{ background: 'none', border: 'none', padding: 0, color: c.error, fontSize: 12, cursor: 'pointer' }}>Remove</button> : null}
+          </div>
         </div>
         <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
       </div>
 
-      <label style={{ display: 'block', color: c.text.secondary, fontSize: 13, marginBottom: sp.xs }}>Name</label>
-      <div style={{ display: 'flex', gap: sp.sm, marginBottom: sp.lg }}>
-        <input value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder='Your name' style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-        <button onClick={saveName} disabled={busy || !nameDirty} style={{ padding: '0 18px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, cursor: 'pointer', opacity: busy || !nameDirty ? 0.5 : 1 }}>Save</button>
-      </div>
-
-      <Collapsible title='Appearance' {...sect('appearance')}>
-        <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
-      </Collapsible>
-      <Collapsible title='Lists' {...sect('lists')}>
-        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
-          control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
-      </Collapsible>
-      <Collapsible title='Connection' {...sect('connection')}>
-        <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
-          extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
-          control={<Toggle on={relayOn} onChange={toggleRelay} />} />
-      </Collapsible>
-      {/* Everything here lives only on the household's phones, so a file is the
-          only copy that survives all of them. Also the one way out of a space a
-          device cannot sync (see SyncBanner). */}
-      <Collapsible title='Backup' {...sect('backup')}>
-        <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
-            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
-            : 'Nothing to save yet.'}</span>}
-          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
-        <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
-          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
-      </Collapsible>
+      {/* ORDER IS DELIBERATE, and it is the whole point of this section.
+          Before: Appearance (one dark-mode toggle) first, Linked devices SIXTH and
+          below the fold on the TCL - pairing, the roster and removal, i.e. the most
+          consequential things in the app. Now: identity and devices first, directly
+          under the profile block they are conceptually part of; then the settings
+          people actually adjust; then the ones you set once and forget.
+          Two single-row groups merged: "Tidy finished aisles" and "Learned Aisles"
+          are both grocery-aisle behaviour and were four unrelated groups apart. */}
       {dl?.enabled ? (
-        <Collapsible title='Linked devices' {...sect('devices')} maxHeight={900}>
+        <Collapsible title='You &amp; your devices' icon={DeviceMobile} {...sect('devices')} maxHeight={900}>
           <Setting onAbout={setInfo} first title='Your devices' about={ABOUT['Your devices']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{
               (dl.devices || []).length
@@ -3632,6 +3639,50 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
         </Collapsible>
       ) : null}
+      <Collapsible title='Notifications' icon={BellRinging} {...sect('notifications')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
+          extra={reminder.enabled
+            // No "Every day at" label: the title already says daily, so the time
+            // on its own is unambiguous (Tim's call).
+            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
+            : null}
+          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
+        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+      </Collapsible>
+      <Collapsible title='Lists &amp; aisles' icon={ListChecks} {...sect('listsAisles')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
+          control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
+      <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
+          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
+          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
+      </Collapsible>
+      {/* Everything here lives only on the household's phones, so a file is the
+          only copy that survives all of them. Also the one way out of a space a
+          device cannot sync (see SyncBanner). */}
+      <Collapsible title='Backup' icon={Archive} {...sect('backup')}>
+        <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
+            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
+            : 'Nothing to save yet.'}</span>}
+          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
+        <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
+          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
+      </Collapsible>
+      <Collapsible title='Connection' icon={Broadcast} {...sect('connection')}>
+        <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
+          extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
+          control={<Toggle on={relayOn} onChange={toggleRelay} />} />
+      </Collapsible>
+      <Collapsible title='Appearance' icon={Palette} {...sect('appearance')}>
+        <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
+      </Collapsible>
+      <Collapsible title='Help' icon={Question} {...sect('help')}>
+        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
+          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
+      </Collapsible>
       {/* CLOSING THIS DOES NOT CANCEL THE PAIRING, and that is deliberate.
           It used to call device:cancelPairing here, which made "Copy link"
           almost useless: the only reason to copy a pair link is to send it from
@@ -3648,31 +3699,10 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
       <DeviceRosterSheet open={roster} onClose={() => setRoster(false)} devices={dl?.devices}
         onRename={renameThisDevice} onRemove={removeDevice} />
-      <Collapsible title='Notifications' {...sect('notifications')} maxHeight={900}>
-        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
-        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
-          extra={reminder.enabled
-            // No "Every day at" label: the title already says daily, so the time
-            // on its own is unambiguous (Tim's call).
-            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
-                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
-            : null}
-          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
-        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
-      </Collapsible>
-      <Collapsible title='Aisles' {...sect('aisles')}>
-        <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
-          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
-          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
-      </Collapsible>
       <TimeOfDaySheet open={pickTime} hour={reminder.hour} minute={reminder.minute}
         onClose={() => setPickTime(false)}
         onPick={(h, m) => saveReminder({ ...reminder, hour: h, minute: m })} />
-      <Collapsible title='Help' {...sect('help')}>
-        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
-          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
-      </Collapsible>
-      <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
+            <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
         {info?.link ? (
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: sp.base }}>
