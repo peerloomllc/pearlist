@@ -160,7 +160,37 @@ function hasMnemonicInMemory () { return !!_mnemonic }
 //
 // The linked-device roster does NOT need registering: device-link owns deviceMeta
 // and listLinkedDevices natively.
-function makeRecords () { return { profile: { validate: isProfileRecord } } }
+// `space` is the second: WHICH SPACES A PERSON IS IN. See
+// proposals/2026-07-31-your-spaces-follow-you.md.
+//
+// collectGroups/seedGroups already carry this, but only inside the pairing
+// handshake, so it fires exactly once - at link time. Tim, 2026-07-31: "I created
+// 'New' space on TCL, but it doesn't automatically show up on the iPhone. I have to
+// send an invite to the iPhone." Which reads as absurd once the app has told you the
+// two phones are the same person. The mechanism was never missing, it was wired to
+// the wrong event.
+//
+// IT CARRIES THE JOIN SECRETS IN THE CLEAR, and that is a decision rather than an
+// oversight. A sealed version was designed (proposals/2026-07-31-space-secrets-
+// locked-to-your-current-phones.md) to stop a REMOVED phone learning how to join
+// spaces made after its removal. Tim then settled what removal means, 2026-07-31: "I
+// don't care about 'if they lose their phone and need to revoke access' because they
+// can just delete a space and create a new one." That is the exact threat the seal
+// existed for, so the seal is superseded - see DECISIONS.md.
+// Two things also narrow it: these secrets already ride the pair channel today
+// (deviceLink.js collectGroups), and removing your last other phone now moves the
+// account to a base that phone cannot read at all (device-link #15).
+function isSpaceRecord (v) {
+  return !!(v && typeof v === 'object' &&
+    typeof v.groupId === 'string' && v.groupId &&
+    typeof v.groupKey === 'string' && v.groupKey)
+}
+function makeRecords () {
+  return {
+    profile: { validate: isProfileRecord },
+    space: { validate: isSpaceRecord },
+  }
+}
 
 // Where applied personal-base rows land locally.
 //
@@ -173,14 +203,25 @@ function makeRecords () { return { profile: { validate: isProfileRecord } } }
 // scope, so the right one is passed in instead of a module-level "last ctx" that
 // would be a guess about ordering.
 let _profileMirror = null
+let _spaceMirror = null
 function setProfileMirror (fn) { if (typeof fn === 'function') _profileMirror = fn }
+function setSpaceMirror (fn) { if (typeof fn === 'function') _spaceMirror = fn }
 function makeMirror (ctx) {
   return async (type, key, value) => {
-    if (type !== 'profile' || !_profileMirror) return
     // Never let a mirror failure escape into device-link's apply: an unhandled
     // rejection there takes down the WHOLE worklet, and the app then dies on every
     // launch forever (see the guard in src/bare.js and the 2026-07-30 bricking).
-    try { await _profileMirror(ctx, value) } catch (e) { _trace('dl:profileMirrorFailed', { err: (e && e.message) || String(e) }) }
+    // That is why every branch here is individually wrapped rather than the caller
+    // trusting one try around the lot.
+    if (type === 'profile' && _profileMirror) {
+      try { await _profileMirror(ctx, value) } catch (e) { _trace('dl:profileMirrorFailed', { err: (e && e.message) || String(e) }) }
+      return
+    }
+    // A space arriving from another of this person's phones. `value` is null for a
+    // DELETE, which is how leaving is carried: see spaceMirror in listMethods.
+    if (type === 'space' && _spaceMirror) {
+      try { await _spaceMirror(ctx, key, value) } catch (e) { _trace('dl:spaceMirrorFailed', { err: (e && e.message) || String(e) }) }
+    }
   }
 }
 
@@ -206,6 +247,47 @@ async function putProfileRecord (ctx, profile) {
     const dl = await getDeviceLink(ctx)
     if (!dl || typeof dl.putRecord !== 'function') return false
     return await dl.putRecord('profile', 'profile', record)
+  } catch { return false }
+}
+
+const SPACE_RECORD_KEY = (groupId) => 'space:' + groupId
+
+// Tell this person's OTHER phones that they are in this space. Same never-initiates
+// discipline as putProfileRecord above, for the same reason: this is called from the
+// space join/create paths, which run in every build whether or not linking is on.
+async function putSpaceRecord (ctx, group) {
+  if (!DEVICE_LINK_ENABLED || !isDeviceLinkStarted()) return false
+  if (!group || typeof group.groupId !== 'string' || typeof group.groupKey !== 'string') return false
+  try {
+    const dl = await getDeviceLink(ctx)
+    if (!dl || typeof dl.putRecord !== 'function') return false
+    const ok = await dl.putRecord('space', SPACE_RECORD_KEY(group.groupId), {
+      groupId: group.groupId,
+      groupKey: group.groupKey,
+      encryptionKey: group.encryptionKey,
+      bootstrap: group.bootstrap,
+      name: group.name || '',
+    })
+    _trace('dl:putSpaceRecord', { gid: short(group.groupId), ok: !!ok })
+    return ok
+  } catch { return false }
+}
+
+// LEAVING IS PER PERSON, so it is a DELETE of the same record rather than a local-only
+// forget. If it were local only, the record would still be on the personal base, apply
+// would mirror it back, and the phone would rejoin the space it just left - a leave
+// button that undoes itself, which is worse than no sync at all. Recommended and
+// chosen in the proposal: a space is something a PERSON is in, not a phone, which is
+// the same correction PRs #161, #162 and #163 made everywhere else.
+async function delSpaceRecord (ctx, groupId) {
+  if (!DEVICE_LINK_ENABLED || !isDeviceLinkStarted()) return false
+  if (typeof groupId !== 'string' || !groupId) return false
+  try {
+    const dl = await getDeviceLink(ctx)
+    if (!dl || typeof dl.delRecord !== 'function') return false
+    const ok = await dl.delRecord('space', SPACE_RECORD_KEY(groupId))
+    _trace('dl:delSpaceRecord', { gid: short(groupId), ok: !!ok })
+    return ok
   } catch { return false }
 }
 
@@ -420,4 +502,4 @@ async function attestSelf (devicePubkeyHex) {
   return proofHex
 }
 
-module.exports = { setProfileMirror, putProfileRecord, isDeviceLinkStarted, isKeystoreUnreadable, attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }
+module.exports = { setProfileMirror, putProfileRecord, setSpaceMirror, putSpaceRecord, delSpaceRecord, SPACE_RECORD_KEY, isDeviceLinkStarted, isKeystoreUnreadable, attestSelf, getDeviceLink, DEVICE_LINK_ENABLED, provisionMnemonic, hasMnemonicInMemory, migrateLegacyMnemonic, LEGACY_MNEMONIC_KEY, parsePairLink, buildPairLink, setTrace, _trace: (n, d) => _trace(n, d), _safeEventData: safeEventData, _resetForTest, _groupPluginForTest }
