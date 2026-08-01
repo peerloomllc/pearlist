@@ -1,9 +1,41 @@
 # Space secrets locked to your current phones
 
-**Status:** proposed
+**Status:** SUPERSEDED 2026-08-01, unbuilt. See below.
 **Tier:** T3 (key management)
 **Date:** 2026-07-31
 **Amends:** `2026-07-31-your-spaces-follow-you.md`, Open question 1
+
+## SUPERSEDED - the threat it defends against was ruled out of scope
+
+This exists to stop a phone you have REMOVED from learning the secrets needed to
+join spaces you create afterwards. Tim settled what removal means the same evening,
+after measurement showed a removed member gets re-admitted over a live connection
+(DECISIONS.md, "Removing someone from a space is a ROSTER action, not a lock"):
+
+> I don't care about "if they lose their phone and need to revoke access" because
+> they can just delete a space and create a new one.
+
+That is precisely the threat this seals against, so sealing buys nothing he wants
+and costs a two-repo cryptography change. `2026-07-31-your-spaces-follow-you.md`
+shipped instead with the plain record it originally proposed (PR #174), which is
+the T2 it started as.
+
+Two things narrow the exposure further, and are worth recording so the trade is not
+re-litigated from memory:
+
+- These secrets **already** cross the pair channel today, in `collectGroups`. Putting
+  them on the personal base changes their durability, not who can see them.
+- Removing your last other phone now mints a fresh personal base that the removed
+  phone cannot read at all (device-link #15), so the common case is covered by
+  rotation rather than by encryption.
+
+**WHAT IS STILL TRUE HERE, and why this file is kept rather than deleted:** the
+analysis of why the obvious "ask my other phone for the secrets" design cannot work -
+every linked device holds the mnemonic, so a removed phone proves it is you perfectly -
+is unaffected by the decision. If space removal is ever wanted as a real boundary,
+start here rather than rediscovering it.
+
+The rest of this document is left exactly as approved.
 
 ## Why this exists
 
