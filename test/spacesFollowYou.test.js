@@ -24,6 +24,23 @@ const path = require('node:path')
 
 const src = (f) => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')
 
+// The body of a top-level call like `setSpaceMirror(async (...) => { ... })`, bounded
+// by where it actually ENDS rather than by a character count.
+//
+// A NEGATIVE ASSERTION IS ONLY AS GOOD AS ITS WINDOW. `slice(at, at + 1600)` made
+// "nothing joins from inside apply" mean "no joinGroup in the first 1600 characters",
+// which is an accident of how much comment happens to sit there. Proved by re-running
+// this file against comment-stripped source: the window slid far enough to swallow
+// scheduleSpaceWork - which joins ON PURPOSE, off the apply loop - and the assertion
+// flipped. It would have done the same on any ordinary edit, and quietly.
+function callBody (s, marker) {
+  const at = s.indexOf(marker)
+  assert.ok(at > 0, `${marker} exists`)
+  const end = s.indexOf('\n})', at)
+  assert.ok(end > at, `${marker} is a closed call`)
+  return s.slice(at, end)
+}
+
 test('the space record type is registered, or every write is silently dropped', () => {
   const dl = src('deviceLink.js')
   assert.match(dl, /space:\s*\{\s*validate/, 'the personal base accepts a `space` record')
@@ -51,9 +68,7 @@ test('leaving retracts the record, so it cannot mirror itself back', () => {
 
 test('an arriving record is acted on OFF the personal base apply loop', () => {
   const lm = src('listMethods.js')
-  const at = lm.indexOf('setSpaceMirror(')
-  assert.ok(at > 0, 'the mirror handler exists')
-  const body = lm.slice(at, at + 1600)
+  const body = callBody(lm, 'setSpaceMirror(')
 
   // Joining or destroying a space touches a DIFFERENT base than the one whose apply
   // this runs inside. Doing that inline is the "Invalid checkout N for batch" assert -
@@ -66,8 +81,7 @@ test('an arriving record is acted on OFF the personal base apply loop', () => {
 
 test('a space already joined is skipped, in both the put and delete directions', () => {
   const lm = src('listMethods.js')
-  const at = lm.indexOf('setSpaceMirror(')
-  const body = lm.slice(at, at + 1600)
+  const body = callBody(lm, 'setSpaceMirror(')
 
   // Re-announcing is routine - every announce re-puts every space and a re-pair
   // replays the lot - so joining twice would mount a second base for one space.

@@ -83,7 +83,13 @@ test('the removal confirm is derived, not hand-written at the call site', () => 
   const src = app()
   const at = src.indexOf('async function removeDevice')
   assert.ok(at > 0, 'removeDevice should exist')
-  const body = src.slice(at, at + 900)
+  // BOUNDED BY THE FUNCTION, not by a character count. `slice(at, at + 900)` made the
+  // two negatives below mean "this copy is not in the first 900 characters", so a
+  // hand-written sentence added past that point - or pushed past it by any ordinary
+  // edit - would creep back in silently. That is exactly what these guards exist to
+  // prevent, and the window was quietly undermining them.
+  const close = src.indexOf('\n  async function', at + 1)
+  const body = src.slice(at, close > at ? close : undefined)
 
   assert.match(body, /askConfirm\(/, 'removal must be confirmed')
   assert.match(body, /device:removalPreview/, 'and must ask what will actually happen first')
