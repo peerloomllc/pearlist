@@ -233,7 +233,19 @@ test('the removal flow tells the truth on an UN-ARMED space', () => {
   // not to bother - being told afterwards is being told too late.
   assert.match(body, /revoke\?\.armed/, 'the confirm has to know whether this space is armed')
   assert.match(body, /still change things/, 'and say what removal will not do')
-  assert.match(body, /Stronger removal/, 'and name the control that fixes it')
+
+  // ...AND NAME WHAT WOULD CHANGE IT. This used to require the string "Stronger
+  // removal". That control was deleted in PR #170 - spaces arm themselves now - so the
+  // pin should have gone red then and did not, because the words still appeared in a
+  // COMMENT inside the same function. A pin matched against a whole function body can
+  // be satisfied by prose nobody ships. It is asserted against the user-visible
+  // `message:` strings now, and names the condition rather than a control, since there
+  // is no longer a control to name.
+  const messages = body.match(/message:[\s\S]*?confirmLabel/)
+  assert.ok(messages, 'the confirm still builds a message')
+  assert.match(messages[0], /everyone updates/, 'and names what would change it')
+  assert.doesNotMatch(messages[0], /Stronger removal/,
+    'never by pointing at a control that no longer exists')
 
   // The BANNER too: a confirm is read once and dismissed, and the banner is what is
   // still on screen when they look at the members list and see the person gone.

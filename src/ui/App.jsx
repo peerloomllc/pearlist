@@ -2020,14 +2020,28 @@ export default function App () {
       title: `Remove ${name}?`,
       // Honest: re-inviting them is NOT enough on its own, because only the owner
       // can clear an eviction. "Add back" on this screen is the way back.
-      // NO LONGER OFFERS AN ACTION FOR THE HIDE-ONLY CASE. It used to say "until you
-      // turn on Stronger removal below", which is now impossible advice: there is no
-      // control to turn on. Whether a space is armed is decided by whether everyone
-      // has updated, so that is the only thing left to tell them, and it is the same
-      // sentence in both branches now.
+      // IT STOPPED PROMISING A LOCK, because removal is not one and measurement
+      // proved it. test/removalStaysRemoved.test.js: on an ARMED space, over a live
+      // connection, the owner's own phone applies a FRESH admission for the writer it
+      // just revoked, and the removed peer is writing again within seconds. Nobody
+      // asked for that - it is the pair channel doing its job, which is to let in any
+      // phone that says it cannot write. A thrown-out phone and a phone the owner just
+      // added back make the identical request, and nothing on the wire tells them
+      // apart.
+      //
+      // DECIDED, not a defect to hide (Tim, 2026-07-31): "I don't care about 'if they
+      // lose their phone and need to revoke access' because they can just delete a
+      // space and create a new one." So removal means "get them out of my list and
+      // stop them touching things", not "lock them out", and the copy has to say the
+      // weaker true thing rather than the stronger false one. See DECISIONS.md.
+      //
+      // The old sentence - "can no longer change anything here" - read as a security
+      // guarantee. It is the exact shape of promise this file has already had to walk
+      // back once (the un-armed hide-only case, 2026-07-31 that morning), and it would
+      // have been walked back again the first time someone checked.
       message: hideOnly
         ? `${name} stops showing as a member, but can still change things here until everyone updates to the latest version. Their lists stay and you can add them back.`
-        : `${name} stops showing as a member and can no longer change anything here. Their lists stay and you can add them back.`,
+        : `${name} stops showing as a member and stops being able to change things. This is not a lock: a phone they still have could get back in. To put a group beyond someone for good, make a new space without them. Their lists stay and you can add them back.`,
       confirmLabel: 'Remove',
       danger: true,
     })
@@ -2038,7 +2052,9 @@ export default function App () {
     // Be honest when we could only HIDE them. Cutting a device off needs its writer
     // binding, which only exists if it has been online since the space armed itself.
     // Without it the removal is hide-only, and saying otherwise would be a lie about
-    // a security property.
+    // what just happened. (The full-strength case is not a lock either - see the
+    // confirm above - but "we could not even revoke" is a different, sharper failure
+    // and still worth its own sentence.)
     if (revoke?.armed && res && res.why === 'not-owner-device') {
       // A DIFFERENT REASON, so a different sentence. This phone can manage the space
       // because it is the owner's, but cutting a member's device off is still the

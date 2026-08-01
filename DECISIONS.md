@@ -2,6 +2,61 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-07-31 - Removing someone from a space is a ROSTER action, not a lock
+Tier: T2 (it changes what a shipped security control promises). No wire change.
+This records a deliberate trade, so nobody rebuilds removal on the assumption it
+is a boundary - and so nobody "fixes" the re-admission back out without knowing
+what it costs.
+
+WHAT WAS MEASURED. peerloom-core#19 made a revoked writer keep asking to be let
+back in, and made the admitter stop refusing forever. That was to fix a real
+complaint: "Add back" reported success while the restored member silently still
+could not write, until they force-quit the app. The roster said one thing and the
+truth was another.
+
+The side effect, measured in test/removalStaysRemoved.test.js against real
+Autobase peers over a real pair channel: on an ARMED space, the owner's own phone
+applies a FRESH admission for the writer it just revoked, within seconds, with
+nobody asking. Admissions for that writer went 2 -> 3 and the removed peer was
+writing again. A CONTROL with the pair channel removed shows the same removal
+taking effect and staying, so the removal itself is sound - the connection undoes
+it.
+
+IT IS A REGRESSION, NOT A PRE-EXISTING HOLE, and that was checked rather than
+assumed: the same test run against the previous engine finds no re-admission,
+because a revoked device used to stop asking. It was first reported to Tim the
+other way round, as "widening an existing hole", and corrected once measured.
+
+WHY THE TWO CANNOT BE TOLD APART. A phone that was thrown out and a phone the
+owner just added back make the IDENTICAL request: "I cannot write, let me in."
+Nothing on the wire distinguishes them. Spaces keep no denylist, deliberately -
+test/readmission.test.js pins that as the choice that makes recovering from an
+accidental removal possible at all. So supporting Add back over a live connection
+and refusing a thrown-out phone over the same connection are the same code path.
+
+THE DECISION (Tim): "What I want is this: If a user pairs a device both devices
+become like one person with all the same permissions for a space so that a user
+can do all the same things on either device. I don't care about 'if they lose
+their phone and need to revoke access' because they can just delete a space and
+create a new one."
+
+So: keep the fix. Removal means "get them off my list and stop them touching
+things", and deleting the space is the answer for getting someone out for good.
+
+WHAT CHANGED AS A RESULT. The removal confirm stopped promising a lock. It said
+"can no longer change anything here", which is false while the removed phone is
+connected. It now says removal is not a lock and points at making a new space.
+That is the second time this dialog has had to walk back a promise it could not
+keep (the un-armed hide-only case, earlier the same day), and the pattern is
+worth naming: every sentence here should describe what the code does, never what
+the feature is called.
+
+NOT DONE, deliberately: the arming and capability machinery stays. It is built,
+tested, shipping and harmless, and ripping it out on the back of this would be a
+large change justified by a small one. If removal is ever wanted as a real lock,
+the engine already has the `authorizeWriter` hook for it - what is missing is a
+replicated record of who was deliberately revoked, which is a T3 with a proposal.
+
 ## 2026-07-30 - promote1 ships WITH device linking, not after it
 Tier: T3 (it decides when a consensus rule reaches users). No code change:
 `armRevocation` already sets revokeV1, revokeV2 and promoteV1 in a single write
