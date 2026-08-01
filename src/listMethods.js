@@ -509,8 +509,43 @@ async function publishMember (ctx, onlyGroupId) {
     if (onlyGroupId && groupId !== onlyGroupId) continue
     if (!base.writable) continue
     try { await ctx.append(groupId, { type: 'put', key, value: signRow(ctx, value) }); published = true } catch {}
+    // ARM THE MOMENT OUR ROW EXISTS, rather than waiting to be looked at.
+    //
+    // The catch-up in space:revocationStatus already arms, and it runs on the roster
+    // refresh - which fires on open, on every change, on reconnect and on a 15s
+    // backstop. So a space the owner is LOOKING AT arms within seconds, which is how
+    // the automatic arming was seen working on hardware.
+    //
+    // The hole that leaves: the refresh only ever runs for the ACTIVE space, and only
+    // the owner DEVICE can perform the first arming (canActAsOwner needs revokeV2, so
+    // a linked phone cannot). A space its founder creates and never opens again
+    // therefore never arms, and the founder's OTHER phone can never manage it - the
+    // exact "my second phone has no buttons" complaint, on a space nobody thinks to
+    // revisit. It self-heals when the founder opens it, which is precisely why it
+    // would be reported as intermittent.
+    //
+    // Publishing is the right moment because it is when the precondition becomes true:
+    // allMembersSupportCap returns FALSE on an empty row set, so arming any earlier is
+    // a silent no-op. Best-effort and idempotent - armRevocation re-checks the gate,
+    // ownership and the capabilities itself, so this can only ever be early, never
+    // wrong.
+    armAfterPublish(ctx, groupId).catch(() => {})
   }
   return published
+}
+
+// Deliberately separated so publishMember stays a publish. Updates first: our own
+// append has to be APPLIED before the row is visible to the capability gate, and
+// without that the first attempt always sees an empty set.
+async function armAfterPublish (ctx, groupId) {
+  const base = ctx.bases.get(groupId)
+  if (!base || !base.writable) return
+  try { await base.update() } catch {}
+  const meta = await readRow(base, 'space')
+  // Only the owner device, and only a space that is not already armed. Anything else
+  // is armRevocation's business and it will refuse anyway.
+  if (!meta || meta.revokeV1 === true || meta.owner !== pubkeyHex(ctx)) return
+  await armRevocation(ctx, groupId)
 }
 
 // Stamp authorship + a fresh updatedAt, then sign. Every write records the

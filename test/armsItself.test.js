@@ -104,6 +104,10 @@ function mkCtx (dev, groupId, peer) {
     bases,
     async append (gid, value) { await bases.get(gid).append(value) },
     emit () {},
+    // publishMember reads a profile out of localDb. A bare stub is enough: the row
+    // it builds only needs `caps` for the capability gate, and the display name is
+    // not what is under test here.
+    localDb: { async get () { return null } },
   }
 }
 const GID = 'g1'
@@ -143,6 +147,38 @@ test('a brand new space arms itself on the first status check, with nobody asked
   assert.equal(meta.promoteV1, true)
   assert.equal(meta.owner, a.pubkey, 'ownership untouched')
   assert.equal(meta.name, 'New', 'and so is everything else on the row')
+})
+
+// ARMING MUST NOT DEPEND ON ANYONE LOOKING AT THE SPACE.
+//
+// space:revocationStatus arms, and it runs on the roster refresh - which fires on
+// open, on change, on reconnect and on a 15s backstop. So a space the owner is LOOKING
+// AT arms within seconds. The hole that leaves: the refresh only runs for the ACTIVE
+// space, and only the owner DEVICE can perform the first arming, so a space its founder
+// creates and never opens again NEVER arms - and the founder's other phone can never
+// manage it. It self-heals the moment the founder revisits, which is exactly what makes
+// it a confusing intermittent report rather than a clean bug.
+//
+// Publishing the member row is the right moment: it is when the capability gate's
+// precondition becomes true. This test never calls space:revocationStatus at all.
+test('publishing the member row arms the space, with nobody viewing it', async (t) => {
+  t.after(cleanup)
+  const me = await person()
+  const a = await me()
+  // No member row yet - publishMember writes it, which is the trigger under test.
+  const s = await freshSpace(a, { publishMember: false })
+  t.after(() => closeAll(s))
+
+  assert.equal((await metaOf(s.pa)).revokeV1, undefined, 'precondition: un-armed')
+
+  await methods['member:publish']({ groupId: GID }, mkCtx(a, GID, s.pa))
+  await settle(s.peers, 1500)
+
+  const meta = await metaOf(s.pa)
+  assert.equal(meta.revokeV1, true, 'armed off the back of the publish alone')
+  assert.equal(meta.revokeV2, true)
+  assert.equal(meta.promoteV1, true)
+  assert.equal(meta.owner, a.pubkey, 'and ownership is untouched')
 })
 
 // THE ORDERING TRAP, pinned because getting it wrong is silent and permanent-looking.
