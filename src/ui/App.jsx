@@ -420,14 +420,22 @@ function AislePickerSheet ({ open, onClose, current, onPick, custom = [], noun =
 }
 
 // Accordion card matching the suite (rotating chevron, max-height body).
-function Collapsible ({ title, open, onToggle, children }) {
+//
+// `maxHeight` is the collapse animation's open bound, not a layout cap - the body
+// is clipped at it. 600 is fine for prose, but a Settings section grows with its
+// content: Linked devices gets taller with every phone paired, and Notifications
+// with the daily-reminder controls expanded. A section that silently loses its last
+// row at seven devices would be a very annoying bug to find, so callers with
+// unbounded content pass their own. Same prop and default as PearCal's Collapsible,
+// so the two stay recognisably one component.
+function Collapsible ({ title, open, onToggle, maxHeight = 600, children }) {
   return (
     <div style={{ background: c.surface.elevated, borderRadius: r.lg, overflow: 'hidden', marginBottom: sp.sm }}>
       <button onClick={onToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.base}px`, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 400 }}>
         <span>{title}</span>
         <CaretRight size={18} color={c.text.muted} weight='regular' style={{ transition: 'transform 0.3s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }} />
       </button>
-      <div style={{ maxHeight: open ? 600 : 0, overflow: 'hidden', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
+      <div style={{ maxHeight: open ? maxHeight : 0, overflow: 'hidden', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
         <div style={{ padding: `0 ${sp.base}px ${sp.base}px` }}>{children}</div>
       </div>
     </div>
@@ -685,6 +693,22 @@ function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(list
 const AUTOCOLLAPSE_KEY = 'pearlist:autocollapse'
 function loadAutoCollapse () { try { return localStorage.getItem(AUTOCOLLAPSE_KEY) === '1' } catch { return false } }
 function saveAutoCollapse (on) { try { localStorage.setItem(AUTOCOLLAPSE_KEY, on ? '1' : '0') } catch {} }
+
+// Which Settings sections are expanded. Device-local and purely presentational,
+// like the aisle view state above.
+//
+// MULTI-OPEN, unlike the About page's accordion, which keeps exactly one section
+// open. About is a document you read top to bottom; Settings is a workbench, and
+// closing Notifications because you opened Backup is the kind of small rudeness
+// that makes a page feel like it is fighting you.
+//
+// ALL CLOSED BY DEFAULT, which is the point of the change. Eight groups holding
+// eleven rows did not fit on the TCL, so "Your devices" - pairing, the roster,
+// removal - sat below the fold. Collapsed, the whole page is a short list of
+// headings that fits without scrolling, and nothing is buried by position alone.
+const SETTINGS_OPEN_KEY = 'pearlist:settingsOpen'
+function loadSettingsOpen () { try { return JSON.parse(localStorage.getItem(SETTINGS_OPEN_KEY) || '{}') || {} } catch { return {} } }
+function saveSettingsOpen (next) { try { localStorage.setItem(SETTINGS_OPEN_KEY, JSON.stringify(next)) } catch {} }
 
 // User-made aisle names remembered per space (device-local), so a custom aisle
 // stays offered in the picker even after its last item leaves it (an empty aisle
@@ -3288,14 +3312,6 @@ function Setting ({ title, about, aboutLink, control, extra, first, alignTop, on
     </div>
   )
 }
-function Group ({ title, children }) {
-  return (
-    <div style={{ marginBottom: sp.lg }}>
-      <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `0 ${sp.xs}px ${sp.xs}px` }}>{title}</div>
-      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>{children}</div>
-    </div>
-  )
-}
 
 function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
@@ -3305,6 +3321,19 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   const [pairUrl, setPairUrl] = useState(null)
   const [linking, setLinking] = useState(false)
   const [roster, setRoster] = useState(false)
+  // Which sections are expanded, remembered across launches. See SETTINGS_OPEN_KEY.
+  const [openSections, setOpenSections] = useState(loadSettingsOpen)
+  const toggleSection = useCallback((key) => {
+    setOpenSections((cur) => {
+      const next = { ...cur, [key]: !cur[key] }
+      saveSettingsOpen(next)
+      return next
+    })
+  }, [])
+  // Every group is the same three props, and getting one wrong means a section that
+  // will not open or that toggles a different one - silent and easy to miss in a
+  // page of eight. Spreading them keeps the call sites to a title and content.
+  const sect = useCallback((key) => ({ open: !!openSections[key], onToggle: () => toggleSection(key) }), [openSections, toggleSection])
   const loadDevices = useCallback(async () => {
     const st = await call('device:status', {}).catch(() => null)
     setDl(st)
@@ -3559,22 +3588,22 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
         <button onClick={saveName} disabled={busy || !nameDirty} style={{ padding: '0 18px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, cursor: 'pointer', opacity: busy || !nameDirty ? 0.5 : 1 }}>Save</button>
       </div>
 
-      <Group title='Appearance'>
+      <Collapsible title='Appearance' {...sect('appearance')}>
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
-      </Group>
-      <Group title='Lists'>
+      </Collapsible>
+      <Collapsible title='Lists' {...sect('lists')}>
         <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
           control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
-      </Group>
-      <Group title='Connection'>
+      </Collapsible>
+      <Collapsible title='Connection' {...sect('connection')}>
         <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
           extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
           control={<Toggle on={relayOn} onChange={toggleRelay} />} />
-      </Group>
+      </Collapsible>
       {/* Everything here lives only on the household's phones, so a file is the
           only copy that survives all of them. Also the one way out of a space a
           device cannot sync (see SyncBanner). */}
-      <Group title='Backup'>
+      <Collapsible title='Backup' {...sect('backup')}>
         <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
             ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
@@ -3583,9 +3612,9 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
         <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
           control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
-      </Group>
+      </Collapsible>
       {dl?.enabled ? (
-        <Group title='Linked devices'>
+        <Collapsible title='Linked devices' {...sect('devices')} maxHeight={900}>
           <Setting onAbout={setInfo} first title='Your devices' about={ABOUT['Your devices']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{
               (dl.devices || []).length
@@ -3601,7 +3630,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
-        </Group>
+        </Collapsible>
       ) : null}
       {/* CLOSING THIS DOES NOT CANCEL THE PAIRING, and that is deliberate.
           It used to call device:cancelPairing here, which made "Copy link"
@@ -3619,7 +3648,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
       <DeviceRosterSheet open={roster} onClose={() => setRoster(false)} devices={dl?.devices}
         onRename={renameThisDevice} onRemove={removeDevice} />
-      <Group title='Notifications'>
+      <Collapsible title='Notifications' {...sect('notifications')} maxHeight={900}>
         <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
         <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
           extra={reminder.enabled
@@ -3630,19 +3659,19 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
             : null}
           control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
         {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
-      </Group>
-      <Group title='Aisles'>
+      </Collapsible>
+      <Collapsible title='Aisles' {...sect('aisles')}>
         <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
-      </Group>
+      </Collapsible>
       <TimeOfDaySheet open={pickTime} hour={reminder.hour} minute={reminder.minute}
         onClose={() => setPickTime(false)}
         onPick={(h, m) => saveReminder({ ...reminder, hour: h, minute: m })} />
-      <Group title='Help'>
+      <Collapsible title='Help' {...sect('help')}>
         <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
           control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
-      </Group>
+      </Collapsible>
       <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
         {info?.link ? (
