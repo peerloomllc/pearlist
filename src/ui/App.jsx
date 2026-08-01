@@ -14,7 +14,7 @@ import { isMyRow, isMine } from '../selfKeys.js'
 import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -420,14 +420,28 @@ function AislePickerSheet ({ open, onClose, current, onPick, custom = [], noun =
 }
 
 // Accordion card matching the suite (rotating chevron, max-height body).
-function Collapsible ({ title, open, onToggle, children }) {
+//
+// `maxHeight` is the collapse animation's open bound, not a layout cap - the body
+// is clipped at it. 600 is fine for prose, but a Settings section grows with its
+// content: Linked devices gets taller with every phone paired, and Notifications
+// with the daily-reminder controls expanded. A section that silently loses its last
+// row at seven devices would be a very annoying bug to find, so callers with
+// unbounded content pass their own. Same prop and default as PearCal's Collapsible,
+// so the two stay recognisably one component.
+function Collapsible ({ title, icon: Icon, open, onToggle, maxHeight = 600, children }) {
   return (
     <div style={{ background: c.surface.elevated, borderRadius: r.lg, overflow: 'hidden', marginBottom: sp.sm }}>
       <button onClick={onToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${sp.base}px`, background: 'none', border: 'none', cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 400 }}>
-        <span>{title}</span>
-        <CaretRight size={18} color={c.text.muted} weight='regular' style={{ transition: 'transform 0.3s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }} />
+        {/* `icon` is OPTIONAL and the prop name matches PearCal's and PearCircle's
+            Collapsible, so the three stay recognisably one component. The About page
+            passes none and is unchanged. */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, minWidth: 0 }}>
+          {Icon ? <Icon size={20} weight='regular' color={c.text.secondary} style={{ flexShrink: 0 }} /> : null}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+        </span>
+        <CaretRight size={18} color={c.text.muted} weight='regular' style={{ flexShrink: 0, transition: 'transform 0.3s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }} />
       </button>
-      <div style={{ maxHeight: open ? 600 : 0, overflow: 'hidden', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
+      <div style={{ maxHeight: open ? maxHeight : 0, overflow: 'hidden', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
         <div style={{ padding: `0 ${sp.base}px ${sp.base}px` }}>{children}</div>
       </div>
     </div>
@@ -685,6 +699,22 @@ function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(list
 const AUTOCOLLAPSE_KEY = 'pearlist:autocollapse'
 function loadAutoCollapse () { try { return localStorage.getItem(AUTOCOLLAPSE_KEY) === '1' } catch { return false } }
 function saveAutoCollapse (on) { try { localStorage.setItem(AUTOCOLLAPSE_KEY, on ? '1' : '0') } catch {} }
+
+// Which Settings sections are expanded. Device-local and purely presentational,
+// like the aisle view state above.
+//
+// MULTI-OPEN, unlike the About page's accordion, which keeps exactly one section
+// open. About is a document you read top to bottom; Settings is a workbench, and
+// closing Notifications because you opened Backup is the kind of small rudeness
+// that makes a page feel like it is fighting you.
+//
+// ALL CLOSED BY DEFAULT, which is the point of the change. Eight groups holding
+// eleven rows did not fit on the TCL, so "Your devices" - pairing, the roster,
+// removal - sat below the fold. Collapsed, the whole page is a short list of
+// headings that fits without scrolling, and nothing is buried by position alone.
+const SETTINGS_OPEN_KEY = 'pearlist:settingsOpen'
+function loadSettingsOpen () { try { return JSON.parse(localStorage.getItem(SETTINGS_OPEN_KEY) || '{}') || {} } catch { return {} } }
+function saveSettingsOpen (next) { try { localStorage.setItem(SETTINGS_OPEN_KEY, JSON.stringify(next)) } catch {} }
 
 // User-made aisle names remembered per space (device-local), so a custom aisle
 // stays offered in the picker even after its last item leaves it (an empty aisle
@@ -2605,69 +2635,67 @@ function SpaceSwitcherSheet ({ open, onClose, spaces, activeId, onPick, onCreate
 //
 // So: the row for this phone is editable, the rows for other phones are
 // removable, and neither offers the control that would not work.
-function DeviceRosterSheet ({ open, onClose, devices, onRename, onRemove }) {
+// One phone on the roster, inline in Settings rather than behind a Manage sheet.
+//
+// EDIT IS ONLY EVER ON YOUR OWN ROW, and that is a wire constraint, not a layout
+// choice. deviceMeta is SELF-ATTESTED: decideDeviceMetaPut refuses any row whose
+// writerKey is not the Autobase-attested author, and device-link's setDeviceNickname
+// only ever writes `personalBase.local`. There is no API to rename another phone and
+// there cannot be one without changing that rule. A pencil on a housemate's row would
+// be a button that silently does nothing, so other rows get remove only.
+function DeviceRow ({ device, isSelf, onRename, onRemove }) {
+  const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
-  const list = devices || []
-  const self = list.find((d) => d.self || d.isThisDevice) || null
-  const others = list.filter((d) => !(d.self || d.isThisDevice))
+  const label = deviceLabel(device)
 
-  // Reset from the roster each time it opens, so a cancelled edit does not
-  // survive to look like a saved one.
-  useEffect(() => {
-    if (open) { setName(deviceLabel(self, '')); setBusy(false) }
-  }, [open, self])
-
+  const start = () => { setName(deviceLabel(device, '')); setEditing(true) }
+  const cancel = () => { setEditing(false); setName('') }
   const save = async () => {
-    const v = name.trim(); if (!v || v === deviceLabel(self, '')) return
+    const v = name.trim()
+    if (!v || v === deviceLabel(device, '')) return cancel()
     setBusy(true)
     try { await onRename(v) } catch (e) { alert(problem('Could not rename this phone', e)) }
-    setBusy(false)
+    setBusy(false); setEditing(false)
   }
 
-  return (
-    <BottomSheet open={open} onClose={onClose} title='Your devices'>
-      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', margin: `0 0 ${sp.base}px` }}>
-        Phones signed in as you. They share your spaces and can edit them.
-      </p>
-
-      <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>This phone</span>
-      <div style={{ display: 'flex', gap: sp.sm, alignItems: 'center', margin: `${sp.sm}px 0 ${sp.base}px` }}>
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', gap: sp.sm, alignItems: 'center', padding: `${sp.sm}px 0` }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <Field value={name} onChange={setName} placeholder='Name this phone' />
         </div>
-        <Button
-          variant='secondary'
-          disabled={busy || !name.trim() || name.trim() === deviceLabel(self, '')}
-          style={{ width: 'auto', flexShrink: 0, opacity: busy || !name.trim() || name.trim() === deviceLabel(self, '') ? 0.5 : 1 }}
-          onClick={save}
-        >{busy ? 'Saving…' : 'Save'}</Button>
+        <button onClick={save} disabled={busy || !name.trim()} aria-label='Save name'
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.primary, opacity: busy || !name.trim() ? 0.4 : 1 }}>
+          <Check size={20} weight='bold' />
+        </button>
+        <button onClick={cancel} disabled={busy} aria-label='Cancel rename'
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}>
+          <X size={18} weight='bold' />
+        </button>
       </div>
+    )
+  }
 
-      {others.length ? (
-        <>
-          <span style={{ color: c.text.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Other phones</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: sp.sm }}>
-            {others.map((d) => (
-              <div key={d.writerKey} style={{ display: 'flex', alignItems: 'center' }}>
-                <span style={{ flex: 1, minWidth: 0, padding: `${sp.md}px ${sp.sm}px`, color: c.text.primary, fontSize: 16, fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {deviceLabel(d)}
-                </span>
-                <button onClick={() => onRemove(d)} aria-label={`Remove ${deviceLabel(d)}`}
-                  style={{ width: 44, height: 44, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <TrashIcon size={17} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: sp.xs, padding: `${sp.xs}px 0` }}>
+      <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 15, fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}{isSelf ? <span style={{ color: c.text.muted, fontSize: 13 }}> (this phone)</span> : null}
+      </span>
+      {isSelf ? (
+        <button onClick={start} aria-label={`Rename ${label}`}
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}>
+          <PencilSimple size={18} weight='regular' />
+        </button>
       ) : (
-        <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>No other phones yet. Pair one from the previous screen.</span>
+        <button onClick={() => onRemove(device)} aria-label={`Remove ${label}`}
+          style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: c.text.muted }}>
+          <Trash size={18} weight='regular' />
+        </button>
       )}
-    </BottomSheet>
+    </div>
   )
 }
-
 function JoinSheet ({ open, onClose, onJoin }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -3288,14 +3316,6 @@ function Setting ({ title, about, aboutLink, control, extra, first, alignTop, on
     </div>
   )
 }
-function Group ({ title, children }) {
-  return (
-    <div style={{ marginBottom: sp.lg }}>
-      <div style={{ color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6, padding: `0 ${sp.xs}px ${sp.xs}px` }}>{title}</div>
-      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: `${sp.xs}px ${sp.base}px` }}>{children}</div>
-    </div>
-  )
-}
 
 function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
@@ -3304,7 +3324,19 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   const [dl, setDl] = useState(null)          // { enabled, devices, ... } | null
   const [pairUrl, setPairUrl] = useState(null)
   const [linking, setLinking] = useState(false)
-  const [roster, setRoster] = useState(false)
+  // Which sections are expanded, remembered across launches. See SETTINGS_OPEN_KEY.
+  const [openSections, setOpenSections] = useState(loadSettingsOpen)
+  const toggleSection = useCallback((key) => {
+    setOpenSections((cur) => {
+      const next = { ...cur, [key]: !cur[key] }
+      saveSettingsOpen(next)
+      return next
+    })
+  }, [])
+  // Every group is the same three props, and getting one wrong means a section that
+  // will not open or that toggles a different one - silent and easy to miss in a
+  // page of eight. Spreading them keeps the call sites to a title and content.
+  const sect = useCallback((key) => ({ open: !!openSections[key], onToggle: () => toggleSection(key) }), [openSections, toggleSection])
   const loadDevices = useCallback(async () => {
     const st = await call('device:status', {}).catch(() => null)
     setDl(st)
@@ -3544,37 +3576,106 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
   const nameDirty = name.trim() && name.trim() !== profile?.displayName
   return (
     <FullScreen title='Settings'>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.base, padding: `${sp.lg}px 0` }}>
-        <Avatar name={profile?.displayName || name} avatar={profile?.avatar} size={96} />
-        <div style={{ display: 'flex', gap: sp.sm, width: '100%', maxWidth: 280 }}>
-          <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ flex: 1, padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add photo'}</button>
-          {hasAvatar ? <button onClick={() => commitAvatar(null)} disabled={busy} style={{ flex: 1, padding: '10px 16px', borderRadius: r.md, border: `1px solid ${c.error}`, background: 'transparent', color: c.error, fontSize: 14, cursor: 'pointer' }}>Remove</button> : null}
+      {/* COMPACT PROFILE ROW. It used to be three stacked blocks - a 96px avatar
+          centred, a full-width photo button under it, then a labelled name field on
+          its own row - which came to roughly 40% of the TCL's screen before a single
+          setting. Collapsing the sections helped; this is the other half, and the two
+          together are what put every section on one screen.
+          Side by side instead: a smaller avatar that IS the photo control, with the
+          name beside it. Nothing is removed - Remove only ever appeared with a photo
+          set, and still does. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp.base, marginBottom: sp.lg }}>
+        {/* The avatar is the button. A photo is the obvious thing to tap on a photo,
+            and it buys back the full-width button's height. The caption underneath
+            carries the affordance for anyone who would not think to try. */}
+        <button onClick={() => fileRef.current?.click()} disabled={busy} aria-label={hasAvatar ? 'Change photo' : 'Add photo'}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0, borderRadius: '50%' }}>
+          <Avatar name={profile?.displayName || name} avatar={profile?.avatar} size={64} />
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: sp.sm }}>
+            <input value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder='Your name'
+              style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
+            <button onClick={saveName} disabled={busy || !nameDirty}
+              style={{ padding: '0 16px', flexShrink: 0, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, cursor: 'pointer', opacity: busy || !nameDirty ? 0.5 : 1 }}>Save</button>
+          </div>
+          <div style={{ display: 'flex', gap: sp.base, marginTop: 6 }}>
+            <button onClick={() => fileRef.current?.click()} disabled={busy}
+              style={{ background: 'none', border: 'none', padding: 0, color: c.text.muted, fontSize: 12, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add photo'}</button>
+            {hasAvatar ? <button onClick={() => commitAvatar(null)} disabled={busy}
+              style={{ background: 'none', border: 'none', padding: 0, color: c.error, fontSize: 12, cursor: 'pointer' }}>Remove</button> : null}
+          </div>
         </div>
         <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
       </div>
 
-      <label style={{ display: 'block', color: c.text.secondary, fontSize: 13, marginBottom: sp.xs }}>Name</label>
-      <div style={{ display: 'flex', gap: sp.sm, marginBottom: sp.lg }}>
-        <input value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder='Your name' style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-        <button onClick={saveName} disabled={busy || !nameDirty} style={{ padding: '0 18px', borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, cursor: 'pointer', opacity: busy || !nameDirty ? 0.5 : 1 }}>Save</button>
-      </div>
-
-      <Group title='Appearance'>
-        <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
-      </Group>
-      <Group title='Lists'>
+      {/* ORDER IS DELIBERATE, and it is the whole point of this section.
+          Before: Appearance (one dark-mode toggle) first, Linked devices SIXTH and
+          below the fold on the TCL - pairing, the roster and removal, i.e. the most
+          consequential things in the app. Now: identity and devices first, directly
+          under the profile block they are conceptually part of; then the settings
+          people actually adjust; then the ones you set once and forget.
+          Two single-row groups merged: "Tidy finished aisles" and "Learned Aisles"
+          are both grocery-aisle behaviour and were four unrelated groups apart. */}
+      {/* THE ROSTER IS THE SECTION, rather than a count and a Manage button opening a
+          sheet. Tim: "what if we have the devices listed in rows underneath the header,
+          and then we have icons for edit/remove instead of under a separate Manage
+          menu?" The sheet existed when this was a dark diagnostic; now that removal and
+          renaming live here it was a second tap in front of the only place a stale
+          device is visible at all.
+          The per-row asymmetry is a WIRE constraint, not a layout choice - see
+          DeviceRow: deviceMeta is self-attested, so only your own row can be renamed. */}
+      {dl?.enabled ? (
+        <Collapsible title='You &amp; your devices' icon={DeviceMobile} {...sect('devices')} maxHeight={1200}>
+          <p style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.4, margin: `0 0 ${sp.sm}px` }}>
+            Phones signed in as you. They share your spaces and can edit them.
+          </p>
+          {(dl.devices || []).length
+            ? (dl.devices || []).map((d) => (
+                <DeviceRow key={d.writerKey} device={d} isSelf={!!(d.self || d.isThisDevice)}
+                  onRename={renameThisDevice} onRemove={removeDevice} />
+              ))
+            : <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300 }}>Only this phone so far.</span>}
+        </Collapsible>
+      ) : null}
+      {/* PAIRING IS ITS OWN SECTION, per Tim. It is a different job from managing the
+          phones you already have, and the two directions belong together: Pair shows a
+          link on THIS phone for another to consume, Link consumes one shown elsewhere.
+          They read as opposites and were previously split across two rows of a roster
+          section, with Pair sitting beside a Manage button it has nothing to do with. */}
+      {dl?.enabled ? (
+        <Collapsible title='Add a phone' icon={Link} {...sect('addPhone')} maxHeight={900}>
+          <Setting onAbout={setInfo} first title='Pair a phone' about={ABOUT['Your devices']} alignTop
+            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Shows a link for the other phone to open.</span>}
+            control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
+          <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
+            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
+            control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
+        </Collapsible>
+      ) : null}
+      <Collapsible title='Notifications' icon={BellRinging} {...sect('notifications')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
+          extra={reminder.enabled
+            // No "Every day at" label: the title already says daily, so the time
+            // on its own is unambiguous (Tim's call).
+            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
+            : null}
+          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
+        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+      </Collapsible>
+      <Collapsible title='Lists &amp; aisles' icon={ListChecks} {...sect('listsAisles')} maxHeight={900}>
         <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
           control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
-      </Group>
-      <Group title='Connection'>
-        <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
-          extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
-          control={<Toggle on={relayOn} onChange={toggleRelay} />} />
-      </Group>
+      <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
+          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
+          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
+      </Collapsible>
       {/* Everything here lives only on the household's phones, so a file is the
           only copy that survives all of them. Also the one way out of a space a
           device cannot sync (see SyncBanner). */}
-      <Group title='Backup'>
+      <Collapsible title='Backup' icon={Archive} {...sect('backup')}>
         <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
             ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
@@ -3583,26 +3684,19 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
         <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
           control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
-      </Group>
-      {dl?.enabled ? (
-        <Group title='Linked devices'>
-          <Setting onAbout={setInfo} first title='Your devices' about={ABOUT['Your devices']} alignTop
-            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{
-              (dl.devices || []).length
-                ? (dl.devices || []).map((d) => deviceLabel(d) + ((d.self || d.isThisDevice) ? ' (this phone)' : '')).join(', ')
-                : 'Only this phone so far.'
-            }</span>}
-            control={<div style={{ display: 'flex', gap: sp.sm, flexShrink: 0 }}>
-              {(dl.devices || []).length
-                ? <button onClick={() => setRoster(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Manage</button>
-                : null}
-              <button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>
-            </div>} />
-          <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
-            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
-            control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
-        </Group>
-      ) : null}
+      </Collapsible>
+      <Collapsible title='Connection' icon={Broadcast} {...sect('connection')}>
+        <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
+          extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
+          control={<Toggle on={relayOn} onChange={toggleRelay} />} />
+      </Collapsible>
+      <Collapsible title='Appearance' icon={Palette} {...sect('appearance')}>
+        <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
+      </Collapsible>
+      <Collapsible title='Help' icon={Question} {...sect('help')}>
+        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
+          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
+      </Collapsible>
       {/* CLOSING THIS DOES NOT CANCEL THE PAIRING, and that is deliberate.
           It used to call device:cancelPairing here, which made "Copy link"
           almost useless: the only reason to copy a pair link is to send it from
@@ -3617,33 +3711,10 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
           whole copy-and-send path. */}
       <PairLinkSheet open={!!pairUrl} url={pairUrl} onClose={() => { setPairUrl(null); loadDevices() }} />
       <LinkDeviceSheet open={linking} onClose={() => setLinking(false)} onLink={linkThisDevice} />
-      <DeviceRosterSheet open={roster} onClose={() => setRoster(false)} devices={dl?.devices}
-        onRename={renameThisDevice} onRemove={removeDevice} />
-      <Group title='Notifications'>
-        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
-        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
-          extra={reminder.enabled
-            // No "Every day at" label: the title already says daily, so the time
-            // on its own is unambiguous (Tim's call).
-            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
-                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
-            : null}
-          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
-        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
-      </Group>
-      <Group title='Aisles'>
-        <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
-          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
-          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
-      </Group>
       <TimeOfDaySheet open={pickTime} hour={reminder.hour} minute={reminder.minute}
         onClose={() => setPickTime(false)}
         onPick={(h, m) => saveReminder({ ...reminder, hour: h, minute: m })} />
-      <Group title='Help'>
-        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
-          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
-      </Group>
-      <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
+            <BottomSheet open={!!info} onClose={() => setInfo(null)} title={info?.title}>
         <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.55, margin: 0 }}>{info?.body}</p>
         {info?.link ? (
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: sp.base }}>
