@@ -1321,6 +1321,11 @@ export default function App () {
   // shows the link door and onboarding renders long before Settings exists.
   const [deviceLinkOn, setDeviceLinkOn] = useState(false)
   const [spaces, setSpaces] = useState([])
+  // Mirrors `spaces` so loadMembers can read the CURRENT ownership flag without
+  // taking `spaces` as a dependency. loadMembers is a useCallback with no deps on
+  // purpose (it is called from effects and handlers all over), so closing over the
+  // state directly would pin it to whatever the list was on first render.
+  const spacesRef = useRef([])
   const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
   const [openListId, setOpenListId] = useState(null)
@@ -1359,6 +1364,7 @@ export default function App () {
 
   const loadSpaces = useCallback(async () => {
     const sp = await call('spaces:list', {}).catch(() => [])
+    spacesRef.current = sp
     setSpaces(sp)
     return sp
   }, [])
@@ -1399,7 +1405,30 @@ export default function App () {
     const rm = await call('member:getRemoved', { groupId }).catch(() => [])
     setMembers(ms)
     setRemovedMembers(rm)
-    call('space:revocationStatus', { groupId }).then(setRevoke).catch(() => setRevoke(null))
+    // AND RE-READ THE SPACES LIST IF OWNERSHIP HAS MOVED UNDER US.
+    //
+    // `spaces[].owner` is what swaps trash for leave and gates Remove / Add back, and
+    // it is only ever set by loadSpaces(), which nothing re-runs when a space ARMS or
+    // when a pairing completes. So a phone that has just gained ownership goes on
+    // showing "Leave" until the app is restarted.
+    //
+    // Watched on the clean rig 2026-07-31: the Pixel linked to the TCL, joined "Home",
+    // and offered "Leave Home" through a roster refresh and a re-open of the sheet.
+    // Force-stop and relaunch and it read "Delete Home". The ownership was real the
+    // whole time. It nearly got reported as PR #170 failing, and it matters MORE since
+    // #170: arming used to follow a tap, so the user was looking at the screen when it
+    // changed. Now it happens by itself and nothing moves.
+    //
+    // The fresh answer is already in hand. `revoke:status.isOwner` is canActAsOwner -
+    // the SAME predicate spaces:list uses for `owner` - so this compares the two and
+    // re-reads only on a genuine disagreement, rather than refetching every space on
+    // every roster tick.
+    call('space:revocationStatus', { groupId }).then((st) => {
+      setRevoke(st)
+      if (!st || typeof st.isOwner !== 'boolean') return
+      const row = spacesRef.current.find((s) => s.groupId === groupId)
+      if (row && !!row.owner !== st.isOwner) loadSpaces()
+    }).catch(() => setRevoke(null))
     // Re-publish our roster row until it lands... but NOT if we were removed. An
     // evicted member is filtered out of `ms` forever, so without this guard the
     // "I'm missing, republish" retry would fire on every refresh tick and append a
@@ -1432,7 +1461,9 @@ export default function App () {
     }
     prevMembersRef.current[groupId] = new Set(ms.flatMap(keysOf))
     return ms
-  }, [])
+    // `loadSpaces` is a useCallback with no deps of its own, so it is stable and this
+    // stays a stable callback too. Named rather than omitted so the two cannot drift.
+  }, [loadSpaces])
 
   // Whether this space is actually working, so an empty one can say WHY it is
   // empty. Rides the same refresh cycle as the roster (group:updated,
