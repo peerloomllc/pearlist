@@ -8,6 +8,7 @@ import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
+import { shouldClear } from '../clearOnChecked.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
 import { isMyRow, isMine } from '../selfKeys.js'
@@ -699,6 +700,17 @@ function saveAisleView (listId, patch) { try { const v = { ...loadAisleView(list
 const AUTOCOLLAPSE_KEY = 'pearlist:autocollapse'
 function loadAutoCollapse () { try { return localStorage.getItem(AUTOCOLLAPSE_KEY) === '1' } catch { return false } }
 function saveAutoCollapse (on) { try { localStorage.setItem(AUTOCOLLAPSE_KEY, on ? '1' : '0') } catch {} }
+
+// Device-local preference: an item leaves the list when it is checked off, instead
+// of staying on with a line through it. Off by default, and read as off when the
+// key is missing, so an update never starts deleting anyone's items unasked.
+//
+// Stored beside the other view preferences, but it is NOT one: the rule in
+// src/clearOnChecked.js explains why a private setting is allowed to delete shared
+// data here, and what it refuses to touch.
+const CLEAR_ON_CHECKED_KEY = 'pearlist:clearonchecked'
+function loadClearOnChecked () { try { return localStorage.getItem(CLEAR_ON_CHECKED_KEY) === '1' } catch { return false } }
+function saveClearOnChecked (on) { try { localStorage.setItem(CLEAR_ON_CHECKED_KEY, on ? '1' : '0') } catch {} }
 
 // Which Settings sections are expanded. Device-local and purely presentational,
 // like the aisle view state above.
@@ -1796,6 +1808,8 @@ export default function App () {
   const collapsedSet = new Set(aisleView.collapsed || [])
   const [autoCollapse, setAutoCollapseState] = useState(loadAutoCollapse)
   const setAutoCollapse = useCallback((on) => { setAutoCollapseState(!!on); saveAutoCollapse(on) }, [])
+  const [clearOnChecked, setClearOnCheckedState] = useState(loadClearOnChecked)
+  const setClearOnChecked = useCallback((on) => { setClearOnCheckedState(!!on); saveClearOnChecked(on) }, [])
   const toggleAisle = useCallback((aisle) => {
     const cur = aisleView.collapsed || []
     // Tapping a header is the user taking over: the group stops counting as
@@ -2224,14 +2238,34 @@ export default function App () {
   }, [draft, openListId])
   async function toggleItem (item) {
     const nowChecked = !item.checked
-    setItems((cur) => cur.map(i => i.id === item.id ? { ...i, checked: nowChecked } : i)) // optimistic
+    // "Clear when checked" (src/clearOnChecked.js). The rule lives there because it
+    // is mostly exceptions; here we only act on it.
+    const clearing = shouldClear({ on: clearOnChecked, checked: nowChecked, listKind: openList?.kind })
+    setItems((cur) => clearing ? cur.filter(i => i.id !== item.id) : cur.map(i => i.id === item.id ? { ...i, checked: nowChecked } : i)) // optimistic
     await call('item:toggle', { groupId: gid, listId: openListId, itemId: item.id, checked: nowChecked })
-    await loadItems(gid, openListId)
+    // TOGGLE FIRST, THEN DELETE, rather than deleting outright. The check is what
+    // the rest of the space is told about: "Every completion" alerts and the
+    // list-creator's completed banner both hang off the toggle op, and skipping it
+    // would make a cleared item vanish from other phones with nobody notified.
+    if (clearing) {
+      // Restored UNCHECKED: you cleared the wrong item, so what you want back is
+      // something still to buy, not something already ticked off.
+      const snap = { text: item.text, qty: item.qty, note: item.note, url: item.url, assignee: item.assignee, checked: false }
+      await call('item:delete', { groupId: gid, listId: openListId, itemId: item.id })
+      await loadItems(gid, openListId)
+      setPendingUndo({ snap, listId: openListId })
+    } else {
+      await loadItems(gid, openListId)
+    }
     // Checking this item just completed the list (every item now checked) ->
     // offer to delete it. `items` is the pre-toggle state, so this fires only on
     // the transition, when the LAST open item is checked. Skipped on chore lists:
     // those are a parent/child setup where a child finishing chores should not be
     // prompted to delete the (typically recurring, parent-owned) list.
+    //
+    // Still right with "Clear when checked" on, where the last tick leaves the list
+    // EMPTY rather than fully checked: either way the shop is done and the offer to
+    // put the list away is the same one.
     if (nowChecked && openList?.kind !== 'chore' && items.length > 0 && items.every(i => i.id === item.id || i.checked)) setSheet('listComplete')
   }
   // Swipe-delete: remove the item, then offer a 3s undo. Undo re-creates it with
@@ -2450,7 +2484,7 @@ export default function App () {
           )}
         </>
       ) : view === 'profile' ? (
-        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} clearOnChecked={clearOnChecked} onClearOnChecked={setClearOnChecked} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
           spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces}
           onLinkDevice={linkThisDevice} />
       ) : view === 'about' ? (
@@ -3317,7 +3351,7 @@ function Setting ({ title, about, aboutLink, control, extra, first, alignTop, on
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, clearOnChecked, onClearOnChecked, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
   // build shows nothing new.
@@ -3537,6 +3571,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
+    'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
     'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
     'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file. You choose where it goes: your phone offers Downloads first, and Documents or a cloud folder are a tap away. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
@@ -3668,6 +3703,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, o
       <Collapsible title='Lists &amp; aisles' icon={ListChecks} {...sect('listsAisles')} maxHeight={900}>
         <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
           control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
+        <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
+          control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
       <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
