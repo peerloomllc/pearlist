@@ -61,12 +61,16 @@ test('day stepping keeps the time of day, including across a DST change', () => 
 test('minute stepping wraps within the day rather than changing the date', () => {
   assert.equal(stepMinutes(at(2026, 7, 27, 14, 30), 1), at(2026, 7, 27, 14, 30 + MINUTE_STEP))
   assert.equal(stepMinutes(at(2026, 7, 27, 14, 30), -1), at(2026, 7, 27, 14, 30 - MINUTE_STEP))
-  // 23:55 + 5 wraps to 00:00 the SAME day: adjusting a time field should never
-  // silently move the date. That is what the day stepper is for.
-  assert.equal(stepMinutes(at(2026, 7, 27, 23, 55), 1), at(2026, 7, 27, 0, 0))
-  assert.equal(stepMinutes(at(2026, 7, 27, 0, 0), -1), at(2026, 7, 27, 23, 55))
-  // An off-grid time snaps to the grid as it steps.
-  assert.equal(stepMinutes(at(2026, 7, 27, 14, 33), 1), at(2026, 7, 27, 14, 40))
+  // One step past the last slot of the day wraps to 00:00 the SAME day: adjusting
+  // a time field should never silently move the date. That is what the day stepper
+  // is for. Written off MINUTE_STEP so the case survives changing the step.
+  const lastSlot = 1440 - MINUTE_STEP
+  const endOfDay = at(2026, 7, 27, Math.floor(lastSlot / 60), lastSlot % 60)
+  assert.equal(stepMinutes(endOfDay, 1), at(2026, 7, 27, 0, 0))
+  assert.equal(stepMinutes(at(2026, 7, 27, 0, 0), -1), endOfDay)
+  // An off-grid time snaps to the grid as it steps: 14:33 rounds to 14:30, then
+  // takes one quarter-hour step.
+  assert.equal(stepMinutes(at(2026, 7, 27, 14, 33), 1), at(2026, 7, 27, 14, 45))
 })
 
 test('the exact picker opens on the next whole hour, always in the future', () => {
