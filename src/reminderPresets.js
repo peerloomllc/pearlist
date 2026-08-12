@@ -66,7 +66,11 @@ function describeWhen (ms, now) {
 // --- exact-time fallback -----------------------------------------------------
 // Steppers rather than a wheel: no gesture to tune, and each control is a plain
 // labelled button.
-const MINUTE_STEP = 5
+// A quarter hour, not five minutes (Tim, 2026-08-12). Five was a lot of taps to
+// cross an hour, and a household reminder is never set that precisely. A time
+// already sitting off the grid, say 18:05, snaps to the nearest step on the first
+// tap - deliberate, so the stepper always lands on round times from then on.
+const MINUTE_STEP = 15
 
 // Nudge a chosen instant by whole days, keeping the time of day. Built from date
 // parts so a DST day is still "the same clock time tomorrow".
