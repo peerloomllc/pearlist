@@ -47,12 +47,8 @@ const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 const Corestore = require('corestore')
 
-const _dirs = []
-function tmpDir () { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'plist-checkout-')); _dirs.push(d); return d }
-function cleanup () {
-  for (const d of _dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch {} }
-  _dirs.length = 0
-}
+const { tmpDir: _tmpDir, cleanupTmpDirs: cleanup } = require('./helpers/tmpdir')
+const tmpDir = () => _tmpDir('plist-checkout-')
 
 // A destination core shaped the way autobase shapes a migrated view: a fresh core
 // whose manifest declares a prologue copied from `src`.
@@ -76,8 +72,11 @@ async function migratedViewCore (store, name, src, length) {
 // second copy would take this runner down. Returns { out, err, status }.
 function runCrashFixture (n) {
   const script = path.join(__dirname, 'fixtures', 'invalid-checkout-crash.js')
+  // The child's store dir is made HERE, because the child dies on purpose and can
+  // never remove its own. It lands under this run's root, so the exit sweep gets it.
+  const storeDir = tmpDir()
   try {
-    const out = execFileSync(process.execPath, [script, String(n)], {
+    const out = execFileSync(process.execPath, [script, String(n), storeDir], {
       cwd: path.join(__dirname, '..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000
     })
     return { out, err: '', status: 0 }

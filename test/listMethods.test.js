@@ -15,13 +15,9 @@ const { applyListOp } = require('../src/listWire')
 const listMethods = require('../src/listMethods')
 const { MAX_SCHEDULED_REMINDERS } = require('../src/listWire')
 
-const _tmpDirs = []
-function tmpStore () {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pearlist-'))
-  _tmpDirs.push(dir)
-  return new Corestore(dir)
-}
-after(() => { for (const d of _tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch {} } })
+const { tmpDir, cleanupTmpDirs } = require('./helpers/tmpdir')
+function tmpStore () { return new Corestore(tmpDir('pearlist-')) }
+after(cleanupTmpDirs)
 
 function fakeSwarm () {
   const ee = new EventEmitter()
