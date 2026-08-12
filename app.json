@@ -2,7 +2,7 @@
   "expo": {
     "name": "PearList",
     "slug": "pearlist",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "newArchEnabled": true,
     "orientation": "portrait",
     "scheme": "pear",
@@ -28,7 +28,7 @@
     },
     "android": {
       "package": "com.pearlist",
-      "versionCode": 1000007,
+      "versionCode": 1000008,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0d0d0d"
