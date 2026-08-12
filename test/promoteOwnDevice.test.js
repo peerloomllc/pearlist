@@ -24,12 +24,8 @@ const IdentityKey = require('../../peerloom-device-link/node_modules/keet-identi
 const { signValue } = require('@peerloom/core/records')
 const CURRENT = require('../src/listWire.js')
 
-const _dirs = []
-function tmpDir () { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'plist-promo-')); _dirs.push(d); return d }
-function cleanup () {
-  for (const d of _dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch {} }
-  _dirs.length = 0
-}
+const { tmpDir: _tmpDir, cleanupTmpDirs: cleanup } = require('./helpers/tmpdir')
+const tmpDir = () => _tmpDir('plist-promo-')
 const openView = (s) => new Hyperbee(s.get('view'), { keyEncoding: 'utf-8', valueEncoding: 'json' })
 const hex = (b) => b4a.toString(b, 'hex')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

@@ -42,12 +42,8 @@ const listWire = require('../src/listWire.js')
 const { authorizeRevoke, admitWriter } = require('../src/revocation.js')
 const methods = require('../src/listMethods.js')
 
-const _dirs = []
-function tmpDir () { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'plist-stays-')); _dirs.push(d); return d }
-function cleanup () {
-  for (const d of _dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch {} }
-  _dirs.length = 0
-}
+const { tmpDir: _tmpDir, cleanupTmpDirs: cleanup } = require('./helpers/tmpdir')
+const tmpDir = () => _tmpDir('plist-stays-')
 
 const openView = (s) => new Hyperbee(s.get('view'), { keyEncoding: 'utf-8', valueEncoding: 'json' })
 const hex = (b) => b4a.toString(b, 'hex')

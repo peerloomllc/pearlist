@@ -5,15 +5,19 @@
 //
 // The caller here does everything right: awaits inside a try/catch and reports.
 // Dying anyway is the result being measured. Deliberately installs no handler.
-const fs = require('node:fs')
-const os = require('node:os')
-const path = require('node:path')
+//
+// THE STORE DIRECTORY IS THE CALLER'S, handed in as argv[3]. It used to mkdtemp its
+// own, which meant a process whose whole point is to die never removed it: this
+// fixture was the single biggest family among the 123 abandoned directories found
+// on 2026-08-07. Nothing in here can clean up after itself, so the parent owns the
+// directory and sweeps it. See test/helpers/tmpdir.js.
 const Corestore = require('corestore')
 
 const N = Number(process.argv[2] || 16)
+const STORE_DIR = process.argv[3]
 
 async function main () {
-  const store = new Corestore(fs.mkdtempSync(path.join(os.tmpdir(), 'plist-crash-')))
+  const store = new Corestore(STORE_DIR)
   await store.ready()
 
   const src = store.get({ name: 'src' })

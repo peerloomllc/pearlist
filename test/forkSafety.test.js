@@ -46,16 +46,7 @@ const { signValue } = require('@peerloom/core/records')
 const REPO = path.join(__dirname, '..')
 const CURRENT = require('../src/listWire.js')
 
-const _dirs = []
-function tmpDir (prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
-  _dirs.push(dir)
-  return dir
-}
-function cleanup () {
-  for (const d of _dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch {} }
-  _dirs.length = 0
-}
+const { tmpDir, cleanupTmpDirs: cleanup } = require('./helpers/tmpdir')
 
 // A past build's listWire, loaded from a real `git archive` of that commit.
 // node_modules is symlinked rather than copied: the old src only needs
