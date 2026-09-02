@@ -9,6 +9,7 @@ import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { shouldClear } from '../clearOnChecked.js'
+import { addCategory } from '../addToGroup.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
 import { isMyRow, isMine } from '../selfKeys.js'
@@ -1044,6 +1045,8 @@ function orderRows (rows, itemOrder) {
 // aisle to re-file them there; headers reorder the aisles. All order is
 // per-device (see the 2026-07-11 hybrid decision). `dragProps(kind,id,aisle)`
 // wires the long-press handlers from the parent's drag controller.
+// `onAddTo(aisle)` is the header "+": it aims the composer at that group, so an
+// item can be filed as it is typed instead of being classified and then dragged.
 // Smoothly grows/shrinks an aisle's rows on collapse toggle using the
 // grid-template-rows 0fr<->1fr trick (animates auto height with no fixed cap).
 // Overflow is clipped while collapsed or mid-animation, but set back to visible
@@ -1062,7 +1065,7 @@ function CollapsibleRows ({ collapsed, children }) {
   )
 }
 
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, flashId, builtins = aisles.AISLES, fallbackLabel = aisles.FALLBACK }) {
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, onAddTo, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, flashId, builtins = aisles.AISLES, fallbackLabel = aisles.FALLBACK }) {
   const buckets = new Map()
   for (const it of items) {
     // Keyword classification is synchronous, so an item's aisle is known the
@@ -1094,6 +1097,7 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, aisleOrder,
               {aisleTarget
                 ? <span style={{ fontSize: 12, fontWeight: 600, color: c.primary, flexShrink: 0, maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Move to {label}</span>
                 : <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>}
+              {onAddTo ? <button onClick={(e) => { e.stopPropagation(); if (didDrag?.()) return; onAddTo(aisle) }} aria-label={`Add to ${label}`} style={{ flexShrink: 0, padding: '8px 8px', margin: '-6px 0', background: 'none', border: 'none', color: c.text.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Plus size={18} weight='bold' /></button> : null}
               {dragProps ? <span {...dragProps('aisle', aisle, aisle)} onClick={(e) => e.stopPropagation()} aria-label='Reorder aisle' style={{ flexShrink: 0, padding: '4px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex' }}><DotsSixVertical size={18} weight='bold' /></span> : null}
             </div>
             <CollapsibleRows collapsed={isCollapsed}>
@@ -1810,6 +1814,11 @@ export default function App () {
   const setAutoCollapse = useCallback((on) => { setAutoCollapseState(!!on); saveAutoCollapse(on) }, [])
   const [clearOnChecked, setClearOnCheckedState] = useState(loadClearOnChecked)
   const setClearOnChecked = useCallback((on) => { setClearOnCheckedState(!!on); saveClearOnChecked(on) }, [])
+  // The group the header "+" aimed the composer at, or null for the ordinary
+  // add bar. Device-local and momentary: it survives only until the next add or
+  // until the user clears the chip, and never leaves this screen.
+  const [addTo, setAddTo] = useState(null)
+  useEffect(() => { setAddTo(null) }, [openListId])
   const toggleAisle = useCallback((aisle) => {
     const cur = aisleView.collapsed || []
     // Tapping a header is the user taking over: the group stops counting as
@@ -1819,6 +1828,14 @@ export default function App () {
       auto: (aisleView.auto || []).filter((a) => a !== aisle),
     })
   }, [aisleView.collapsed, aisleView.auto, patchAisleView])
+
+  // Header "+": aim the composer at one group. Expands it first if it is
+  // collapsed, otherwise the item lands somewhere the user cannot see it.
+  const startAddTo = useCallback((aisle) => {
+    setAddTo(aisle)
+    if ((aisleView.collapsed || []).includes(aisle)) toggleAisle(aisle)
+    composer.current?.focus?.()
+  }, [aisleView.collapsed, toggleAisle])
 
   // Grocery lists group by a fixed aisle taxonomy (+ AI); other lists group by
   // user-defined SECTIONS (same category field, no built-ins, no AI) once the
@@ -2212,15 +2229,28 @@ export default function App () {
   }
   async function addItemText (text) {
     const t = String(text || '').trim(); if (!t || !gid || !openListId) return
-    setDraft(''); setSuggestions([])
+    const pin = addTo // the group the header "+" aimed at, if any
+    setDraft(''); setSuggestions([]); setAddTo(null)
     composer.current?.blur?.() // dismiss the keyboard; show the full list
     // Groceries: choose quantity FIRST, then actually add on confirm/dismiss. The
     // row is added only after the quantity sheet closes, so it is not inserted
-    // underneath the sheet where the just-added flash would be missed.
-    if (openList?.kind === 'grocery') { setSheet({ type: 'qty', text: t }); return }
+    // underneath the sheet where the just-added flash would be missed. The pin
+    // rides along on the sheet, since the add happens on the other side of it.
+    if (openList?.kind === 'grocery') { setSheet({ type: 'qty', text: t, aisle: pin }); return }
     const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t })
+    if (itemId && pin) await fileInto(itemId, t, pin, null)
     await loadItems(gid, openListId)
     if (itemId) setFlashId(itemId) // scroll to + flash the new row
+  }
+
+  // File a just-added item into the group its "+" came from. Deliberately the
+  // same signed ai:setCategory path a drag uses, `by: 'user'`, so the pin syncs
+  // to every peer and the keyword classifier never re-sorts it afterwards.
+  async function fileInto (itemId, text, aisle, override) {
+    const cat = addCategory({ aisle, isGrocery: isGroceryList, override })
+    if (!cat) return
+    if (isGroceryList && aisle) rememberOverride(text, cat) // learn it, exactly as a drag does
+    await call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: cat, by: 'user' }).catch(() => {})
   }
   const addItem = () => addItemText(draft)
 
@@ -2463,7 +2493,7 @@ export default function App () {
                   </SwipeRow>
                 )
                 return grouped
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} onAddTo={startAddTo} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
                   : items.map((it) => (
                     <div key={it.id} data-item-id={it.id} style={{ position: 'relative' }}>
                       {renderRow(it)}
@@ -2478,7 +2508,8 @@ export default function App () {
               120, toasts/banners 130). The composer must beat headers + lifted rows
               but stay under every overlay, so overlays live in the 100+ band. */}
           <div style={{ position: 'sticky', bottom: 0, zIndex: 60, background: c.surface.base }}>
-            <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder='Add an item' disabled={!!syncTrouble(syncStatus)} />
+            <ComposerBar inputRef={composer} value={draft} onChange={setDraft} onSubmit={addItem} placeholder={addTo ? `Add to ${addTo === aisles.FALLBACK ? fallbackLabel : addTo}` : 'Add an item'} disabled={!!syncTrouble(syncStatus)}
+              into={addTo ? { label: addTo === aisles.FALLBACK ? fallbackLabel : addTo, onClear: () => setAddTo(null) } : null} />
           </div>
           </>
           )}
@@ -2595,7 +2626,7 @@ export default function App () {
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <QtySheet open={!!sheet && sheet.type === 'qty'}
-        onCommit={async (qty) => { const t = sheet?.text; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); const ov = overrideFor(t); if (itemId && ov) await call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: ov, by: 'user' }).catch(() => {}); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
+        onCommit={async (qty) => { const t = sheet?.text; const pin = sheet?.aisle; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); const ov = overrideFor(t); if (itemId && (pin || ov)) await fileInto(itemId, t, pin, ov); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
       />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
@@ -3057,11 +3088,22 @@ function SuggestionBar ({ items, onPick }) {
 // shopping list into a space that will never send it is worse than being stopped:
 // the entry is lost with no error, which is precisely how the 2026-07-28 report
 // read from the user's side.
-function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef, disabled }) {
+// `into` is the group a header "+" aimed at: { label, onClear }. It shows as a
+// dismissible chip above the input, so the composer says where the next item is
+// going and the user can back out without adding anything.
+function ComposerBar ({ value, onChange, onSubmit, placeholder, inputRef, disabled, into }) {
   return (
-    <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: sp.sm, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base }}>
-      <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) onSubmit() }} placeholder={placeholder} disabled={!!disabled} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: disabled ? c.text.muted : c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
-      <button onClick={onSubmit} disabled={!!disabled} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: disabled ? c.surface.input : c.primary, color: disabled ? c.text.muted : c.text.onPrimary, cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={22} weight='bold' /></button>
+    <div style={{ position: 'sticky', bottom: 0, padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.sm}px)`, background: c.surface.base }}>
+      {into ? (
+        <button onClick={into.onClear} aria-label={`Stop adding to ${into.label}`} style={{ display: 'flex', alignItems: 'center', gap: sp.xs, marginBottom: sp.sm, padding: '3px 8px', background: c.surface.input, color: c.text.secondary, border: `1px solid ${c.border}`, borderRadius: r.full, fontSize: 12, fontFamily: FONT, cursor: 'pointer' }}>
+          <span>Adding to {into.label}</span>
+          <X size={12} weight='bold' />
+        </button>
+      ) : null}
+      <div style={{ display: 'flex', gap: sp.sm }}>
+        <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) onSubmit() }} placeholder={placeholder} disabled={!!disabled} style={{ flex: 1, padding: '12px 14px', background: c.surface.input, color: disabled ? c.text.muted : c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 16, outline: 'none' }} />
+        <button onClick={onSubmit} disabled={!!disabled} aria-label='Add' style={{ width: 46, borderRadius: r.md, border: 'none', background: disabled ? c.surface.input : c.primary, color: disabled ? c.text.muted : c.text.onPrimary, cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={22} weight='bold' /></button>
+      </div>
     </div>
   )
 }
