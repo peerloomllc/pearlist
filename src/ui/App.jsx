@@ -1097,7 +1097,7 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, onAddTo, ai
               {aisleTarget
                 ? <span style={{ fontSize: 12, fontWeight: 600, color: c.primary, flexShrink: 0, maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Move to {label}</span>
                 : <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>}
-              {onAddTo ? <button onClick={(e) => { e.stopPropagation(); if (didDrag?.()) return; onAddTo(aisle) }} aria-label={`Add to ${label}`} style={{ flexShrink: 0, padding: '4px 6px', background: 'none', border: 'none', color: c.text.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Plus size={18} weight='bold' /></button> : null}
+              {onAddTo ? <button onClick={(e) => { e.stopPropagation(); if (didDrag?.()) return; onAddTo(aisle) }} aria-label={`Add to ${label}`} style={{ flexShrink: 0, padding: '8px 8px', margin: '-6px 0', background: 'none', border: 'none', color: c.text.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Plus size={18} weight='bold' /></button> : null}
               {dragProps ? <span {...dragProps('aisle', aisle, aisle)} onClick={(e) => e.stopPropagation()} aria-label='Reorder aisle' style={{ flexShrink: 0, padding: '4px 2px', color: c.text.muted, cursor: 'grab', touchAction: 'none', display: 'flex' }}><DotsSixVertical size={18} weight='bold' /></span> : null}
             </div>
             <CollapsibleRows collapsed={isCollapsed}>
