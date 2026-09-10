@@ -29,11 +29,13 @@ function fakeSwarm () {
 }
 
 // A driver around the engine's IPC loop: feed a method call, await its reply.
-function driver () {
+// `dir` is optional and only passed by tests that need to REOPEN the same store in
+// a second engine, which is the only way to test what a cold start does.
+function driver (dir) {
   const responses = []
   const read = new EventEmitter()
   const engine = createGroupEngine({
-    appId: 'pearlist', corestore: tmpStore(), createSwarm: fakeSwarm,
+    appId: 'pearlist', corestore: dir ? new Corestore(dir) : tmpStore(), createSwarm: fakeSwarm,
     applyOps: applyListOp, methods: listMethods,
   })
   engine.start({ read, write: (buf) => responses.push(JSON.parse(buf.toString())) })
@@ -915,23 +917,73 @@ test('deleting a list hides it from list:getAll', async () => {
   await engine.close()
 })
 
-test('space:retain prunes old blocks but items stay intact and writable', async () => {
+// THIS TEST USED TO ASSERT THE BUG. It required `cleared > 0` and that
+// `base.local.has(0)` was FALSE, i.e. that retention had deleted the oldest block
+// of this device's OWN input core. Core stopped doing that on 2026-09-09 (core
+// commit 8252844, "retention deleted the one copy of a device's own blocks"), so
+// the test went red against the corrected behaviour and stayed red on master.
+//
+// Sweeping a REMOTE writer's core is the feature: those blocks can be fetched from
+// the writer again, so dropping them costs a download. Sweeping our OWN is not
+// pruning, it is deletion - the only copies left are on whatever peers happen to
+// have replicated them, so the base is no longer self-sufficient and a cold start
+// with nobody around waits on a block no one can serve.
+//
+// PearList is the app that runs this on a timer (src/bare.js: retentionInterval 30
+// minutes, retentionKeepRecent 512), so the property belongs in PearList's suite
+// and not only in core's. Measured here 2026-09-10 against the core 1.0.9 shipped:
+// retain cleared 181 of 201 local blocks and the next cold start with no peer hung
+// init forever, which is the field report that started this.
+test('space:retain leaves this device\'s own blocks alone', async () => {
   const { engine, call } = driver()
   await call('init', {})
   const { groupId } = await call('group:create', { name: 'Churny' })
   const { listId } = await call('list:create', { groupId, name: 'L' })
   for (let i = 0; i < 200; i++) await call('item:add', { groupId, listId, text: 'i' + i })
   const base = engine.bases.get(groupId); await base.update()
+  const length = base.local.length
 
   const res = await call('space:retain', { groupId, keepRecent: 20 })
   assert.equal(res.ok, true)
-  assert.ok(res.cleared > 0, 'pruned some blocks')
-  assert.equal(await base.local.has(0), false, 'oldest block pruned')
+  // The only writer here is this device, so there is nothing safe to sweep.
+  assert.equal(res.cleared, 0, 'nothing cleared, because every core present is our own')
+  assert.equal(res.cores, 0, 'and no core was swept')
+  assert.equal(await base.local.has(0), true, 'the oldest local block is still here')
+  assert.equal(base.local.length, length, 'the local core did not shrink')
 
   // No data loss: all 200 items still readable, and the list is still writable.
   assert.equal((await call('item:getAll', { groupId, listId })).length, 200)
   await call('item:add', { groupId, listId, text: 'after' })
   assert.equal((await call('item:getAll', { groupId, listId })).length, 201)
+  await engine.close()
+})
+
+// The regression that the assertion above exists to prevent, stated as the thing
+// the user actually experiences: after a sweep, the app must still open on its own.
+// Before the core fix this hung init forever, which the shell shows as 25s of black
+// screen followed by a spinner that never stops.
+test('a space still opens alone after a retention sweep, with no peer anywhere', async () => {
+  const dir = tmpDir('retain-cold-')
+  {
+    const { engine, call } = driver(dir)
+    await call('init', {})
+    const { groupId } = await call('group:create', { name: 'Churny' })
+    const { listId } = await call('list:create', { groupId, name: 'L' })
+    for (let i = 0; i < 200; i++) await call('item:add', { groupId, listId, text: 'i' + i })
+    await engine.bases.get(groupId).update()
+    await call('space:retain', { groupId, keepRecent: 20 })
+    await engine.close()
+    await new Promise((r) => setTimeout(r, 400))
+  }
+  // A cold start over the same store. driver()'s call budget is what fails this:
+  // a hang never answers, exactly as it does not on a phone.
+  const { engine, call } = driver(dir)
+  await call('init', {})
+  const spaces = await call('spaces:list', {})
+  assert.equal(spaces.length, 1, 'the space is still there after the sweep')
+  const lists = await call('list:getAll', { groupId: spaces[0].groupId })
+  assert.equal((await call('item:getAll', { groupId: spaces[0].groupId, listId: lists[0].id })).length, 200,
+    'and every item is still readable with nobody to fetch anything from')
   await engine.close()
 })
 
