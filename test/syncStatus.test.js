@@ -90,6 +90,20 @@ test('the rebuild copy says what it costs before the user taps it', () => {
   assert.match(t.body, /will not come back/i, 'and names what is lost')
 })
 
+test('the rebuild copy tells them to OPEN PEARLIST on the other phone, first', () => {
+  // Asked for by Tim 2026-09-10 on reading the first draft, which had the
+  // instruction buried mid-paragraph. The rebuild copies the lists back from the
+  // other phone, so a phone that is merely powered on and not running PearList
+  // gives a failed rebuild - and the person has spent their one obvious remedy.
+  const t = syncTrouble({ available: false }, true)
+  assert.match(t.body, /open PearList/i, 'it names the app, not just the phone')
+  assert.match(t.body, /leave it on screen|keep it open/i, 'and says to leave it there')
+  // First sentence, not buried: the instruction has to land before the caveats.
+  const first = t.body.split('.')[0] + '.'
+  assert.match(first, /another phone/i, 'the very first sentence is the instruction')
+  assert.doesNotMatch(first, /will not come back/i, 'and not the warning')
+})
+
 test('the retry copy does NOT frighten anyone: nothing is lost by trying', () => {
   const t = syncTrouble({ available: false })
   assert.match(t.body, /Nothing has been deleted/i)

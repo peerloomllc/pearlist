@@ -54,7 +54,14 @@ function syncTrouble (status, retried = false) {
     return retried
       ? {
           title: 'This space still will not open',
-          body: 'Part of this space is missing from this phone and cannot be rebuilt from what is here. It can be rebuilt from another phone in your household that still has the space: open PearList there and keep both phones on. Anything you added on this phone that never reached anyone else will not come back.',
+          // THE INSTRUCTION GOES FIRST, and it is an instruction rather than an
+          // explanation. Rebuilding pulls the lists from another phone, so if that
+          // phone is not awake with PearList open, the rebuild does nothing and the
+          // person has spent their one obvious remedy on a failed attempt. The
+          // first draft said "open PearList there and keep both phones on" in the
+          // middle of the second sentence, which buries it and lets "on" be read as
+          // "powered on". Say it up front, say which app, and say why.
+          body: 'First, on another phone in your household that still has this space: open PearList and leave it on screen. The lists are copied back from that phone, so if it is asleep or PearList is closed there, this will not work. Anything you added on this phone that never reached anyone else will not come back.',
           action: { kind: 'rebuild', label: 'Rebuild from another phone' },
         }
       : {
