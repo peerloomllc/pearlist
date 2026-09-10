@@ -154,6 +154,37 @@ function Spinner ({ size = 22 }) {
 // Haptics are applied globally by a delegated click listener (see App), so
 // individual controls need no per-onClick wiring. `data-haptic` opts an element
 // into a stronger cue ('warn' for destructive, 'success' for completing).
+// Shown when the shell gives up on the worklet (code BACKEND_DOWN). Deliberately
+// says the lists are still there: the failure is that nothing can READ them, and
+// a user who thinks their lists are gone force-clears app storage, which is the
+// one action that would actually lose them.
+//
+// The reason is on screen and copyable on purpose. It is already written to the
+// Android log by bootLog, but nobody reporting this has adb, so the log may as
+// well not exist. A tap that produces a pasteable line is the whole point.
+function BackendDown ({ reason }) {
+  const [copied, setCopied] = useState(false)
+  const detail = 'PearList could not start its engine.\n' + String(reason || 'no reason reported')
+  async function copyDetail () {
+    try { await call('shell:clipboard', { text: detail }); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {}
+  }
+  return (
+    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: sp.lg, padding: sp.xl, textAlign: 'center' }}>
+      <div style={{ fontSize: 20, fontWeight: 500, color: c.text.primary }}>PearList could not start</div>
+      <div style={{ fontSize: 15, lineHeight: 1.5, color: c.text.secondary }}>
+        Your lists are still on this phone. The part of PearList that reads them did not start, so there is nothing to show yet.
+      </div>
+      <div style={{ fontSize: 15, lineHeight: 1.5, color: c.text.secondary }}>
+        Close PearList completely and open it again. If that does not help, copy the details below and send them to us, and please do not clear the app's storage - that is the one thing that would lose your lists.
+      </div>
+      <div style={{ fontFamily: MONO, fontSize: 12, lineHeight: 1.45, color: c.text.muted, background: c.surface.card, border: `1px solid ${c.border}`, borderRadius: r.md, padding: sp.md, textAlign: 'left', whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text', WebkitUserSelect: 'text' }}>
+        {detail}
+      </div>
+      <Button variant="secondary" onClick={copyDetail} data-haptic="success">{copied ? 'Copied' : 'Copy the details'}</Button>
+    </div>
+  )
+}
+
 function Button ({ variant = 'primary', children, style, ...rest }) {
   const base = { width: '100%', padding: '14px 16px', borderRadius: r.lg, fontSize: 16, fontWeight: 400, cursor: 'pointer', fontFamily: FONT }
   const variants = {
@@ -1361,6 +1392,12 @@ function SyncBanner ({ status }) {
 
 export default function App () {
   const [phase, setPhase] = useState('loading')
+  // The reason the backend never came up, when it never came up. The shell sends
+  // it with code BACKEND_DOWN in place of a reply once it has given up on the
+  // worklet; before this the call simply never resolved and the app sat on the
+  // spinner below forever, which is how a broken engine reached a user as "the
+  // app opens to a black screen" with nothing attached to report.
+  const [backendError, setBackendError] = useState(null)
   // Whether device-link is switched on in this build. `device:status` answers
   // `{ enabled: false }` cheaply when the flag is off, so this is safe to ask on
   // every launch. Needed at THIS level, not just in Settings, because onboarding
@@ -1538,7 +1575,14 @@ export default function App () {
         setActiveSpaceId(sp.some((s) => s.groupId === saved) ? saved : sp[0].groupId)
         setPhase('home')
       } else setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding')
-    })().catch((e) => { console.error(e); setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding') })
+    })().catch((e) => {
+      console.error(e)
+      // BACKEND_DOWN is not a failed operation, it is no backend at all: every
+      // later call fails the same way, so rendering the app would only show empty
+      // lists that are not actually empty. Say what happened instead.
+      if (e?.code === 'BACKEND_DOWN') { setBackendError(e.message || 'unknown'); setPhase('backend-down'); return }
+      setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding')
+    })
   }, [loadSpaces])
 
   // Remember where we are, so a reload (notably the WebView freeze recovery) can
@@ -2427,6 +2471,9 @@ export default function App () {
   // top-level screens) and map the tab to the view state.
   const goTab = useCallback((key) => { setOpenListId(null); setView(key === 'settings' ? 'profile' : key === 'about' ? 'about' : null) }, [])
 
+  if (phase === 'backend-down') {
+    return <BackendDown reason={backendError} />
+  }
   if (phase === 'loading') {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spinner size={28} /></div>
   }
