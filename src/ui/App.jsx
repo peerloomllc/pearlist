@@ -1379,13 +1379,23 @@ const BACKUP_BTN = {
 
 // The banner that explains an empty space. Copy + rule live in ../syncStatus.js
 // so they are unit-tested rather than eyeballed.
-function SyncBanner ({ status }) {
-  const trouble = syncTrouble(status)
+function SyncBanner ({ status, retried = false, busy = false, onAction }) {
+  const trouble = syncTrouble(status, retried)
   if (!trouble) return null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}`, background: c.surface.input }}>
       <span style={{ color: c.warn, fontSize: 14, fontWeight: 400 }}>{trouble.title}</span>
       <span style={{ color: c.text.secondary, fontSize: 13, lineHeight: 1.45 }}>{trouble.body}</span>
+      {trouble.action && onAction ? (
+        <button
+          disabled={busy}
+          onClick={() => onAction(trouble.action.kind)}
+          data-haptic={trouble.action.kind === 'rebuild' ? 'warn' : undefined}
+          style={{ alignSelf: 'flex-start', marginTop: sp.sm, padding: '8px 14px', borderRadius: r.lg, fontSize: 14, fontWeight: 400, cursor: 'pointer', opacity: busy ? 0.5 : 1, background: c.surface.elevated, color: c.text.primary, border: `1px solid ${c.text.muted}` }}
+        >
+          {busy ? 'Working…' : trouble.action.label}
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -1460,7 +1470,16 @@ export default function App () {
   }, [])
 
   const loadLists = useCallback(async (groupId) => {
-    const ls = await call('list:getAll', { groupId })
+    // A space whose base never opened throws 'unknown group' here. Before this
+    // catch the rejection went unhandled, setLists never ran, `lists` kept its
+    // previous value - [] on a cold start - and the space rendered as an ordinary
+    // EMPTY one. That is what sends a user to clear app storage, which is the one
+    // action that turns a recoverable space into a lost one. SyncBanner says what
+    // actually happened; this just makes sure the failure is not silent.
+    const ls = await call('list:getAll', { groupId }).catch((e) => {
+      console.warn('[lists] ' + (e?.message ?? String(e)))
+      return []
+    })
     setLists(ls)
     // Stay on the overview by default; only keep a list open if it still exists.
     setOpenListId((cur) => (cur && ls.some(l => l.id === cur) ? cur : null))
@@ -1569,6 +1588,48 @@ export default function App () {
   const loadSyncStatus = useCallback(async (groupId) => {
     setSyncStatus(await call('space:status', { groupId }).catch(() => null))
   }, [])
+
+  // Getting back a space that would not open.
+  // proposals/2026-09-10-repairing-a-space-1.0.9-broke.md.
+  //
+  // TWO STEPS, and `repairRetried` is what separates them. A 15s mount timeout is
+  // not proof of damage - a slow phone with a large store, or a cold start racing
+  // its first connection, times out on a perfectly healthy space - so the first
+  // offer is a retry that changes nothing, and the destructive rebuild only appears
+  // once that retry has also failed. Reset per space, or a space that failed once
+  // would offer a rebuild as the FIRST option on an unrelated space later.
+  const [repairRetried, setRepairRetried] = useState(false)
+  const [repairing, setRepairing] = useState(false)
+  useEffect(() => { setRepairRetried(false); setRepairing(false) }, [gid])
+
+  const repairSpace = useCallback(async (kind) => {
+    if (!gid || repairing) return
+    setRepairing(true)
+    try {
+      const res = await call('space:repair', { groupId: gid, rebuild: kind === 'rebuild' })
+      if (res?.ok) {
+        setRepairRetried(false)
+        await loadLists(gid)
+        await loadSyncStatus(gid)
+        loadMembers(gid, selfPubkey)
+        // A rebuild mounts but is NOT writable until an existing writer admits this
+        // device's new key, which is the ordinary join path. Saying so here is the
+        // difference between "it worked" and a user watching a space that looks
+        // stuck; from the next render the existing "Waiting to be let in" banner
+        // takes over and gives the same advice.
+        setBanner(res.rebuilt && !res.writable
+          ? 'Rebuilt. Keep PearList open on both phones while it catches up.'
+          : 'That space is open again.')
+      } else {
+        // Still would not open. Now the rebuild is worth offering.
+        setRepairRetried(true)
+        await loadSyncStatus(gid)
+      }
+    } catch (e) {
+      setRepairRetried(true)
+      setBanner(problem('Could not open that space', e))
+    } finally { setRepairing(false) }
+  }, [gid, repairing, selfPubkey, loadLists, loadSyncStatus, loadMembers])
 
   // Boot.
   useEffect(() => {
@@ -2562,7 +2623,7 @@ export default function App () {
           <DetailHeader title={openList?.name || 'List'} assignee={openList?.assignee} members={members} onBack={() => setOpenListId(null)} onOptions={() => setSheet('listOptions')} />
           {/* Also here, not just on the overview: inside a list is where someone
               meets the dead composer, so the reason has to be on the same screen. */}
-          <SyncBanner status={syncStatus} />
+          <SyncBanner status={syncStatus} retried={repairRetried} busy={repairing} onAction={repairSpace} />
           {isNoteList ? (
             // A note is free text, not a checklist: the whole body is one editor,
             // so there is no item list, no add-item composer and no aisle UI.
@@ -2637,10 +2698,20 @@ export default function App () {
             right={<IconButton label='Invite' onClick={() => setSheet('invite')}><ShareIcon /></IconButton>}
           />
           <MembersBar members={members} onOpen={() => setSheet('members')} />
-          <SyncBanner status={syncStatus} />
+          <SyncBanner status={syncStatus} retried={repairRetried} busy={repairing} onAction={repairSpace} />
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
-              ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>No lists in {activeSpace?.name || 'this space'} yet. Add one below.</div>
+              ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>
+                  {/* "Add one below" is an invitation, and the composer under it is
+                      DISABLED whenever SyncBanner is up - a space that cannot be read
+                      or written cannot take a new list. Saying it anyway contradicts
+                      the banner directly above and reads as the app not knowing its
+                      own state. The banner has already said why; this just stops
+                      arguing with it. */}
+                  {syncTrouble(syncStatus)
+                    ? `Nothing to show for ${activeSpace?.name || 'this space'} right now.`
+                    : `No lists in ${activeSpace?.name || 'this space'} yet. Add one below.`}
+                </div>
               : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
           </div>
           {templates.length && !listDraft.trim() ? (

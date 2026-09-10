@@ -34,8 +34,45 @@
 // the TCL 2026-07-28: exactly that, a fabricated invite to a space nobody hosts
 // read as "waiting" because an unrelated peer was connected. A member row or a
 // list, on the other hand, can only have come from a peer in THIS space.
-function syncTrouble (status) {
-  if (!status || status.writable) return null
+// A FOURTH STATE, 2026-09-10: the base never opened at all.
+//
+// The three states below all describe a space that IS open and has nothing in it
+// yet, and all three are fixed by waiting or by waking another phone. This one is
+// not. It is the space PearList could not open on this device, which since 1.0.9
+// means the retention bug deleted local blocks nothing else can serve. Waiting
+// cannot fix it, so it gets its own copy and an action.
+//
+// `retried` is the UI's, not the worklet's, and it is what makes this two steps
+// rather than one. A 15s mount timeout is not proof of damage - a slow phone with a
+// large store times out on a perfectly healthy space - so the first offer is a free
+// retry that changes nothing, and the destructive rebuild is only reachable after
+// that retry has also failed. See
+// proposals/2026-09-10-repairing-a-space-1.0.9-broke.md.
+function syncTrouble (status, retried = false) {
+  if (!status) return null
+  if (status.available === false) {
+    return retried
+      ? {
+          title: 'This space still will not open',
+          // THE INSTRUCTION GOES FIRST, and it is an instruction rather than an
+          // explanation. Rebuilding pulls the lists from another phone, so if that
+          // phone is not awake with PearList open, the rebuild does nothing and the
+          // person has spent their one obvious remedy on a failed attempt. The first
+          // draft said "open PearList there and keep both phones on" in the middle
+          // of the second sentence, which buries it and lets "on" be read as
+          // "powered on". Then the second draft opened with "First," and spelled out
+          // the failure case, which said the same thing twice. Three sentences: do
+          // this, here is why, here is what it costs.
+          body: 'Open PearList on another phone in your household that has this space, and leave it on screen. The lists are copied back from it. Anything you added on this phone that never reached anyone else will not come back.',
+          action: { kind: 'rebuild', label: 'Rebuild from another phone' },
+        }
+      : {
+          title: 'This space did not open',
+          body: 'Nothing has been deleted. Spaces are sometimes just slow to open, so try again first.',
+          action: { kind: 'retry', label: 'Try again' },
+        }
+  }
+  if (status.writable) return null
   const arrived = (status.members || 0) > 0 || (status.lists || 0) > 0
   return arrived
     ? {

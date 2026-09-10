@@ -2,6 +2,46 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-09-10 - Repair is OFFERED to everyone, because we cannot know who it will help
+Tier: T3 (it re-runs the pairing flow). Proposal: PR #188. Implementation: PR #189.
+
+THE QUESTION the proposal left open: should Repair be hidden when this phone might
+be the only writer the space ever had? Rebuilding mints a new writer key, and a new
+writer is admitted by an EXISTING writer. If nobody else ever had the space, nobody
+can admit it, so the button cannot work and offering it is a promise we break.
+
+CHOICE: offer it anyway, bound it, and report honestly.
+
+WHY, and it is not a preference: we cannot tell. The writer set lives in the base's
+view, and the base is exactly what will not open. Core's persistMembership writes
+the SAME record shape for a space you created and one you joined, so there is no
+local marker either. A flag added today would not help the phones this feature
+exists for, because they were damaged before it existed.
+
+So the alternatives were: guess and sometimes hide a button that would have worked,
+or offer it and sometimes have it fail. Hiding it is worse - a user whose space
+CAN be repaired and who is shown no way to do it has no route at all, while a user
+whose space cannot be repaired gets a bounded 30s answer and copy that already told
+them it needs another phone.
+
+CONSEQUENCES:
+- `space:repair` is bounded at SPACE_REPAIR_TIMEOUT_MS (30s) and returns
+  `{ ok: false, why: 'did-not-open' }` rather than hanging. An unbounded call here
+  would reproduce the exact hang the whole line of work exists to remove.
+- The rebuild copy states the precondition BEFORE the tap ("It can be rebuilt from
+  another phone in your household that still has the space") and the cost
+  ("Anything you added on this phone that never reached anyone else will not come
+  back").
+- A rebuild that mounts but is not admitted lands in the EXISTING "Waiting to be
+  let in" state, which already gives the right advice. No new copy for it.
+- If we later want the check, the durable fix is core recording founder-vs-joiner
+  in the membership record. Worth doing for future damage, worthless for today's.
+
+ALSO DECIDED, smaller: a retry is offered before a rebuild, and the rebuild is
+unreachable until the retry has failed. A 15s mount timeout is not proof of damage -
+a slow phone with a large store times out on a healthy space - and a one-tap rebuild
+there would throw away a good local writer for nothing.
+
 ## 2026-07-31 - Removing someone from a space is a ROSTER action, not a lock
 Tier: T2 (it changes what a shipped security control promises). No wire change.
 This records a deliberate trade, so nobody rebuilds removal on the assumption it

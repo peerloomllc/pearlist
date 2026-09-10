@@ -63,3 +63,62 @@ test('copy is plain language: no jargon leaks to the user', () => {
     assert.doesNotMatch(text, /writer|autobase|swarm|peer|pubkey|replicat/i, 'jargon in: ' + text)
   }
 })
+
+// --- the fourth state: the base never opened (2026-09-10) -------------------
+// proposals/2026-09-10-repairing-a-space-1.0.9-broke.md. The three states above
+// all describe a space that IS open and empty, and all three are fixed by waiting
+// or by waking another phone. This one is fixed by neither.
+
+test('an unavailable space gets its own copy, not the waiting copy', () => {
+  const t = syncTrouble({ available: false, writable: false, members: 0, lists: 0 })
+  assert.ok(t, 'it must say something: this is the one case waiting cannot fix')
+  const waiting = syncTrouble(status({ writable: false, members: 0, lists: 0 }))
+  assert.notEqual(t.title, waiting.title)
+  assert.notEqual(t.body, waiting.body)
+})
+
+test('the free retry is offered FIRST, and the destructive rebuild only after it', () => {
+  // A 15s mount timeout is not proof of damage. Offering a rebuild up front would
+  // throw away a good local writer on a phone that was merely slow.
+  assert.equal(syncTrouble({ available: false }).action.kind, 'retry')
+  assert.equal(syncTrouble({ available: false }, true).action.kind, 'rebuild')
+})
+
+test('the rebuild copy says what it costs before the user taps it', () => {
+  const t = syncTrouble({ available: false }, true)
+  assert.match(t.body, /another phone/i, 'it needs one, and says so')
+  assert.match(t.body, /will not come back/i, 'and names what is lost')
+})
+
+test('the rebuild copy tells them to OPEN PEARLIST on the other phone, first', () => {
+  // Asked for by Tim 2026-09-10 on reading the first draft, which had the
+  // instruction buried mid-paragraph. The rebuild copies the lists back from the
+  // other phone, so a phone that is merely powered on and not running PearList
+  // gives a failed rebuild - and the person has spent their one obvious remedy.
+  const t = syncTrouble({ available: false }, true)
+  assert.match(t.body, /open PearList/i, 'it names the app, not just the phone')
+  assert.match(t.body, /leave it on screen|keep it open/i, 'and says to leave it there')
+  // First sentence, not buried: the instruction has to land before the caveats.
+  const first = t.body.split('.')[0] + '.'
+  assert.match(first, /another phone/i, 'the very first sentence is the instruction')
+  assert.doesNotMatch(first, /will not come back/i, 'and not the warning')
+})
+
+test('the retry copy does NOT frighten anyone: nothing is lost by trying', () => {
+  const t = syncTrouble({ available: false })
+  assert.match(t.body, /Nothing has been deleted/i)
+  assert.doesNotMatch(t.body, /will not come back/i, 'that warning belongs to the rebuild, not the retry')
+})
+
+test('a status without `available` behaves exactly as it did before', () => {
+  // Every existing caller and every older worklet reply omits the field.
+  assert.equal(syncTrouble({ writable: true }), null)
+  assert.equal(syncTrouble(status({ writable: false, members: 2, lists: 1 })).title, 'Waiting to be let in')
+})
+
+test('the new copy is plain language too', () => {
+  for (const t of [syncTrouble({ available: false }), syncTrouble({ available: false }, true)]) {
+    const text = t.title + ' ' + t.body + ' ' + t.action.label
+    assert.doesNotMatch(text, /writer|autobase|swarm|peer|pubkey|replicat|namespace|core\b|mount/i, 'jargon in: ' + text)
+  }
+})
