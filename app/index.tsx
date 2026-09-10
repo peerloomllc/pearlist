@@ -554,6 +554,19 @@ async function startWorklet () {
     new Promise((r) => setTimeout(() => r(TIMED_OUT), WORKLET_INIT_TIMEOUT_MS)),
   ])
   if (res === TIMED_OUT) throw new Error(`worklet init did not reply within ${WORKLET_INIT_TIMEOUT_MS}ms`)
+  // AN ERROR REPLY IS ALSO A FAILED BOOT. callRaw resolves with the whole message,
+  // so a worklet that answers `{ error }` used to land here as a success and the
+  // app carried on with an engine that had not opened anything. The UI's own init
+  // then failed, fell into its generic catch and rendered home or onboarding - so a
+  // store this device could not open presented as an EMPTY PearList, which reads as
+  // "my lists are gone" and invites exactly the storage-clearing that would make
+  // that true. Measured 2026-09-10: every way of damaging a Corestore that was
+  // tried (truncated MANIFEST, emptied CURRENT, missing MANIFEST, zeroed CORESTORE
+  // header) comes back as a clean error reply like "CURRENT file does not end with
+  // newline", never as a hang, so this is the path such a device actually takes.
+  if (res && typeof res === 'object' && (res as any).error != null) {
+    throw new Error(`worklet init failed: ${(res as any).error}`)
+  }
 
   // Hand the worklet whatever the keystore holds, before anything can touch
   // device-link. NOT awaited into the boot gate's failure path: a device that
