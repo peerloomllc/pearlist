@@ -303,7 +303,10 @@ async function refreshItemReminders () {
           title: 'Reminder',
           body: `"${r.text}" on ${r.listName}`,
           // `reminder: true` tells the foreground handler to SHOW this one.
-          data: { groupId: r.groupId, listId: r.listId, reminder: true }, // tap -> open the list
+          // itemId rides along so the tap can land on the ITEM, not just the list.
+          // `r.key` is already the identifier above; `r.itemId` is the id the UI
+          // renders rows under (data-item-id), which is what the WebView can find.
+          data: { groupId: r.groupId, listId: r.listId, itemId: r.itemId, reminder: true }, // tap -> open the item
           ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL } : {}),
         },
         // channelId on the TRIGGER, not just the content - see refreshDailyReminder.
@@ -758,7 +761,7 @@ export default function Shell () {
   useEffect(() => {
     const deliverNav = (data: any) => {
       if (!data || !data.groupId) return
-      const nav = { groupId: data.groupId, listId: data.listId ?? null }
+      const nav = { groupId: data.groupId, listId: data.listId ?? null, itemId: data.itemId ?? null }
       if (webViewLoaded.current) emitEvent('notify:open', nav)
       else pendingNotifNav.current = nav
     }

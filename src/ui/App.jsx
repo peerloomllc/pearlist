@@ -1413,6 +1413,13 @@ export default function App () {
   const [lists, setLists] = useState([])
   const [openListId, setOpenListId] = useState(null)
   const [items, setItems] = useState([])
+  const [itemsListId, setItemsListId] = useState(null) // which list `items` belongs to
+  // STATE, not a ref, and that is the whole trick. A ref would work on a cold start
+  // (the rows arrive later, so the effect re-runs anyway) and silently do nothing
+  // on a warm one: with the list already open and loaded, setting a ref changes no
+  // dependency, so the effect below would never run and the tap would just sit
+  // there. Caught before it shipped, 2026-09-10.
+  const [pendingItem, setPendingItem] = useState(null) // { groupId, listId, itemId } from a reminder tap
   const [theme, setThemeMode] = useState('dark')
   const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'wallet'|'spaces'|'listOptions'|'renameList'|{type:'item',item}
   const [view, setView] = useState(null) // full-screen: 'profile' | 'about'
@@ -1460,9 +1467,15 @@ export default function App () {
     return ls
   }, [])
 
+  // `itemsListId` records which list the rows in `items` actually came from. It
+  // exists so "this item is not in the list" can be told apart from "the list has
+  // not finished loading", which are the same thing to look at and mean opposite
+  // things to a notification tap arriving on a cold start.
   const loadItems = useCallback(async (groupId, listId) => {
-    if (!groupId || !listId) { setItems([]); return }
-    setItems(await call('item:getAll', { groupId, listId }))
+    if (!groupId || !listId) { setItems([]); setItemsListId(null); return }
+    const rows = await call('item:getAll', { groupId, listId })
+    setItems(rows)
+    setItemsListId(listId)
   }, [])
 
   // Commit a note edit and hand the freshly stored rows back to the editor, so
@@ -1745,8 +1758,34 @@ export default function App () {
     if (!spaces.some((s) => s.groupId === navRequest.groupId)) return
     setActiveSpaceId(navRequest.groupId)
     setOpenListId(navRequest.listId || null)
+    // A reminder tap names the ITEM. Opening the list is immediate; finding the row
+    // is not, because on a cold start the list arrives before its items do. So the
+    // target is parked here and the effect below picks it up when the rows land -
+    // waiting on the data rather than on a timer, the same shape as the space check
+    // one line above.
+    setPendingItem(navRequest.itemId
+      ? { groupId: navRequest.groupId, listId: navRequest.listId, itemId: navRequest.itemId }
+      : null)
     setNavRequest(null)
   }, [navRequest, phase, spaces])
+
+  // The reminder tap's second half: flash the item once its list has really loaded.
+  // Reuses the just-added-item flash (setFlashId), which already scrolls the row
+  // into view, expands a collapsed aisle to reach it and clears itself - so there
+  // is one highlight mechanism here and not two.
+  useEffect(() => {
+    if (!pendingItem) return
+    // Wait, rather than guess: until the rows on screen are THIS list's rows,
+    // "absent" means nothing.
+    if (gid !== pendingItem.groupId || itemsListId !== pendingItem.listId) return
+    const { itemId } = pendingItem
+    setPendingItem(null)
+    if (items.some((i) => i.id === itemId)) { setFlashId(itemId); return }
+    // Checked off or deleted by someone else between the reminder firing and the
+    // tap. The list is already open, which is the useful part; say why there is
+    // nothing highlighted rather than leaving it looking like a dud notification.
+    setBanner('That reminder is for an item that is no longer on the list')
+  }, [pendingItem, items, itemsListId, gid])
 
   // Two-week donation nudge: check once on reaching home, show only once ever
   // (mark shown as soon as it surfaces). Runs on iOS too now that the App Store

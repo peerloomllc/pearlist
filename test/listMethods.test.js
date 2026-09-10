@@ -1363,6 +1363,31 @@ test('reminder:pending returns only what THIS device should schedule, soonest fi
   await engine.close()
 })
 
+// The tap target. `key` is the OS identifier (so a cancel is exact) and `itemId`
+// is what the UI renders rows under (data-item-id), and they are deliberately not
+// the same string. The shell puts itemId in the notification payload so a tap can
+// scroll to the item instead of dropping the user at the top of a long list, so if
+// this drifts the reminder quietly goes back to opening the list and stopping.
+test('reminder:pending carries the id the UI renders rows under, not just the OS key', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
+  await call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() + 10 * 60 * 1000 })
+
+  const { reminders } = await call('reminder:pending', {})
+  assert.equal(reminders.length, 1)
+  assert.equal(reminders[0].itemId, itemId, 'the reminder names the item')
+
+  const rows = await call('item:getAll', { groupId, listId })
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].id, reminders[0].itemId,
+    'and it is the SAME id item:getAll returns, which is what the WebView can find on screen')
+  assert.notEqual(reminders[0].key, reminders[0].itemId, 'the OS identifier is a different string, on purpose')
+  await engine.close()
+})
+
 test('reminder:pending caps what it schedules and SAYS how many it dropped', async () => {
   const { engine, call } = driver()
   await call('init', {})
