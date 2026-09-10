@@ -31,6 +31,11 @@ async function classifyItem (_ctx, text) {
 // Grace before the owner tears down a just-deleted space, so the `space`
 // tombstone can replicate to connected members first.
 const SPACE_DELETE_GRACE_MS = 5000
+// How long space:repair gives a mount before reporting that it did not open. Longer
+// than core's own 15s mount budget, because the user asked for this one and is
+// watching it, and shorter than forever, because a mount waiting on a block nobody
+// can serve is the exact failure being repaired.
+const SPACE_REPAIR_TIMEOUT_MS = 30_000
 
 // --- avatars: stored in the content blob store, not inline in member rows -----
 // A member row carries a tiny { avatarBlob:{key,id}, avatarHash, avatarType }
@@ -1003,7 +1008,16 @@ const methods = {
           owner = await canActAsOwner(ctx, base, meta)
         } catch {}
       }
-      out.push({ groupId: value.groupId, name: value.name || 'Space', inviteKey, joinedAt: value.joinedAt || 0, owner })
+      // A space whose base never opened is still IN this list, because the list is
+      // read from localDb and the membership record survives a failed mount. Before
+      // this flag it came back looking completely ordinary and then failed every
+      // later call with 'unknown group', which the UI rendered as an empty space.
+      const why = (ctx.engine && ctx.engine.unmounted && ctx.engine.unmounted.get(value.groupId)) || null
+      out.push({
+        groupId: value.groupId, name: value.name || 'Space', inviteKey,
+        joinedAt: value.joinedAt || 0, owner,
+        available: !why, ...(why ? { unavailableReason: why } : {}),
+      })
     }
     out.sort((a, b) => a.joinedAt - b.joinedAt)
     return out
@@ -1028,6 +1042,27 @@ const methods = {
   // "is this device talking to anyone at all", which is the question that matters
   // when the answer is zero.
   'space:status': async ({ groupId }, ctx) => {
+    // A FOURTH STATE, added 2026-09-10: the base never opened at all. This used to
+    // go through viewFor and throw 'unknown group', the UI caught it to null, and
+    // the banner showed nothing - so the one case where the user genuinely cannot
+    // fix anything by waiting was the one case that said nothing. See
+    // proposals/2026-09-10-repairing-a-space-1.0.9-broke.md.
+    const mounted = ctx.bases.get(groupId)
+    if (!mounted) {
+      // Still throw for a groupId we have never heard of. "Not a space" and "a
+      // space that would not open" are different answers and the caller acts
+      // differently on each.
+      const known = await ctx.localDb.get('groups:joined:' + groupId)
+      if (!known) throw new Error('unknown group: ' + groupId)
+      return {
+        available: false,
+        reason: (ctx.engine && ctx.engine.unmounted && ctx.engine.unmounted.get(groupId)) || null,
+        writable: false,
+        conns: (ctx.swarm && ctx.swarm.connections && ctx.swarm.connections.size) || 0,
+        members: 0,
+        lists: 0,
+      }
+    }
     const base = viewFor(ctx, groupId)
     try { await base.update() } catch {}
     let members = 0
@@ -1035,11 +1070,88 @@ const methods = {
     let lists = 0
     for await (const { value } of base.view.createReadStream(LIST_RANGE)) if (value) lists++
     return {
+      available: true,
       writable: !!base.writable,
       conns: (ctx.swarm && ctx.swarm.connections && ctx.swarm.connections.size) || 0,
       members,
       lists,
     }
+  },
+
+  // GETTING A SPACE BACK THAT WOULD NOT OPEN.
+  // proposals/2026-09-10-repairing-a-space-1.0.9-broke.md, approved as PR #188.
+  //
+  // TWO DIFFERENT ACTIONS BEHIND ONE METHOD, and the difference is the whole point:
+  //
+  //   rebuild: false   just try mounting again, in the SAME namespace. Costs
+  //                    nothing and changes nothing. A 15s mount timeout is not
+  //                    proof of damage - a slow phone with a large store, or a cold
+  //                    start racing its first connection, times out on a perfectly
+  //                    healthy space - so this is what the user is offered first
+  //                    and it is what usually works.
+  //   rebuild: true    give the space a FRESH corestore namespace. That is the
+  //                    repair, and it is not reversible in any useful sense: the
+  //                    cores under a namespace are deterministic, so re-joining the
+  //                    same invite reopens the same damaged cores, and the only way
+  //                    forward is a new local writer that re-syncs from a peer.
+  //
+  // WHAT REBUILDING COSTS, which the UI must say before calling it with true:
+  //   - anything this phone wrote that no peer ever received is abandoned with the
+  //     old local core. The old cores are left on disk rather than deleted (core's
+  //     choice, e2cfce8) but nothing reads them again.
+  //   - a new namespace means a new writer key, so this device has to be re-admitted
+  //     by an existing writer exactly like a new phone. If nobody else has this
+  //     space, or nobody is awake, it mounts and stays read-only.
+  //
+  // NO NEW INVITE IS NEEDED from the other side: the membership record already
+  // holds groupKey, encryptionKey, bootstrap and name, which is everything
+  // encodeInvite wants, and spaces:list has been re-encoding one from it all along.
+  //
+  // WHY THIS DOES NOT REFUSE WHEN THIS PHONE MIGHT BE THE ONLY WRITER, which open
+  // question 2 of the proposal asked about: it cannot know. The writer set lives in
+  // the base's view and the base is exactly what will not open, and core's
+  // persistMembership writes the SAME record shape for a space you created and one
+  // you joined, so there is no local marker either. A flag added today would not
+  // help the phones this exists for, which were damaged before it. So the method
+  // reports honestly instead of guessing: it returns `writable`, and a repaired
+  // space that nobody admits sits in the existing "Waiting to be let in" state,
+  // which already says what to do.
+  'space:repair': async ({ groupId, rebuild = false }, ctx) => {
+    if (typeof groupId !== 'string' || !groupId) throw new Error('groupId required')
+    const open = ctx.bases.get(groupId)
+    if (open) return { ok: true, alreadyOpen: true, rebuilt: false, writable: !!open.writable }
+
+    const row = (await ctx.localDb.get('groups:joined:' + groupId))?.value
+    if (!row || !row.groupKey) throw new Error('unknown space')
+
+    const inviteKey = defaultEncodeInvite({
+      groupId, groupKey: row.groupKey, encryptionKey: row.encryptionKey,
+      bootstrap: row.bootstrap, name: row.name,
+    })
+    // A retry keeps whatever namespace the record already carries (undefined means
+    // the default, which is the groupId). A rebuild mints one that has never been
+    // used, so the cores derived under it are new.
+    const namespace = rebuild ? `${groupId}:rebuild:${Date.now()}` : (row.namespace || null)
+
+    // BOUNDED. joinGroup awaits a mount, and a mount waiting on a block nobody can
+    // serve is exactly the failure being repaired - unbounded here would reproduce
+    // the hang this whole line of work exists to remove.
+    const TIMED_OUT = Symbol('repair timeout')
+    const raced = await Promise.race([
+      ctx.joinGroup({ inviteKey, announce: row.announce !== false, namespace }),
+      new Promise((r) => setTimeout(() => r(TIMED_OUT), SPACE_REPAIR_TIMEOUT_MS)),
+    ])
+    if (raced === TIMED_OUT) {
+      return { ok: false, rebuilt: false, why: 'did-not-open', reason: (ctx.engine && ctx.engine.unmounted && ctx.engine.unmounted.get(groupId)) || null }
+    }
+
+    // joinGroup re-persists the membership and stamps a fresh joinedAt, which would
+    // silently move the space to the end of the switcher. Put the original back.
+    if (row.joinedAt) {
+      const now = (await ctx.localDb.get('groups:joined:' + groupId))?.value
+      if (now) await ctx.localDb.put('groups:joined:' + groupId, { ...now, joinedAt: row.joinedAt })
+    }
+    return { ok: true, rebuilt: !!rebuild, alreadyOpen: false, writable: !!raced.writable }
   },
 
   // Establish ownership of a freshly created space: the founder writes the signed

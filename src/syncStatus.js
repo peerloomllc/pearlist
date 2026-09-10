@@ -34,8 +34,36 @@
 // the TCL 2026-07-28: exactly that, a fabricated invite to a space nobody hosts
 // read as "waiting" because an unrelated peer was connected. A member row or a
 // list, on the other hand, can only have come from a peer in THIS space.
-function syncTrouble (status) {
-  if (!status || status.writable) return null
+// A FOURTH STATE, 2026-09-10: the base never opened at all.
+//
+// The three states below all describe a space that IS open and has nothing in it
+// yet, and all three are fixed by waiting or by waking another phone. This one is
+// not. It is the space PearList could not open on this device, which since 1.0.9
+// means the retention bug deleted local blocks nothing else can serve. Waiting
+// cannot fix it, so it gets its own copy and an action.
+//
+// `retried` is the UI's, not the worklet's, and it is what makes this two steps
+// rather than one. A 15s mount timeout is not proof of damage - a slow phone with a
+// large store times out on a perfectly healthy space - so the first offer is a free
+// retry that changes nothing, and the destructive rebuild is only reachable after
+// that retry has also failed. See
+// proposals/2026-09-10-repairing-a-space-1.0.9-broke.md.
+function syncTrouble (status, retried = false) {
+  if (!status) return null
+  if (status.available === false) {
+    return retried
+      ? {
+          title: 'This space still will not open',
+          body: 'Part of this space is missing from this phone and cannot be rebuilt from what is here. It can be rebuilt from another phone in your household that still has the space: open PearList there and keep both phones on. Anything you added on this phone that never reached anyone else will not come back.',
+          action: { kind: 'rebuild', label: 'Rebuild from another phone' },
+        }
+      : {
+          title: 'This space would not open',
+          body: 'PearList could not open this space on this phone, so there is nothing to show. Nothing has been deleted. Trying again is free and often enough, because a space can simply be slow to open.',
+          action: { kind: 'retry', label: 'Try again' },
+        }
+  }
+  if (status.writable) return null
   const arrived = (status.members || 0) > 0 || (status.lists || 0) > 0
   return arrived
     ? {
