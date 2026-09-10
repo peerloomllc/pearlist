@@ -419,6 +419,13 @@ async function storeMnemonic (mnemonic: string) {
 // --- worklet + IPC (module-scoped so it survives remounts) -----------------
 let _worklet: any = null
 let _workletStarted = false
+// WHY THE BOOT FAILURE IS KEPT, not just logged. If the worklet never comes up,
+// callRaw neither rejects nor times out, so every UI call sits in _pending
+// forever and the UI stays on its loading spinner with nothing to say. Holding
+// the reason here lets onMessage answer those calls with it instead, which is
+// the difference between "PearList does not open" and a report with a cause in
+// it. Reported on GrapheneOS against 1.0.9, 2026-09-10.
+let _workletError: string | null = null
 let _webViewRef: { current: any } | null = null
 const _pending = new Map<number, (msg: any) => void>()
 let _nextId = 1
@@ -666,7 +673,8 @@ export default function Shell () {
       try {
         await startWorklet()
       } catch (e: any) {
-        bootLog('worklet did not start: ' + (e?.message ?? String(e)))
+        _workletError = e?.message ?? String(e)
+        bootLog('worklet did not start: ' + _workletError)
       }
       if (!cancelled) setHtml(await loadUiHtml())
       // Re-derive both reminder surfaces from the current state. Waits on the
@@ -753,8 +761,8 @@ export default function Shell () {
   // Response shape matches the UI bridge (src/ui/ipc.js): __pearResponse(msg).
   const reply = (id: number, result: any) =>
     webViewRef.current?.injectJavaScript(`window.__pearResponse(${JSON.stringify({ id, result: result ?? null })}); true;`)
-  const replyError = (id: number, error: any) =>
-    webViewRef.current?.injectJavaScript(`window.__pearResponse(${JSON.stringify({ id, error: String(error) })}); true;`)
+  const replyError = (id: number, error: any, code?: string) =>
+    webViewRef.current?.injectJavaScript(`window.__pearResponse(${JSON.stringify({ id, error: String(error), ...(code ? { code } : {}) })}); true;`)
 
   const onMessage = async (e: any) => {
     let msg: any
@@ -928,6 +936,11 @@ export default function Shell () {
           return reply(id, { ok: true })
         }
         default: {
+          // The worklet is not coming. Answer rather than forward: callRaw would
+          // hang forever (by design - see its comment), and a hung call is what
+          // put the UI on an endless spinner in the first place. The shell:* cases
+          // above still work, so the error screen can still copy itself out.
+          if (_workletError) return replyError(id, _workletError, 'BACKEND_DOWN')
           // Everything else goes to the worklet.
           const wm = await callRaw(method, args)
           // A write that can change what should be scheduled: reconcile shortly
