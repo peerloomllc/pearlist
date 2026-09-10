@@ -1,0 +1,375 @@
+{
+  "comment": "A FRESH HOLD-OUT, written 2026-09-10 and never looked at while tuning. Round one's hold-out was burned by printing its misses, so the 100% on aisle-items.json is a training number and means nothing about generalisation. Every item here is held:true and appears in NEITHER tuned fixture (asserted when this file was generated). The gaps it aims at are the ones the TODO named: regional and non-US names, store-brand phrasings, and several items on one line. DO NOT tune against this file. Widen the table using aisle-items.json, then run this ONCE to see whether the widening generalised. When it is burned, write a fourth.",
+  "items": [
+    {
+      "text": "courgettes",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "aubergine",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "fresh coriander",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "mange tout",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "swede",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "spring greens",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "punnet of strawberries",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "salad tomatoes",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "king edward potatoes",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "bag of satsumas",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "beef mince",
+      "expect": "Meat & Seafood",
+      "held": true
+    },
+    {
+      "text": "gammon steak",
+      "expect": "Meat & Seafood",
+      "held": true
+    },
+    {
+      "text": "king prawns",
+      "expect": "Meat & Seafood",
+      "held": true
+    },
+    {
+      "text": "lamb shoulder",
+      "expect": "Meat & Seafood",
+      "held": true
+    },
+    {
+      "text": "streaky bacon",
+      "expect": "Meat & Seafood",
+      "held": true
+    },
+    {
+      "text": "pork belly",
+      "expect": "Meat & Seafood",
+      "held": true
+    },
+    {
+      "text": "smoked haddock",
+      "expect": "Meat & Seafood",
+      "held": true
+    },
+    {
+      "text": "double cream",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "half a dozen free range eggs",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "natural yoghurt",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "paneer",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "halloumi",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "semi skimmed milk",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "baguette",
+      "expect": "Bakery",
+      "held": true
+    },
+    {
+      "text": "crumpets",
+      "expect": "Bakery",
+      "held": true
+    },
+    {
+      "text": "brioche buns",
+      "expect": "Bakery",
+      "held": true
+    },
+    {
+      "text": "roti",
+      "expect": "Bakery",
+      "held": true
+    },
+    {
+      "text": "ciabatta rolls",
+      "expect": "Bakery",
+      "held": true
+    },
+    {
+      "text": "passata",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "basmati rice",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "red lentils",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "tinned tomatoes",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "porridge oats",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "stock cubes",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "rice noodles",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "crisps",
+      "expect": "Snacks",
+      "held": true
+    },
+    {
+      "text": "digestive biscuits",
+      "expect": "Snacks",
+      "held": true
+    },
+    {
+      "text": "salted popcorn",
+      "expect": "Snacks",
+      "held": true
+    },
+    {
+      "text": "tortilla chips",
+      "expect": "Snacks",
+      "held": true
+    },
+    {
+      "text": "instant coffee",
+      "expect": "Beverages",
+      "held": true
+    },
+    {
+      "text": "teabags",
+      "expect": "Beverages",
+      "held": true
+    },
+    {
+      "text": "fizzy lemonade",
+      "expect": "Beverages",
+      "held": true
+    },
+    {
+      "text": "crate of lager",
+      "expect": "Alcohol",
+      "held": true
+    },
+    {
+      "text": "bottle of prosecco",
+      "expect": "Alcohol",
+      "held": true
+    },
+    {
+      "text": "gin",
+      "expect": "Alcohol",
+      "held": true
+    },
+    {
+      "text": "washing up liquid",
+      "expect": "Household",
+      "held": true
+    },
+    {
+      "text": "kitchen roll",
+      "expect": "Household",
+      "held": true
+    },
+    {
+      "text": "bin bags",
+      "expect": "Household",
+      "held": true
+    },
+    {
+      "text": "fabric softener",
+      "expect": "Household",
+      "held": true
+    },
+    {
+      "text": "shower gel",
+      "expect": "Personal Care",
+      "held": true
+    },
+    {
+      "text": "plasters",
+      "expect": "Personal Care",
+      "held": true
+    },
+    {
+      "text": "razor blades",
+      "expect": "Personal Care",
+      "held": true
+    },
+    {
+      "text": "toothpaste",
+      "expect": "Personal Care",
+      "held": true
+    },
+    {
+      "text": "cat food pouches",
+      "expect": "Pet",
+      "held": true
+    },
+    {
+      "text": "puppy pads",
+      "expect": "Pet",
+      "held": true
+    },
+    {
+      "text": "self raising flour",
+      "expect": "Baking",
+      "held": true
+    },
+    {
+      "text": "caster sugar",
+      "expect": "Baking",
+      "held": true
+    },
+    {
+      "text": "vanilla essence",
+      "expect": "Baking",
+      "held": true
+    },
+    {
+      "text": "baking powder",
+      "expect": "Baking",
+      "held": true
+    },
+    {
+      "text": "brown sauce",
+      "expect": "Condiments",
+      "held": true
+    },
+    {
+      "text": "mayonnaise",
+      "expect": "Condiments",
+      "held": true
+    },
+    {
+      "text": "sriracha",
+      "expect": "Condiments",
+      "held": true
+    },
+    {
+      "text": "balsamic vinegar",
+      "expect": "Condiments",
+      "held": true
+    },
+    {
+      "text": "frozen chips",
+      "expect": "Frozen",
+      "held": true
+    },
+    {
+      "text": "ice lollies",
+      "expect": "Frozen",
+      "held": true
+    },
+    {
+      "text": "frozen garlic bread",
+      "expect": "Frozen",
+      "held": true
+    },
+    {
+      "text": "great value whole milk",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "kirkland paper towels",
+      "expect": "Household",
+      "held": true
+    },
+    {
+      "text": "365 organic peanut butter",
+      "expect": "Pantry",
+      "held": true
+    },
+    {
+      "text": "tesco value white bread",
+      "expect": "Bakery",
+      "held": true
+    },
+    {
+      "text": "milk and eggs",
+      "expect": "Dairy & Eggs",
+      "held": true
+    },
+    {
+      "text": "onions and garlic",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "apples, pears and plums",
+      "expect": "Produce",
+      "held": true
+    },
+    {
+      "text": "bread and rolls",
+      "expect": "Bakery",
+      "held": true
+    }
+  ]
+}
