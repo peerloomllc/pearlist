@@ -57,16 +57,18 @@ function syncTrouble (status, retried = false) {
           // THE INSTRUCTION GOES FIRST, and it is an instruction rather than an
           // explanation. Rebuilding pulls the lists from another phone, so if that
           // phone is not awake with PearList open, the rebuild does nothing and the
-          // person has spent their one obvious remedy on a failed attempt. The
-          // first draft said "open PearList there and keep both phones on" in the
-          // middle of the second sentence, which buries it and lets "on" be read as
-          // "powered on". Say it up front, say which app, and say why.
-          body: 'First, on another phone in your household that still has this space: open PearList and leave it on screen. The lists are copied back from that phone, so if it is asleep or PearList is closed there, this will not work. Anything you added on this phone that never reached anyone else will not come back.',
+          // person has spent their one obvious remedy on a failed attempt. The first
+          // draft said "open PearList there and keep both phones on" in the middle
+          // of the second sentence, which buries it and lets "on" be read as
+          // "powered on". Then the second draft opened with "First," and spelled out
+          // the failure case, which said the same thing twice. Three sentences: do
+          // this, here is why, here is what it costs.
+          body: 'Open PearList on another phone in your household that has this space, and leave it on screen. The lists are copied back from it. Anything you added on this phone that never reached anyone else will not come back.',
           action: { kind: 'rebuild', label: 'Rebuild from another phone' },
         }
       : {
-          title: 'This space would not open',
-          body: 'PearList could not open this space on this phone, so there is nothing to show. Nothing has been deleted. Trying again is free and often enough, because a space can simply be slow to open.',
+          title: 'This space did not open',
+          body: 'Nothing has been deleted. Spaces are sometimes just slow to open, so try again first.',
           action: { kind: 'retry', label: 'Try again' },
         }
   }
