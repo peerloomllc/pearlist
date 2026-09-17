@@ -1171,7 +1171,7 @@ if $PUBLISH_LINUX   && [ -n "${APPIMAGE_NAME:-}" ]; then _RELEASE_SUMMARY="$_REL
 _confirm "$_RELEASE_SUMMARY ready to publish?"
 
 # ---------------------------------------------------------------------------
-# 5b. Generate the iOS version metadata BEFORE the bump commit
+# 5f. Generate the iOS version metadata BEFORE the bump commit
 #
 # metadata/ios/version/$APP_VERSION is a generated dir: version/default/*.json
 # with `whatsNew` replaced by release_notes.md. It used to be written ~850
