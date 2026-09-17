@@ -94,6 +94,7 @@
         }
       ],
       "./plugins/with-android-abis",
+      "./plugins/with-gradle-jvmargs",
       "./plugins/with-android-queries",
       "./plugins/with-android-debug-app-id",
       "./plugins/with-android-standalone-debug",
