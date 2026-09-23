@@ -181,8 +181,8 @@ of live photos.
 - While a photo has not arrived, a camera outline with "Waiting for photo".
 - **Take photo** uses `<input type="file" accept="image/*" capture="environment">`.
   iOS WKWebView supports this natively, and the QR scanner already declares the
-  camera usage string. The Android WebView needs the file chooser to launch the
-  camera. Check this first, since it could force a small native change.
+  camera usage string. On Android it works with three fixes and no new native
+  module. See "Phase 1 results".
 
 ### Templates and suggestions
 
@@ -200,9 +200,8 @@ cover text only and are unchanged.
 
 ## Risks
 
-- **Android camera capture from the WebView** may need native file-chooser
-  wiring. Check it before building the UI. Library choose already works (the
-  avatar picker).
+- **Android camera capture from the WebView.** Checked in Phase 1: it works
+  once the three fixes in "Phase 1 results" are in.
 - **The photo does not arrive before the shopper leaves**, if no phone holding
   it was online. Eager download makes this rare. The placeholder says what is
   going on.
@@ -246,6 +245,84 @@ cover text only and are unchanged.
    eager fetch and the sweep, with the harness tests.
 3. UI: the detail sheet, the row thumbnail, the viewer and the Settings storage
    line.
+
+## Phase 1 results
+
+Measured 2026-09-23.
+
+### Compression
+
+Eight Wikimedia Commons product photos: bottles, packets and a crowded shelf,
+with Chinese and Japanese labels and small Latin print. Encoded with ImageMagick
+(`-resize`, `-strip`, 4:2:0, the chroma subsampling Chrome also uses). Sizes in
+KB:
+
+| photo | 1400 q80 | 1400 q85 | 1600 q80 | **1600 q85** | 1600 q90 | 2000 q85 | 2000 q90 | thumb 192 q75 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| p1 noodle cup | 173 | 208 | 216 | **262** | 341 | 389 | 512 | 7 |
+| p2 ramen museum | 136 | 163 | 168 | **204** | 269 | 303 | 409 | 7 |
+| p3 soy sauce shelf | 398 | 460 | 505 | **584** | 712 | 867 | 1065 | 12 |
+| p4 soy sauce shelf | 175 | 207 | 218 | **259** | 329 | 376 | 483 | 6 |
+| p5 bottle label | 168 | 198 | 211 | **248** | 311 | 362 | 456 | 6 |
+| p6 bottle | 133 | 169 | 175 | **223** | 313 | 369 | 515 | 4 |
+| p7 packaging | 138 | 169 | 176 | **217** | 291 | 336 | 454 | 4 |
+| p8 store displays | 324 | 377 | 393 | **459** | 571 | 647 | 810 | 12 |
+
+Readability was checked by eye on crops zoomed to about 2x. The test was the
+smallest line on p3, "MUSHROOM DARK SOY SAUCE" under the Chinese name, and the
+"净含量:500mL" net-volume line. Chinese text is readable at every setting. The
+tiny Latin line starts to blur at 1400 q80. At 1600 q85 it is readable, and 2000
+is only slightly sharper for about 50% more bytes.
+
+**Decision: keep 1600 px at q0.85, with a 192 px q0.75 thumbnail.** Most
+photos are 200 to 260 KB. A crowded shelf is 450 to 590 KB, so the 400 KB in
+"Storage budget" is a typical size, not a maximum. The 1 MB cap still leaves
+room.
+
+**The real Android WebView gives the same result.** The same pipeline
+(`createImageBitmap`, a canvas at `imageSmoothingQuality: 'high'`, then
+`toBlob('image/jpeg', 0.85)`), run inside PearList's WebView on the Pixel_9
+emulator: p3 553 KB, p1 240 KB, p5 230 KB, which is 5 to 8% under ImageMagick.
+The crops look the same. Set `imageSmoothingQuality: 'high'` anyway: on p5 the
+default gave 254 KB for no visible gain.
+
+**Each encode took about 4 seconds on the emulator, and most of that is decoding
+the 10 to 12 MP original.** Decode it once and make the full image and the
+thumbnail from the same bitmap. Show a spinner while it runs. Phones should be
+faster than the emulator's software renderer, but that is not measured yet.
+
+### Android camera
+
+Tested on the Pixel_9 emulator with a debug build, putting a
+`<input type="file" accept="image/*" capture="environment">` on the page through
+the WebView debugger and clicking it. Found three problems. Each has a fix that
+needs no new native module:
+
+1. **The camera app was invisible to us.** Android 11 package visibility hides it
+   unless the manifest declares it, and the library then logs "there is no
+   Activity to handle this Intent" and does nothing. **Fixed in this PR:**
+   `plugins/with-android-queries.js` now declares
+   `android.media.action.IMAGE_CAPTURE`. After a rebuild the camera app opens.
+2. **Without camera permission the input silently does nothing.**
+   react-native-webview 13.15 logs "there is no Camera permission" and returns
+   without opening anything or asking. The photo feature must ask first. Calling
+   `navigator.mediaDevices.getUserMedia({ video: true })` and stopping the track
+   right away brings up the Android permission prompt (the shell's
+   `onPermissionRequest` already grants the web side), and after "While using the
+   app" the permission is granted. Anyone who has scanned a QR code has granted
+   it already.
+3. **Our own WebView freeze recovery threw the photo away.** The shell terminates
+   the WebView renderer on resume if the app was in the background for at least
+   20 s (`WEBVIEW_RECOVERY_MIN_BG_MS`), unless `osUiActive` is set. The file input
+   opens the camera without telling the shell. A 30 s camera session came back
+   to a reloaded page with the photo lost. The same flow finished in 11 s
+   delivered the photo (`image/jpeg`, 64 KB from the emulator's fake camera).
+   **Fix:** send a new `shell:osScreen` message that sets `osUiActive` right
+   before clicking any file input. The avatar picker has the same latent bug for
+   anyone who takes more than 20 s choosing a picture.
+
+"Choose from library" is the same input without `capture`, and the avatar picker
+already uses it. It skips problems 1 and 2 but still needs fix 3.
 
 ## Decided
 

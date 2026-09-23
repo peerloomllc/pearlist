@@ -6,6 +6,10 @@
 //   - bitcoin:    on-chain fallback
 //   - https:      open donation / info links in a browser
 //   - mailto:     contact / support email
+//   - IMAGE_CAPTURE: the camera app, for "Take photo" on an item. The WebView
+//     file chooser (react-native-webview) calls resolveActivity on this intent
+//     and silently does nothing when the camera is not visible to us - measured
+//     on the emulator 2026-09-23: "there is no Activity to handle this Intent".
 // Kept intentionally narrow (only what the app actually queries).
 
 const { withAndroidManifest } = require('expo/config-plugins')
@@ -25,6 +29,10 @@ module.exports = function withAndroidQueries (config) {
     intents.push({
       action: [{ $: { 'android:name': 'android.intent.action.SENDTO' } }],
       data: [{ $: { 'android:scheme': 'mailto' } }],
+    })
+
+    intents.push({
+      action: [{ $: { 'android:name': 'android.media.action.IMAGE_CAPTURE' } }],
     })
 
     manifest.queries.push({ intent: intents })
