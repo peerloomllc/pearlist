@@ -346,7 +346,9 @@ function Field ({ value, onChange, placeholder, onEnter, autoFocus }) {
   )
 }
 
-function BottomSheet ({ open, onClose, title, children }) {
+// `z` lifts a sheet above the others. Every sheet shares zIndex 100, so without it
+// the one later in the page wins, whichever opened first.
+function BottomSheet ({ open, onClose, title, children, z = 100 }) {
   const [render, setRender] = useState(open)
   const [shown, setShown] = useState(false)
   useEffect(() => {
@@ -355,7 +357,7 @@ function BottomSheet ({ open, onClose, title, children }) {
   }, [open])
   if (!render) return null
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 100, background: shown ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0)', transition: 'background 280ms ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: z, background: shown ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0)', transition: 'background 280ms ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 600, background: c.surface.card, borderRadius: `${r.sheet}px ${r.sheet}px 0 0`, maxHeight: '85dvh', overflowY: 'auto', transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', padding: `${sp.sm}px ${sp.lg}px calc(var(--pear-safe-bottom) + ${sp.xl}px)` }}>
         <div style={{ width: 36, height: 4, borderRadius: 2, background: c.text.muted, margin: '6px auto 14px' }} />
         {title ? <h2 style={{ textAlign: 'center', fontSize: 17, fontWeight: 400, margin: `0 0 ${sp.base}px`, color: c.text.primary }}>{title}</h2> : null}
@@ -963,7 +965,10 @@ function ConfirmHost () {
   useEffect(() => { _askConfirm = (opts) => new Promise((resolve) => setState({ ...opts, resolve })); return () => { _askConfirm = null } }, [])
   const done = (v) => { const s = state; setState(null); s?.resolve(v) }
   return (
-    <BottomSheet open={!!state} onClose={() => done(false)} title={state?.title}>
+    // Above every other sheet: a confirmation is often asked FROM one (Remove photo
+    // from the photo menu over the item sheet), and ConfirmHost comes earlier in the
+    // page, so at the shared zIndex it opened hidden underneath them.
+    <BottomSheet open={!!state} onClose={() => done(false)} title={state?.title} z={200}>
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.base}px` }}>{state?.message}</p>
       {/* Equal-width buttons: the confirm and Cancel carry the same weight, so one
           does not read as the obvious choice by size alone. Applies to every
