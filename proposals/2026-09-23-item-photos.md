@@ -247,9 +247,10 @@ cover text only and are unchanged.
 3. UI: the detail sheet, the row thumbnail, the viewer and the Settings storage
    line.
 
-## Open questions
+## Decided
 
-1. Whether to keep 7 days as the grace period for replaced photos.
-2. Whether eager download should run on mobile data, or on Wi-Fi only with a
-   setting. Doing it on mobile data costs up to about 400 KB per photo, and not
-   doing it means a shopper away from Wi-Fi may not have the photo.
+Answered by Tim on 2026-09-23.
+
+1. The grace period for a replaced or removed photo is 7 days.
+2. Eager download runs on any network, mobile data included, with no Wi-Fi-only
+   setting in v1.
