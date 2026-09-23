@@ -90,12 +90,20 @@ v1 allows one photo per item. Note lists (`kind: 'note'`) do not offer photos.
 - `item:setPhoto { groupId, listId, itemId, photo, thumb }`. `photo` and `thumb`
   are base64 data URLs. Rejects if the decoded full image is over **1 MB** or the
   thumbnail is over **64 KB**, as a guard against a UI bug. Dedupes by hash
-  through `blobref:{hash}` like `profile:set`. Writes both blobs, then the row.
-  Records `photoref:{hash}` in `localDb` (see Cleanup).
+  through `photoref:{hash}` when this device already holds both images. Writes
+  both blobs, then the row. Records `photoref:{hash}` in `localDb` (see Cleanup).
+  Photos do not use the avatars' `blobref:` entries, so the sweep never has to
+  touch them.
 - `item:setPhoto { ..., photo: null }` removes the field.
 - `item:getPhoto { groupId, listId, itemId, size: 'thumb' | 'full' }` returns a data
-  URL or null. Null means the blob is not reachable yet, and the UI shows a
-  placeholder that says so.
+  URL or null. Null means the blob is not on this device yet, and the UI shows a
+  placeholder that says so. **It never waits on a peer.** Core runs IPC methods
+  one at a time, so a call that waited 8 s for a housemate's phone would freeze
+  every other call. A miss starts a background download and the UI asks again.
+- `photo:maintain { now?, graceMs? }` runs the download pass and the sweep now.
+  A timer runs it a minute after the first photo call and then every 10 minutes.
+  `item:getAll` also starts background downloads for the rows it returns.
+- `photo:stats` returns `{ count, bytes }` for the Settings line.
 - `item:getAll` passes `photo` through unchanged. The UI asks for thumbnails
   lazily, the way `resolveAvatarCached` works.
 - The in-memory cache is an **LRU**, capped at about 40 thumbnails and 6 full
@@ -137,7 +145,7 @@ so disk space is freed some time after the delete.
 3. A hash that is in the live set: clear its `deadSince` if it has one.
 4. A hash that is not live: set `deadSince` if it is not set yet. Once
    `deadSince` is older than the grace period, `clear()` both ranges, then remove
-   the `photoref` and `blobref` entries.
+   the `photoref` entry.
 
 **The sweep clears only what it recorded in `photoref:*`.** It never walks the
 `blobs` core itself, so it cannot clear an avatar, which lives in the same core,
