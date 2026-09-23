@@ -30,7 +30,7 @@
 #   ./scripts/sim-drive.sh shot out.png      only when the LOOK is the question (rule 16)
 #   ./scripts/sim-drive.sh stop
 #
-# Env: SIM_NAME (default PearListBench), BUNDLE_ID (default com.pearlist),
+# Env: SIM_NAME (default PearListBench), BUNDLE_ID (default com.pearlist), WDA_PORT (default 8100),
 #      MAC_MINI (default Tims-Mac-mini.local), APPIUM_PORT (default 4723).
 
 set -euo pipefail
@@ -82,12 +82,19 @@ cmd_start () {
   ver=$(xcrun simctl list runtimes | awk '/^iOS /{print $2}' | tail -1)
   # First run builds WebDriverAgent with xcodebuild, which takes minutes. After
   # that it is seconds, so do not let a timeout here send you looking for a fault.
+  #
+  # isHeadless: Xcode 27 (on the Mac since 2026-09-14) ships no Simulator.app, and
+  # without it every session fails with "Could not find UI client app with bundle
+  # id 'com.apple.iphonesimulator'". simctl and WDA do not need the window.
+  # WDA_PORT: a second session on another simulator (another app's test) needs its
+  # own WebDriverAgent port, or it fails on the one the first session holds.
   sid=$(api POST /session "{\"capabilities\":{\"alwaysMatch\":{
       \"platformName\":\"iOS\",\"appium:automationName\":\"XCUITest\",
       \"appium:udid\":\"$udid\",\"appium:deviceName\":\"$name\",
       \"appium:platformVersion\":\"$ver\",\"appium:bundleId\":\"$BUNDLE_ID\",
       \"appium:noReset\":true,\"appium:newCommandTimeout\":3600,
-      \"appium:wdaLaunchTimeout\":600000}}}" \
+      \"appium:wdaLaunchTimeout\":600000,\"appium:isHeadless\":true,
+      \"appium:wdaLocalPort\":${WDA_PORT:-8100}}}}" \
     | python3 -c 'import sys,json; print(json.load(sys.stdin).get("value",{}).get("sessionId",""))')
   [ -n "$sid" ] || { echo "session failed, see /tmp/appium.log" >&2; exit 1; }
   echo "$sid" > "$SESSION_FILE"
