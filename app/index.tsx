@@ -4,7 +4,7 @@
 // WebView camera permission for the in-WebView QR scanner.
 
 import { useEffect, useRef, useState } from 'react'
-import { View, Platform, Share, StatusBar, BackHandler, AppState } from 'react-native'
+import { View, Platform, Share, StatusBar, BackHandler, AppState, PermissionsAndroid } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Worklet } from 'react-native-bare-kit'
@@ -875,6 +875,32 @@ export default function Shell () {
           } catch (err: any) {
             return reply(id, { ok: false, error: err?.message ?? String(err) })
           }
+        }
+        case 'shell:osScreen': {
+          // The UI is about to open the camera or the photo picker from a WebView
+          // <input type="file">. Mark it like the shell's own pickers, or a return
+          // after 20 s runs the freeze recovery and the reload loses the file.
+          //
+          // With `camera`, also make sure Android's CAMERA permission is granted:
+          // react-native-webview's camera input logs "there is no Camera
+          // permission" and silently does nothing without it (measured on the
+          // emulator 2026-09-23). The flag is set AFTER the prompt: the prompt is
+          // its own screen, and returning from it would use the flag up.
+          // `prompted` tells the UI the system dialog was shown: the tap that asked
+          // has expired by now, so the WebView will not open the camera for it.
+          let camera = true
+          let prompted = false
+          if (args?.camera && Platform.OS === 'android') {
+            try {
+              const perm = PermissionsAndroid.PERMISSIONS.CAMERA
+              if (!(await PermissionsAndroid.check(perm))) {
+                prompted = true
+                camera = (await PermissionsAndroid.request(perm)) === PermissionsAndroid.RESULTS.GRANTED
+              }
+            } catch { camera = false }
+          }
+          osUiActive.current = true
+          return reply(id, { ok: true, camera, prompted })
         }
         case 'shell:haptic': {
           const k = args?.kind

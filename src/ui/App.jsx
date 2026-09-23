@@ -16,7 +16,7 @@ import { isMyRow, isMine } from '../selfKeys.js'
 import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -140,6 +140,132 @@ function compressToAvatar (dataUrl, max = 256, quality = 0.82) {
     img.onerror = reject
     img.src = dataUrl
   })
+}
+
+// Opening a picker from a WebView <input type="file"> takes us to another app, and
+// the shell's freeze recovery reloads the WebView on a return after 20 s or more
+// unless it knows an OS screen is open. A reload loses the picked file. Fire and
+// forget, then click in the same tap: an await here could cost the user gesture
+// the WebView needs before it will open a chooser.
+function openFilePicker (ref) {
+  try { const p = call('shell:osScreen', {}); if (p && p.catch) p.catch(() => {}) } catch {}
+  ref.current?.click()
+}
+
+// Item photos (proposals/2026-09-23-item-photos.md). 1600 px at q0.85 keeps small
+// print on a label readable at 2x zoom; the 192 px thumbnail is what the list row
+// shows. JPEG everywhere: WKWebView cannot encode WebP and silently falls back to a
+// much bigger PNG. Drawing an <img> applies EXIF orientation and re-encoding drops
+// the EXIF itself, GPS location included.
+const PHOTO_EDGE = 1600
+const PHOTO_Q = 0.85
+const THUMB_EDGE = 192
+const THUMB_Q = 0.75
+const PHOTO_MAX_BYTES = 1024 * 1024 // the worklet's cap
+const dataUrlBytes = (u) => Math.floor((u.length - u.indexOf(',') - 1) * 3 / 4)
+// An <img> first, since drawing one applies EXIF orientation everywhere we run.
+// createImageBitmap as the fallback: picking a 12 MP shelf photo on the emulator
+// failed to decode through <img> once in three tries and worked on the retry, and a
+// user should not have to pick the photo twice.
+function loadImageFile (file) {
+  const viaImg = () => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That image could not be read.')) }
+    img.src = url
+  })
+  return viaImg().catch((err) => {
+    if (typeof createImageBitmap !== 'function') throw err
+    return createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => { throw err })
+  })
+}
+function encodeImage (img, edge, quality) {
+  const iw = img.naturalWidth || img.width; const ih = img.naturalHeight || img.height
+  const scale = Math.min(1, edge / Math.max(iw, ih))
+  const w = Math.max(1, Math.round(iw * scale)); const h = Math.max(1, Math.round(ih * scale))
+  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h
+  const ctx = canvas.getContext('2d'); ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(img, 0, 0, w, h)
+  return { url: canvas.toDataURL('image/jpeg', quality), w, h }
+}
+// Decode once, encode twice. Decoding the 10-12 MP original is most of the cost
+// (about 4 s on the emulator), so it must not happen per size.
+async function prepareItemPhoto (file) {
+  const img = await loadImageFile(file)
+  let full = encodeImage(img, PHOTO_EDGE, PHOTO_Q)
+  // A very busy photo can pass the cap at q0.85. Step the quality down before
+  // giving up, rather than refusing a photo the user just took.
+  for (const q of [0.75, 0.65]) { if (dataUrlBytes(full.url) <= PHOTO_MAX_BYTES) break; full = encodeImage(img, PHOTO_EDGE, q) }
+  if (dataUrlBytes(full.url) > PHOTO_MAX_BYTES) throw new Error('That photo is too large.')
+  const thumb = encodeImage(img, THUMB_EDGE, THUMB_Q)
+  return { photo: full.url, thumb: thumb.url, w: full.w, h: full.h }
+}
+
+// Data URLs already loaded in this WebView, so a row that remounts, or the sheet
+// opening on an item the row already showed, paints at once. Keyed hash:size.
+const photoUrlCache = new Map()
+function cachePhotoUrl (hash, size, url) {
+  if (!hash || !url) return
+  photoUrlCache.delete(hash + ':' + size); photoUrlCache.set(hash + ':' + size, url)
+  while (photoUrlCache.size > 60) photoUrlCache.delete(photoUrlCache.keys().next().value)
+}
+// The photo for an item, or null until it is on this phone. The worklet answers
+// at once and downloads in the background, so a null is retried for a minute.
+function useItemPhoto (groupId, item, size) {
+  const hash = item?.photo?.hash || null
+  const [src, setSrc] = useState(() => (hash && photoUrlCache.get(hash + ':' + size)) || null)
+  useEffect(() => {
+    if (!hash || !groupId || !item) { setSrc(null); return }
+    const cached = photoUrlCache.get(hash + ':' + size)
+    if (cached) { setSrc(cached); return }
+    setSrc(null)
+    let live = true; let tries = 0; let t = null
+    const ask = () => call('item:getPhoto', { groupId, listId: item.listId, itemId: item.id, size })
+      .then((u) => { if (!live) return; if (u) { cachePhotoUrl(hash, size, u); setSrc(u) } else if (++tries < 20) t = setTimeout(ask, 3000) })
+      .catch(() => {})
+    ask()
+    return () => { live = false; clearTimeout(t) }
+  }, [groupId, hash, size, item?.id, item?.listId])
+  return src
+}
+
+function PhotoThumb ({ groupId, item, size = 40, onClick }) {
+  const src = useItemPhoto(groupId, item, 'thumb')
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onClick?.() }} aria-label='View photo'
+      style={{ width: size, height: size, flexShrink: 0, padding: 0, border: `1px solid ${c.border}`, borderRadius: r.sm, background: c.surface.elevated, overflow: 'hidden', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted }}>
+      {src ? <img src={src} alt='' style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <Camera size={Math.round(size * 0.5)} weight='regular' />}
+    </button>
+  )
+}
+
+// Full screen, for reading the label. Tap the photo to zoom in and drag to move
+// around; tap again to fit. Shows the thumbnail until the full image is here.
+function PhotoViewer ({ groupId, item, onClose }) {
+  const full = useItemPhoto(groupId, item, 'full')
+  const thumb = useItemPhoto(groupId, item, 'thumb')
+  const [zoom, setZoom] = useState(false)
+  useEffect(() => { setZoom(false) }, [item?.id])
+  if (!item) return null
+  const src = full || thumb
+  return (
+    <div role='dialog' aria-label='Photo' style={{ position: 'fixed', inset: 0, zIndex: 1000, background: '#000', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `calc(var(--pear-safe-top) + ${sp.sm}px) ${sp.base}px ${sp.sm}px` }}>
+        <span style={{ flex: 1, minWidth: 0, color: '#fff', fontSize: 16, fontWeight: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.text}</span>
+        <button onClick={onClose} aria-label='Close photo' style={{ width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={20} weight='bold' /></button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: zoom ? 'auto' : 'hidden', display: zoom ? 'block' : 'flex', alignItems: 'center', justifyContent: 'center', WebkitOverflowScrolling: 'touch' }}>
+        {src
+          ? <img src={src} alt={item.text} onClick={() => setZoom((z) => !z)}
+              style={zoom ? { width: '250%', maxWidth: 'none', display: 'block' } : { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+          : <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.sm }}><Camera size={40} weight='regular' />Waiting for photo</span>}
+      </div>
+      <div style={{ padding: `${sp.sm}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.md}px)`, color: 'rgba(255,255,255,0.6)', fontSize: 12, textAlign: 'center' }}>
+        {src ? (zoom ? 'Tap to fit' : 'Tap to zoom') : 'It arrives when a phone that has it is online.'}
+      </div>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -675,7 +801,7 @@ function UndoToast ({ onUndo }) {
   )
 }
 
-function ItemRow ({ item, members, onToggle, onOpen, dragHandle }) {
+function ItemRow ({ item, groupId, members, onToggle, onOpen, onPhoto, dragHandle }) {
   const checked = !!item.checked
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}` }}>
@@ -690,6 +816,7 @@ function ItemRow ({ item, members, onToggle, onOpen, dragHandle }) {
         </span>
         {item.note ? <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{item.note}</span> : null}
       </button>
+      {item.photo ? <PhotoThumb groupId={groupId} item={item} onClick={() => onPhoto?.(item)} /> : null}
       {item.url ? <button onClick={(e) => { e.stopPropagation(); openUrl(item.url) }} aria-label='Open link' style={{ width: 34, height: 34, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
       <AssigneeAvatar pubkey={item.assignee} members={members} size={24} />
       {dragHandle ? <span
@@ -1234,10 +1361,10 @@ function NameSetup ({ profile, onDone, onLink }) {
         <p style={{ color: c.text.secondary, fontSize: 15, fontWeight: 300, marginTop: sp.sm }}>Set your name so the people you share with know who's who.</p>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: sp.sm }}>
-        <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, borderRadius: '50%' }}>
+        <button onClick={() => openFilePicker(fileRef)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, borderRadius: '50%' }}>
           <Avatar name={name} avatar={avatar} size={96} />
         </button>
-        <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', color: c.primary, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add a photo (optional)'}</button>
+        <button onClick={() => openFilePicker(fileRef)} style={{ background: 'none', border: 'none', color: c.primary, fontSize: 14, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add a photo (optional)'}</button>
         <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
       </div>
       <input value={name} maxLength={64} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') cont() }} placeholder='Your name'
@@ -1432,6 +1559,7 @@ export default function App () {
   const [pendingItem, setPendingItem] = useState(null) // { groupId, listId, itemId } from a reminder tap
   const [theme, setThemeMode] = useState('dark')
   const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'wallet'|'spaces'|'listOptions'|'renameList'|{type:'item',item}
+  const [viewPhoto, setViewPhoto] = useState(null) // the item whose photo is open full screen
   const [view, setView] = useState(null) // full-screen: 'profile' | 'about'
   const [profile, setProfile] = useState(null)
   const [donateReminder, setDonateReminder] = useState(false)
@@ -1888,17 +2016,20 @@ export default function App () {
 
   // Android back button / gesture: tell the shell whether there is an in-app
   // overlay to dismiss, so it consumes the press instead of exiting the app.
-  navRef.current = { donateReminder, listPicker, sheet, view, openListId }
+  navRef.current = { viewPhoto, donateReminder, listPicker, sheet, view, openListId }
   useEffect(() => {
-    const canBack = !!(donateReminder || listPicker || sheet || view || openListId)
+    const canBack = !!(viewPhoto || donateReminder || listPicker || sheet || view || openListId)
     call('shell:navState', { canBack }).catch(() => {})
-  }, [donateReminder, listPicker, sheet, view, openListId])
+  }, [viewPhoto, donateReminder, listPicker, sheet, view, openListId])
 
   // The shell forwards a hardware back press as a 'back' event when canBack was
   // true; close the top-most layer (registered once, reads latest via navRef).
   useEffect(() => on('back', () => {
     const n = navRef.current
-    if (n.donateReminder) setDonateReminder(false)
+    // The photo viewer sits above everything, including the item sheet it may
+    // have been opened from, so it closes first.
+    if (n.viewPhoto) setViewPhoto(null)
+    else if (n.donateReminder) setDonateReminder(false)
     else if (n.listPicker) setListPicker(null)
     else if (n.sheet) { setSheet(null); setDeleteTarget(null) }
     else if (n.view) setView(null)
@@ -2636,7 +2767,7 @@ export default function App () {
               : (() => {
                 const renderRow = (it, handleProps, dragging) => (
                   <SwipeRow key={it.id} onDelete={() => swipeDeleteItem(it)} disabled={dragging}>
-                    <ItemRow item={it} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} dragHandle={handleProps} />
+                    <ItemRow item={it} groupId={gid} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} onPhoto={(item) => setViewPhoto(item)} dragHandle={handleProps} />
                   </SwipeRow>
                 )
                 return grouped
@@ -2753,8 +2884,12 @@ export default function App () {
       <DonationReminderModal open={donateReminder} onDismiss={() => setDonateReminder(false)} onDonate={() => { setDonateReminder(false); goTab('about') }} />
       <GuidedTour open={showTour} onDone={dismissTour} />
       <ConfirmHost />
+      {/* The live row, not the snapshot taken on tap, so a photo a housemate
+          replaces while it is open changes here too. */}
+      {viewPhoto ? <PhotoViewer groupId={gid} item={items.find((i) => i.id === viewPhoto.id) || viewPhoto} onClose={() => setViewPhoto(null)} /> : null}
       <ItemSheet
-        open={!!sheet && sheet.type === 'item'} item={sheet?.item} kind={openList?.kind} noun={groupNoun} builtins={groupBuiltins} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
+        open={!!sheet && sheet.type === 'item'} item={sheet?.item} groupId={gid} onViewPhoto={(item) => setViewPhoto(item)}
+        onPhotoChanged={() => loadItems(gid, openListId)} kind={openList?.kind} noun={groupNoun} builtins={groupBuiltins} members={members} selfPubkey={selfPubkey} onClose={() => setSheet(null)}
         customAisles={isGroceryList
           ? [...new Set([...items.map((i) => i.category).filter((cat) => cat && !aisles.AISLES.includes(cat)), ...loadCustomAisles(gid)])]
           : [...new Set(items.map((i) => i.category).filter(Boolean))]}
@@ -3533,6 +3668,14 @@ function relaySummary (s, on) {
 // whole row. Use it when `extra` is an interactive control of its own (the
 // reminder's time picker): centred, the toggle floats between the two lines and
 // reads as if it belongs to the picker rather than to the setting.
+function photoStatsText (st) {
+  if (!st) return 'Counting...'
+  if (!st.count) return 'None yet.'
+  const mb = st.bytes / (1024 * 1024)
+  const size = mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(st.bytes / 1024))} KB`
+  return `${st.count} photo${st.count === 1 ? '' : 's'}, ${size}.`
+}
+
 function Setting ({ title, about, aboutLink, control, extra, first, alignTop, onAbout }) {
   return (
     <div style={{ display: 'flex', alignItems: alignTop ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.base, padding: `${sp.md}px 0`, borderTop: first ? 'none' : `1px solid ${c.divider}` }}>
@@ -3754,6 +3897,10 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
   }, [])
   const [learned, setLearned] = useState(0)
   useEffect(() => { setLearned(overrideCount()) }, [])
+  // Photos on items, counted from what this phone actually holds. Read once when
+  // Settings opens; it only changes when a photo is added, arrives or is cleared.
+  const [photoStats, setPhotoStats] = useState(null)
+  useEffect(() => { call('photo:stats', {}).then(setPhotoStats).catch(() => {}) }, [])
   async function clearLearned () {
     if (!learned) return
     const ok = await askConfirm({ title: 'Clear learned aisles?', message: `Forget ${learned} learned aisle${learned > 1 ? 's' : ''}? New items will be sorted automatically again.`, confirmLabel: 'Clear', danger: true })
@@ -3773,6 +3920,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
     'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
     'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
+    'Photos on this phone': 'Photos added to items in your spaces. Each phone keeps its own copy so the photo is there when you are in the shop, even if the phone that took it is off. When an item or list is deleted, or you leave a space, its photos are removed from this phone within the hour. A photo that was replaced or removed from an item is kept for 7 days first, in case someone else\'s edit brings it back. Photos are not included in "Save a copy".',
     'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file. You choose where it goes: your phone offers Downloads first, and Documents or a cloud folder are a tap away. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
     'Open a saved copy': 'Reads a file saved by "Save a copy" and puts everything in it back as NEW spaces that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new spaces the usual way once they are there.',
     'Your devices': "Phones and tablets signed in as you. Pair one and it shares your identity and every space you are in, so your lists are the same on both. Pairing hands over your identity, so only ever do it with a device you own and keep - anyone holding that link becomes you.",
@@ -3822,7 +3970,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
         {/* The avatar is the button. A photo is the obvious thing to tap on a photo,
             and it buys back the full-width button's height. The caption underneath
             carries the affordance for anyone who would not think to try. */}
-        <button onClick={() => fileRef.current?.click()} disabled={busy} aria-label={hasAvatar ? 'Change photo' : 'Add photo'}
+        <button onClick={() => openFilePicker(fileRef)} disabled={busy} aria-label={hasAvatar ? 'Change photo' : 'Add photo'}
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0, borderRadius: '50%' }}>
           <Avatar name={profile?.displayName || name} avatar={profile?.avatar} size={64} />
         </button>
@@ -3834,7 +3982,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
               style={{ padding: '0 16px', flexShrink: 0, borderRadius: r.md, border: 'none', background: c.primary, color: c.text.onPrimary, fontSize: 14, cursor: 'pointer', opacity: busy || !nameDirty ? 0.5 : 1 }}>Save</button>
           </div>
           <div style={{ display: 'flex', gap: sp.base, marginTop: 6 }}>
-            <button onClick={() => fileRef.current?.click()} disabled={busy}
+            <button onClick={() => openFilePicker(fileRef)} disabled={busy}
               style={{ background: 'none', border: 'none', padding: 0, color: c.text.muted, fontSize: 12, cursor: 'pointer' }}>{hasAvatar ? 'Change photo' : 'Add photo'}</button>
             {hasAvatar ? <button onClick={() => commitAvatar(null)} disabled={busy}
               style={{ background: 'none', border: 'none', padding: 0, color: c.error, fontSize: 12, cursor: 'pointer' }}>Remove</button> : null}
@@ -3907,6 +4055,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
       <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
+        <Setting onAbout={setInfo} title='Photos on this phone' about={ABOUT['Photos on this phone']}
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{photoStatsText(photoStats)}</span>} />
       </Collapsible>
       {/* Everything here lives only on the household's phones, so a file is the
           only copy that survives all of them. Also the one way out of a space a
@@ -4188,7 +4338,97 @@ function whenLabel (ms) {
   return d ? `${d.day}, ${d.time}` : 'Never'
 }
 
-function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
+// The photo part of the item sheet. Changes apply at once, like an avatar, so a
+// photo is never lost to closing the sheet without pressing Save.
+function ItemPhotoField ({ groupId, item, onView, onChanged }) {
+  const camRef = useRef(null)
+  const libRef = useRef(null)
+  const [photo, setPhoto] = useState(item?.photo || null)
+  const [busy, setBusy] = useState(false)
+  const [hint, setHint] = useState(null)
+  useEffect(() => { setPhoto(item?.photo || null); setBusy(false); setHint(null) }, [item?.id, item?.photo?.hash])
+  const shown = item ? { ...item, photo } : null
+  const preview = useItemPhoto(groupId, photo ? shown : null, 'full')
+  const thumb = useItemPhoto(groupId, photo ? shown : null, 'thumb')
+
+  async function takePhoto () {
+    // On Android the WebView's camera input silently does nothing without the
+    // CAMERA permission, so the shell asks for it first. Measured 2026-09-23.
+    let r = { camera: true }
+    try { r = await call('shell:osScreen', { camera: true }) } catch {}
+    if (r && r.camera === false) { alert('PearList needs permission to use the camera. You can allow it in your phone\'s settings, or choose a photo you already have.'); return }
+    // Right after the permission prompt the WebView will not open the camera: the
+    // tap that started this has expired, and it opens a chooser only inside one.
+    // Measured on the emulator 2026-09-23. Ask for one more tap instead of failing
+    // silently.
+    if (r && r.prompted) { setHint('Camera allowed. Tap Take photo again.'); return }
+    setHint(null)
+    camRef.current?.click()
+  }
+  async function onFile (e) {
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file || !item) return
+    setBusy(true)
+    try {
+      const prepared = await prepareItemPhoto(file)
+      const res = await call('item:setPhoto', { groupId, listId: item.listId, itemId: item.id, ...prepared })
+      cachePhotoUrl(res.photo.hash, 'full', prepared.photo)
+      cachePhotoUrl(res.photo.hash, 'thumb', prepared.thumb)
+      setPhoto(res.photo)
+      onChanged?.()
+    } catch (err) { alert(problem('Could not add that photo', err)) }
+    setBusy(false)
+  }
+  async function remove () {
+    const ok = await askConfirm({ title: 'Remove photo?', message: 'Everyone in this space will stop seeing it.', confirmLabel: 'Remove', danger: true })
+    if (!ok) return
+    setBusy(true)
+    try { await call('item:setPhoto', { groupId, listId: item.listId, itemId: item.id, photo: null }); setPhoto(null); onChanged?.() }
+    catch (err) { alert(problem('Could not remove the photo', err)) }
+    setBusy(false)
+  }
+
+  const btn = { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, padding: '10px 12px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 14, fontFamily: FONT, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1 }
+  const inputs = (
+    <>
+      <input ref={camRef} type='file' accept='image/*' capture='environment' style={{ display: 'none' }} onChange={onFile} />
+      <input ref={libRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onFile} />
+    </>
+  )
+  if (!photo) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', gap: sp.sm }}>
+          <button onClick={takePhoto} disabled={busy} style={btn}><Camera size={18} weight='regular' />Take photo</button>
+          <button onClick={() => openFilePicker(libRef)} disabled={busy} style={btn}><ImageIcon size={18} weight='regular' />Choose photo</button>
+        </div>
+        {busy ? <span style={{ color: c.text.muted, fontSize: 12 }}>Preparing photo...</span> : null}
+        {hint && !busy ? <span style={{ color: c.text.secondary, fontSize: 12 }}>{hint}</span> : null}
+        {inputs}
+      </div>
+    )
+  }
+  const src = preview || thumb
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
+      <button onClick={() => onView?.(shown)} aria-label='View photo full screen'
+        style={{ padding: 0, border: `1px solid ${c.border}`, borderRadius: r.md, background: c.surface.elevated, overflow: 'hidden', cursor: 'pointer', height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted }}>
+        {src ? <img src={src} alt='' style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+          : <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, fontSize: 13 }}><Camera size={28} weight='regular' />Waiting for photo</span>}
+      </button>
+      <div style={{ display: 'flex', gap: sp.sm }}>
+        <button onClick={() => openFilePicker(libRef)} disabled={busy} style={btn}><ImageIcon size={18} weight='regular' />Replace</button>
+        <button onClick={takePhoto} disabled={busy} style={btn}><Camera size={18} weight='regular' />Retake</button>
+        <button onClick={remove} disabled={busy} aria-label='Remove photo' style={{ ...btn, flex: '0 0 46px', color: c.error }}><Trash size={18} weight='regular' /></button>
+      </div>
+      {busy ? <span style={{ color: c.text.muted, fontSize: 12 }}>Preparing photo...</span> : null}
+      {hint && !busy ? <span style={{ color: c.text.secondary, fontSize: 12 }}>{hint}</span> : null}
+      {inputs}
+    </div>
+  )
+}
+
+function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, noun = 'aisle', builtins = aisles.AISLES, customAisles, members, selfPubkey, onClose, onSave, onDelete }) {
   const [text, setText] = useState('')
   const [qty, setQty] = useState(1)
   const [assignee, setAssignee] = useState(null)
@@ -4210,6 +4450,7 @@ function ItemSheet ({ open, item, kind, noun = 'aisle', builtins = aisles.AISLES
       <BottomSheet open={open} onClose={onClose} title='Edit item'>
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
           <Field value={text} onChange={setText} placeholder='Item' />
+          {kind !== 'note' ? <ItemPhotoField groupId={groupId} item={item} onView={onViewPhoto} onChanged={onPhotoChanged} /> : null}
           {/* Quantity is a grocery notion; chores/to-dos/generic lists have no use
               for it, so the stepper is grocery-only (the qty value is preserved). */}
           {isGrocery ? (
