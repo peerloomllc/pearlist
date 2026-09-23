@@ -346,7 +346,9 @@ function Field ({ value, onChange, placeholder, onEnter, autoFocus }) {
   )
 }
 
-function BottomSheet ({ open, onClose, title, children }) {
+// `z` lifts a sheet above the others. Every sheet shares zIndex 100, so without it
+// the one later in the page wins, whichever opened first.
+function BottomSheet ({ open, onClose, title, children, z = 100 }) {
   const [render, setRender] = useState(open)
   const [shown, setShown] = useState(false)
   useEffect(() => {
@@ -355,7 +357,7 @@ function BottomSheet ({ open, onClose, title, children }) {
   }, [open])
   if (!render) return null
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 100, background: shown ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0)', transition: 'background 280ms ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: z, background: shown ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0)', transition: 'background 280ms ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 600, background: c.surface.card, borderRadius: `${r.sheet}px ${r.sheet}px 0 0`, maxHeight: '85dvh', overflowY: 'auto', transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', padding: `${sp.sm}px ${sp.lg}px calc(var(--pear-safe-bottom) + ${sp.xl}px)` }}>
         <div style={{ width: 36, height: 4, borderRadius: 2, background: c.text.muted, margin: '6px auto 14px' }} />
         {title ? <h2 style={{ textAlign: 'center', fontSize: 17, fontWeight: 400, margin: `0 0 ${sp.base}px`, color: c.text.primary }}>{title}</h2> : null}
@@ -963,7 +965,10 @@ function ConfirmHost () {
   useEffect(() => { _askConfirm = (opts) => new Promise((resolve) => setState({ ...opts, resolve })); return () => { _askConfirm = null } }, [])
   const done = (v) => { const s = state; setState(null); s?.resolve(v) }
   return (
-    <BottomSheet open={!!state} onClose={() => done(false)} title={state?.title}>
+    // Above every other sheet: a confirmation is often asked FROM one (Remove photo
+    // from the photo menu over the item sheet), and ConfirmHost comes earlier in the
+    // page, so at the shared zIndex it opened hidden underneath them.
+    <BottomSheet open={!!state} onClose={() => done(false)} title={state?.title} z={200}>
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5, margin: `0 0 ${sp.base}px` }}>{state?.message}</p>
       {/* Equal-width buttons: the confirm and Cancel carry the same weight, so one
           does not read as the obvious choice by size alone. Applies to every
@@ -4346,9 +4351,9 @@ function ItemPhotoField ({ groupId, item, onView, onChanged }) {
   const [photo, setPhoto] = useState(item?.photo || null)
   const [busy, setBusy] = useState(false)
   const [hint, setHint] = useState(null)
-  useEffect(() => { setPhoto(item?.photo || null); setBusy(false); setHint(null) }, [item?.id, item?.photo?.hash])
+  const [menu, setMenu] = useState(false)
+  useEffect(() => { setPhoto(item?.photo || null); setBusy(false); setHint(null); setMenu(false) }, [item?.id, item?.photo?.hash])
   const shown = item ? { ...item, photo } : null
-  const preview = useItemPhoto(groupId, photo ? shown : null, 'full')
   const thumb = useItemPhoto(groupId, photo ? shown : null, 'thumb')
 
   async function takePhoto () {
@@ -4362,7 +4367,7 @@ function ItemPhotoField ({ groupId, item, onView, onChanged }) {
     // Measured on the emulator 2026-09-23. Ask for one more tap instead of failing
     // silently.
     if (r && r.prompted) { setHint('Camera allowed. Tap Take photo again.'); return }
-    setHint(null)
+    setHint(null); setMenu(false)
     camRef.current?.click()
   }
   async function onFile (e) {
@@ -4388,43 +4393,32 @@ function ItemPhotoField ({ groupId, item, onView, onChanged }) {
     setBusy(false)
   }
 
-  const btn = { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: sp.sm, padding: '10px 12px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 14, fontFamily: FONT, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1 }
-  const inputs = (
+  function choosePhoto () { setHint(null); setMenu(false); openFilePicker(libRef) }
+  function view () { setMenu(false); onView?.(shown) }
+
+  // Everything lives in a small menu so the sheet stays its old height: before this
+  // the preview and its buttons pushed Save and Delete off the bottom of the TCL.
+  const opt = { display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: '14px 4px', background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, color: c.text.primary, fontSize: 16, fontWeight: 300, fontFamily: FONT, cursor: 'pointer', textAlign: 'left' }
+  return (
     <>
+      <button onClick={() => { if (!busy) { setHint(null); setMenu(true) } }} disabled={busy} aria-label={photo ? 'Photo options' : 'Add photo'}
+        style={{ width: 48, flexShrink: 0, alignSelf: 'stretch', padding: 0, border: `1px solid ${c.border}`, borderRadius: r.md, background: c.surface.input, overflow: 'hidden', cursor: busy ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted, opacity: busy ? 0.5 : 1 }}>
+        {busy ? <Spinner size={20} />
+          : photo ? (thumb ? <img src={thumb} alt='' style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <ImageIcon size={22} weight='regular' />)
+          : <Camera size={22} weight='regular' />}
+      </button>
       <input ref={camRef} type='file' accept='image/*' capture='environment' style={{ display: 'none' }} onChange={onFile} />
       <input ref={libRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onFile} />
-    </>
-  )
-  if (!photo) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{ display: 'flex', gap: sp.sm }}>
-          <button onClick={takePhoto} disabled={busy} style={btn}><Camera size={18} weight='regular' />Take photo</button>
-          <button onClick={() => openFilePicker(libRef)} disabled={busy} style={btn}><ImageIcon size={18} weight='regular' />Choose photo</button>
+      <BottomSheet open={menu} onClose={() => setMenu(false)} title={photo ? 'Photo' : 'Add a photo'}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {photo ? <button onClick={view} style={{ ...opt, borderTop: 'none' }}><ImageIcon size={20} weight='regular' />View full screen</button> : null}
+          <button onClick={takePhoto} style={photo ? opt : { ...opt, borderTop: 'none' }}><Camera size={20} weight='regular' />{photo ? 'Retake' : 'Take photo'}</button>
+          {hint ? <span style={{ color: c.text.secondary, fontSize: 13, padding: '0 4px 10px 36px' }}>{hint}</span> : null}
+          <button onClick={choosePhoto} style={opt}><ImageIcon size={20} weight='regular' />{photo ? 'Replace from photos' : 'Choose photo'}</button>
+          {photo ? <button onClick={() => { setMenu(false); remove() }} style={{ ...opt, color: c.error }}><Trash size={20} weight='regular' />Remove photo</button> : null}
         </div>
-        {busy ? <span style={{ color: c.text.muted, fontSize: 12 }}>Preparing photo...</span> : null}
-        {hint && !busy ? <span style={{ color: c.text.secondary, fontSize: 12 }}>{hint}</span> : null}
-        {inputs}
-      </div>
-    )
-  }
-  const src = preview || thumb
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
-      <button onClick={() => onView?.(shown)} aria-label='View photo full screen'
-        style={{ padding: 0, border: `1px solid ${c.border}`, borderRadius: r.md, background: c.surface.elevated, overflow: 'hidden', cursor: 'pointer', height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted }}>
-        {src ? <img src={src} alt='' style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
-          : <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, fontSize: 13 }}><Camera size={28} weight='regular' />Waiting for photo</span>}
-      </button>
-      <div style={{ display: 'flex', gap: sp.sm }}>
-        <button onClick={() => openFilePicker(libRef)} disabled={busy} style={btn}><ImageIcon size={18} weight='regular' />Replace</button>
-        <button onClick={takePhoto} disabled={busy} style={btn}><Camera size={18} weight='regular' />Retake</button>
-        <button onClick={remove} disabled={busy} aria-label='Remove photo' style={{ ...btn, flex: '0 0 46px', color: c.error }}><Trash size={18} weight='regular' /></button>
-      </div>
-      {busy ? <span style={{ color: c.text.muted, fontSize: 12 }}>Preparing photo...</span> : null}
-      {hint && !busy ? <span style={{ color: c.text.secondary, fontSize: 12 }}>{hint}</span> : null}
-      {inputs}
-    </div>
+      </BottomSheet>
+    </>
   )
 }
 
@@ -4449,8 +4443,10 @@ function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, no
     <>
       <BottomSheet open={open} onClose={onClose} title='Edit item'>
         <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
-          <Field value={text} onChange={setText} placeholder='Item' />
-          {kind !== 'note' ? <ItemPhotoField groupId={groupId} item={item} onView={onViewPhoto} onChanged={onPhotoChanged} /> : null}
+          <div style={{ display: 'flex', gap: sp.sm, alignItems: 'stretch' }}>
+            {kind !== 'note' ? <ItemPhotoField groupId={groupId} item={item} onView={onViewPhoto} onChanged={onPhotoChanged} /> : null}
+            <div style={{ flex: 1, minWidth: 0 }}><Field value={text} onChange={setText} placeholder='Item' /></div>
+          </div>
           {/* Quantity is a grocery notion; chores/to-dos/generic lists have no use
               for it, so the stepper is grocery-only (the qty value is preserved). */}
           {isGrocery ? (
