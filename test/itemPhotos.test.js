@@ -278,6 +278,27 @@ test('a replaced photo waits out the grace period, then goes', async () => {
   h.cut(); await h.A.engine.close(); await h.B.engine.close()
 })
 
+test('a replaced photo goes at once when its item is deleted afterwards', async () => {
+  const h = await household('ph13')
+  const itemId = await addItem(h.A, h.groupId, h.listId, 'Chili oil')
+  const old = (await h.A.call('item:setPhoto', { groupId: h.groupId, listId: h.listId, itemId, ...photoPair() })).photo
+  const cur = (await h.A.call('item:setPhoto', { groupId: h.groupId, listId: h.listId, itemId, ...photoPair() })).photo
+  assert.equal((await h.A.call('photo:maintain', {})).cleared, 0, 'the replaced one is waiting')
+  await h.A.call('item:delete', { groupId: h.groupId, listId: h.listId, itemId })
+  // No clock moved: a deleted item cannot come back, so neither can its old photo.
+  assert.equal((await h.A.call('photo:maintain', {})).cleared, 2)
+  assert.equal(await holds(h.A, old.key, old.id), false)
+  assert.equal(await holds(h.A, cur.key, cur.id), false)
+  h.cut(); await h.A.engine.close(); await h.B.engine.close()
+})
+
+test('sweepDecision: every item that used it is deleted, so no grace', () => {
+  const sets = { live: new Map(), final: new Set(), deadItems: new Set(['g/L/i1']), unknownGroups: new Set(), joined: new Set(['g']) }
+  assert.equal(sweepDecision({ groups: ['g'], items: ['g/L/i1'] }, 'h', sets, Date.now(), REPLACED_GRACE_MS), 'clear')
+  assert.equal(sweepDecision({ groups: ['g'], items: ['g/L/i1', 'g/L/i2'] }, 'h', sets, Date.now(), REPLACED_GRACE_MS), 'mark',
+    'one item still alive: wait out the grace period')
+})
+
 test('removing a photo also waits out the grace period', async () => {
   const h = await household('ph7')
   const itemId = await addItem(h.A, h.groupId, h.listId, 'Milk')

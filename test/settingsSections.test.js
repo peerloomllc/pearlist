@@ -142,7 +142,9 @@ test('the profile block is a compact row, not three stacked blocks', () => {
   // The avatar IS the photo control now, which is what buys back the button's height.
   const at = body.indexOf('<Avatar')
   const before = body.slice(Math.max(0, at - 400), at)
-  assert.match(before, /fileRef\.current\?\.click\(\)/, 'tapping the avatar picks a photo')
+  // openFilePicker tells the shell first, so the freeze recovery cannot reload the
+  // page while the picker is open and lose the photo (src/ui/App.jsx).
+  assert.match(before, /openFilePicker\(fileRef\)/, 'tapping the avatar picks a photo')
   assert.match(before, /aria-label=/, 'and it is labelled, since it is now a control')
 
   // Remove must still appear when a photo is set - shrinking a block is not a licence

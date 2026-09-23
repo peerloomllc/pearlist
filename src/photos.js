@@ -8,7 +8,8 @@
 // in the author's blob core. Additive like `category`: old peers store it verbatim.
 //
 // What this device HOLDS is tracked in localDb under `photoref:{hash}`:
-//   { key, id, tkey, tid, size, tsize, groups: [groupId], deadSince? }
+//   { key, id, tkey, tid, size, tsize, groups: [groupId], items: [itemRef], deadSince? }
+// `items` are the rows this device has seen use the photo, as groupId/listId/itemId.
 // The cleanup sweep clears ONLY ranges recorded there. It never walks the blob core,
 // so it cannot touch an avatar in the same core or anything a later feature adds.
 //
@@ -69,6 +70,9 @@ const fullCache = lru(6)
 const cacheFor = (size) => (size === 'full' ? fullCache : thumbCache)
 const toDataUrl = (type, bytes) => `data:${type || 'image/jpeg'};base64,${b4a.toString(bytes, 'base64')}`
 
+const itemRef = (groupId, listId, itemId) => `${groupId}/${listId}/${itemId}`
+const ITEMS_CAP = 50
+
 async function readRef (ctx, hash) {
   try { return (await ctx.localDb.get(PREFIX + hash))?.value || null } catch { return null }
 }
@@ -76,14 +80,16 @@ async function readRef (ctx, hash) {
 // Record that this device holds a photo for `groupId`. Merges groups so the same
 // bytes on items in two spaces stay alive while either space still uses them.
 // Drops any deadSince mark: every caller is handling a photo that is in use.
-async function recordRef (ctx, photo, groupId, extra = {}) {
+async function recordRef (ctx, photo, groupId, extra = {}, at = null) {
   const prev = await readRef(ctx, photo.hash)
   const groups = new Set(prev?.groups || [])
   if (groupId) groups.add(groupId)
+  const items = new Set(prev?.items || [])
+  if (at) items.add(at)
   const next = {
     key: photo.key, id: photo.id, tkey: photo.tkey, tid: photo.tid,
     size: extra.size ?? prev?.size ?? 0, tsize: extra.tsize ?? prev?.tsize ?? 0,
-    groups: [...groups],
+    groups: [...groups], items: [...items].slice(-ITEMS_CAP),
   }
   await ctx.localDb.put(PREFIX + photo.hash, next)
   return next
@@ -102,23 +108,30 @@ async function recordRef (ctx, photo, groupId, extra = {}) {
 // reference to it we can see is on a tombstoned item or inside a deleted list.
 // Tombstones cannot be undone (the no-resurrection rule), so nothing can bring
 // those rows back.
+//
+// `deadItems` holds every tombstoned item and every item in a deleted list, photo
+// or not, as an itemRef. A photo that was REPLACED on an item that has since been
+// deleted is no longer on any row, so only this can tell the sweep it is final.
 function liveSet (spaces) {
   const live = new Map()   // hash -> { photo, groupId, listId, itemId }
   const final = new Set()
+  const deadItems = new Set()
   const unknownGroups = new Set()
   for (const s of spaces) {
     if (!s.mounted) { unknownGroups.add(s.groupId); continue }
     const deletedLists = new Set()
     for (const l of s.lists) if (l && l.deleted && l.id) deletedLists.add(l.id)
     for (const it of s.items) {
-      if (!it || !isPhoto(it.photo)) continue
+      if (!it) continue
       const dead = it.deleted === true || deletedLists.has(it.listId)
+      if (dead && it.id) deadItems.add(itemRef(s.groupId, it.listId, it.id))
+      if (!isPhoto(it.photo)) continue
       if (dead) { final.add(it.photo.hash); continue }
       if (!live.has(it.photo.hash)) live.set(it.photo.hash, { photo: it.photo, groupId: s.groupId, listId: it.listId, itemId: it.id })
     }
   }
   for (const h of live.keys()) final.delete(h)
-  return { live, final, unknownGroups }
+  return { live, final, deadItems, unknownGroups }
 }
 
 // What the sweep does with one recorded photo. Pure.
@@ -128,10 +141,13 @@ function liveSet (spaces) {
 //   'mark'   - newly dead, start the grace period
 //   'wait'   - dead, grace period still running
 //   'clear'  - clear the bytes now
-function sweepDecision (ref, hash, { live, final, unknownGroups, joined }, now, graceMs) {
+function sweepDecision (ref, hash, { live, final, deadItems = new Set(), unknownGroups, joined }, now, graceMs) {
   if (live.has(hash)) return ref.deadSince ? 'revive' : 'keep'
   const groups = ref.groups || []
   if (groups.some((g) => unknownGroups.has(g))) return 'keep'
+  // Every item seen using it is gone for good, or in a space this phone left.
+  const items = ref.items || []
+  if (items.length && items.every((k) => deadItems.has(k) || !joined.has(k.split('/')[0]))) return 'clear'
   // Every space it belonged to is gone from this device: nothing here can use it.
   const allLeft = groups.length > 0 && groups.every((g) => !joined.has(g))
   if (allLeft || final.has(hash)) return 'clear'
@@ -170,7 +186,7 @@ async function clearRange (ctx, key, id) {
 // Fetch a photo's bytes from wherever they are (this device or a peer) and record
 // that we now hold them. Background use only: it can wait PEER_FETCH_TIMEOUT_MS.
 const inflight = new Map() // `${hash}:${size}` -> Promise
-function fetchInBackground (ctx, photo, groupId, size) {
+function fetchInBackground (ctx, photo, groupId, size, at = null) {
   const k = photo.hash + ':' + size
   if (inflight.has(k)) return inflight.get(k)
   const p = (async () => {
@@ -178,7 +194,7 @@ function fetchInBackground (ctx, photo, groupId, size) {
     const bytes = await ctx.blobs.get(ref, { timeout: PEER_FETCH_TIMEOUT_MS })
     if (!bytes) return false
     cacheFor(size).set(k, toDataUrl(photo.type, bytes))
-    await recordRef(ctx, photo, groupId, size === 'full' ? { size: bytes.length } : { tsize: bytes.length })
+    await recordRef(ctx, photo, groupId, size === 'full' ? { size: bytes.length } : { tsize: bytes.length }, at)
     return true
   })().catch(() => false).finally(() => inflight.delete(k))
   inflight.set(k, p)
@@ -187,15 +203,15 @@ function fetchInBackground (ctx, photo, groupId, size) {
 
 // Download whichever of the thumbnail and full image this device lacks, thumbnail
 // first. Returns how many it fetched.
-async function fetchMissing (ctx, photo, groupId) {
+async function fetchMissing (ctx, photo, groupId, at = null) {
   const ref = await readRef(ctx, photo.hash)
   if (ref && ref.tsize && ref.size) {
-    if (!(ref.groups || []).includes(groupId)) await recordRef(ctx, photo, groupId)
+    if (!(ref.groups || []).includes(groupId) || (at && !(ref.items || []).includes(at))) await recordRef(ctx, photo, groupId, {}, at)
     return 0
   }
   let n = 0
-  if (!(ref && ref.tsize) && await fetchInBackground(ctx, photo, groupId, 'thumb')) n++
-  if (!(ref && ref.size) && await fetchInBackground(ctx, photo, groupId, 'full')) n++
+  if (!(ref && ref.tsize) && await fetchInBackground(ctx, photo, groupId, 'thumb', at)) n++
+  if (!(ref && ref.size) && await fetchInBackground(ctx, photo, groupId, 'full', at)) n++
   return n
 }
 
@@ -206,7 +222,7 @@ async function maintain (ctx, { now = Date.now(), graceMs = REPLACED_GRACE_MS } 
   const sets = liveSet(spaces)
   const joined = new Set(spaces.map((s) => s.groupId))
   let fetched = 0
-  for (const [, { photo, groupId }] of sets.live) fetched += await fetchMissing(ctx, photo, groupId)
+  for (const [, { photo, groupId, listId, itemId }] of sets.live) fetched += await fetchMissing(ctx, photo, groupId, itemRef(groupId, listId, itemId))
   let cleared = 0
   const refs = []
   for await (const { key, value } of ctx.localDb.createReadStream({ gt: PREFIX, lt: PREFIX + '~' })) refs.push([key.slice(PREFIX.length), value])
@@ -255,10 +271,10 @@ function ensureMaintainTimer (ctx) {
 const prefetching = new Set()
 function prefetchRows (ctx, groupId, rows) {
   ensureMaintainTimer(ctx)
-  const photos = rows.filter((it) => it && !it.deleted && isPhoto(it.photo)).map((it) => it.photo)
-  if (!photos.length || prefetching.has(groupId)) return
+  const withPhotos = rows.filter((it) => it && !it.deleted && isPhoto(it.photo))
+  if (!withPhotos.length || prefetching.has(groupId)) return
   prefetching.add(groupId)
-  ;(async () => { for (const p of photos) await fetchMissing(ctx, p, groupId) })()
+  ;(async () => { for (const it of withPhotos) await fetchMissing(ctx, it.photo, groupId, itemRef(groupId, it.listId, it.id)) })()
     .catch(() => {}).finally(() => prefetching.delete(groupId))
 }
 
@@ -296,7 +312,7 @@ function photoMethods ({ viewFor, readRow, putRow }) {
         key: ref.key, id: ref.id, tkey: ref.tkey, tid: ref.tid, hash, type: full.type,
         w: Number.isFinite(w) ? Math.round(w) : undefined, h: Number.isFinite(h) ? Math.round(h) : undefined,
       }
-      await recordRef(ctx, value, groupId, { size: full.bytes.length, tsize: small.bytes.length })
+      await recordRef(ctx, value, groupId, { size: full.bytes.length, tsize: small.bytes.length }, itemRef(groupId, listId, itemId))
       fullCache.set(hash + ':full', String(photo))
       thumbCache.set(hash + ':thumb', String(thumb))
       await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, photo: value })
@@ -320,7 +336,7 @@ function photoMethods ({ viewFor, readRow, putRow }) {
         const bytes = await ctx.blobs.get(refp, { timeout: LOCAL_READ_TIMEOUT_MS })
         if (bytes) { const url = toDataUrl(p.type, bytes); cacheFor(sz).set(k, url); return url }
       }
-      fetchInBackground(ctx, p, groupId, sz)
+      fetchInBackground(ctx, p, groupId, sz, itemRef(groupId, listId, itemId))
       return null
     },
 
