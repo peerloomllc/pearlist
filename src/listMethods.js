@@ -18,6 +18,7 @@ const relay = require('./relay')
 const { collapseMembers, sameIdentityKeys, identityRootOf, evictionTargets, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
 const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, setSpaceMirror, putSpaceRecord, delSpaceRecord, _trace: _dlTrace } = require('./deviceLink')
 const { decideProfileMirror, shouldFetchAvatar } = require('./profileSync')
+const { photoMethods, prefetchRows } = require('./photos')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -2363,6 +2364,8 @@ const methods = {
         ? { ...value, checked: effectiveChecked(value, now), nextDueAt: nextDueAt(value, now) }
         : value)
     }
+    // Items with a photo this device does not hold yet: download in the background.
+    prefetchRows(ctx, groupId, out)
     return out
   },
 
@@ -2432,6 +2435,9 @@ const methods = {
     return { categorized }
   },
 }
+
+// Photos on items (src/photos.js). Spread in last so the helpers above are defined.
+Object.assign(methods, photoMethods({ viewFor, readRow, putRow }))
 
 module.exports = methods
 // Exported for tests only. isUntouchedProfile decides whether the linked-device
