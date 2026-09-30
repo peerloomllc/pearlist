@@ -240,6 +240,8 @@ NEXT_BUILD="$NEXT_BUILD" node -e "
 "
 
 # ── Archive ─────────────────────────────────────────────────────────────────
+# $HOME, not ~: inside the quotes ~ is never expanded, and codesign then fails with
+# "no identity found" (it did on Xcode 27, 2026-09-28).
 rm -rf "$ARCHIVE_PATH"
 echo "Archiving..."
 PATH="$XCODE_PATH" xcodebuild \
@@ -249,7 +251,7 @@ PATH="$XCODE_PATH" xcodebuild \
   -destination "generic/platform=iOS" \
   -archivePath "$ARCHIVE_PATH" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
-  OTHER_CODE_SIGN_FLAGS="--keychain ~/Library/Keychains/buildkey.keychain" \
+  OTHER_CODE_SIGN_FLAGS="--keychain $HOME/Library/Keychains/buildkey.keychain" \
   archive 2>&1 | tee /tmp/${APP_NAME}-archive.log | grep -E "^(error:|warning:|note:|.*ARCHIVE)|: error:" || true
 # xcodebuild's failure is masked by the grep pipe above, so verify the archive
 # actually exists rather than pressing on to a confusing "archive not found".
@@ -280,7 +282,8 @@ echo "Export complete: $IPA_PATH"
 # ── Upload ──────────────────────────────────────────────────────────────────
 echo "Uploading to App Store Connect..."
 if $USE_ASC; then
-  asc builds upload --app "$ASC_APP_ID" --ipa "$IPA_PATH"
+  # The default timeout cut a ~190 MB PearCinema upload off partway on 2026-09-28.
+  ASC_UPLOAD_TIMEOUT="${ASC_UPLOAD_TIMEOUT:-1200s}" asc builds upload --app "$ASC_APP_ID" --ipa "$IPA_PATH"
 else
   xcrun altool \
     --upload-app \
