@@ -16,6 +16,7 @@ import { isMyRow, isMine } from '../selfKeys.js'
 import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
+import { nextOccurrence } from '../repeatTime.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
@@ -2901,6 +2902,11 @@ export default function App () {
         onSave={async (patch) => {
           await call('item:edit', { groupId: gid, listId: openListId, itemId: sheet.item.id, text: patch.text, qty: patch.qty, note: patch.note, url: patch.url })
           await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee })
+          // Repeat first: item:setReminder accepts a past time only on an item that
+          // already repeats, so turning both on in one save needs this order.
+          if ((patch.repeat || '') !== (sheet.item.repeat || '')) {
+            await call('item:setRepeat', { groupId: gid, listId: openListId, itemId: sheet.item.id, repeat: patch.repeat || null }).catch(() => {})
+          }
           // Only write when it actually changed: item:setReminder rejects a past
           // time, and re-sending an untouched old reminder would fail the save for
           // no reason. Non-fatal either way - a rejected reminder must not lose
@@ -2909,9 +2915,6 @@ export default function App () {
           if ((patch.remindAt ?? null) !== prevRemind) {
             try { await call('item:setReminder', { groupId: gid, listId: openListId, itemId: sheet.item.id, remindAt: patch.remindAt ?? null }) }
             catch (e) { alert(problem('Could not set that reminder', e)) }
-          }
-          if ((patch.repeat || '') !== (sheet.item.repeat || '')) {
-            await call('item:setRepeat', { groupId: gid, listId: openListId, itemId: sheet.item.id, repeat: patch.repeat || null }).catch(() => {})
           }
           if (patch.catTouched) {
             const cat = patch.category || ''
@@ -4437,6 +4440,9 @@ function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, no
   const [pickWhen, setPickWhen] = useState(false)
   useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null); setRepeat(item.repeat || '') } }, [open, item])
   if (!item) return null
+  // A repeating reminder's stored time is its FIRST ring, which may be long past.
+  // Show the next one instead (src/repeatTime.js).
+  const shownAt = remindAt && repeat ? (nextOccurrence(remindAt, repeat, Date.now()) ?? remindAt) : remindAt
   const isGrocery = kind === 'grocery'
   const nounLabel = noun.charAt(0).toUpperCase() + noun.slice(1) // "Aisle" / "Section"
   return (
@@ -4479,11 +4485,11 @@ function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, no
             <span style={{ color: c.text.secondary, fontSize: 14, width: FIELD_LABEL_W, flexShrink: 0 }}>Remind</span>
             <button onClick={() => setPickWhen(true)} aria-label='Reminder time'
               style={{ flex: 1, minWidth: 0, padding: '10px 12px', textAlign: 'left', background: c.surface.input, color: remindAt ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, cursor: 'pointer' }}>
-              {remindAt ? whenLabel(remindAt) : 'Never'}
+              {remindAt ? whenLabel(shownAt) : 'Never'}
             </button>
             {remindAt ? <button onClick={() => setRemindAt(null)} aria-label='Clear reminder' style={{ width: 46, flexShrink: 0, height: 42, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.error, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash size={18} weight='regular' /></button> : null}
           </div>
-          {remindAt && remindAt <= Date.now()
+          {remindAt && !repeat && remindAt <= Date.now()
             ? <span style={{ color: c.error, fontSize: 12, marginTop: -6 }}>That time has already passed, so nothing would fire. Pick a later one.</span>
             : null}
           {/* A chore that comes back. Nothing resets it on a timer: checking it off
@@ -4514,7 +4520,7 @@ function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, no
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>
-      <WhenSheet open={pickWhen} value={remindAt} onClose={() => setPickWhen(false)}
+      <WhenSheet open={pickWhen} value={shownAt} onClose={() => setPickWhen(false)}
         onPick={(ms) => setRemindAt(ms)} onClear={() => setRemindAt(null)} />
       <AssigneePickerSheet open={picking} onClose={() => setPicking(false)} members={members} selfPubkey={selfPubkey} current={assignee} onPick={(pk) => setAssignee(pk)} />
       <AislePickerSheet open={pickingAisle} onClose={() => setPickingAisle(false)} noun={noun} builtins={builtins} current={category} custom={customAisles} onPick={(a) => { setCategory(a); setCatTouched(true) }} />

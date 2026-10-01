@@ -56,6 +56,7 @@ function memberKey (pubkey) { return 'member:' + pubkey }
 const LIST_RANGE = { gt: 'list:', lt: 'list:~' }
 const MEMBER_RANGE = { gt: 'member:', lt: 'member:~' }
 const { sameIdentityKeys, identityRootOf } = require('./memberIdentity')
+const { occurrencesAfter } = require('./repeatTime')
 
 // Does `candidate` prove the same identity root as `ownerPubkey`? The gate on the
 // same-identity ownership transfer in the `space` branch, and - since 2026-07-31 -
@@ -750,12 +751,28 @@ function isSelfKey (self, target) {
 // A checked item never rings: finishing something early is the normal way to
 // cancel a reminder, and it must not still fire.
 function isReminderPending (item, list, selfKey, now) {
-  // effectiveChecked, not item.checked: a recurring chore completed LAST period
-  // is open again and must ring, and one completed this period must not.
-  if (!item || item.deleted === true || effectiveChecked(item, now)) return false
-  if (typeof item.remindAt !== 'number' || !Number.isFinite(item.remindAt)) return false
-  if (item.remindAt <= now) return false // already past; the OS has fired it or it was missed
+  if (!reminderTimes(item, now, 1).length) return false
   return isSelfKey(selfKey, reminderTargetOf(item, list))
+}
+
+// How many rings of a repeating reminder to book ahead. The shell only reconciles
+// while the app runs, so a daily reminder booked one ring at a time stopped after
+// the first night the app stayed closed. About a week of each.
+const REMINDER_LOOKAHEAD = { daily: 7, weekly: 4, monthly: 3 }
+
+// Every upcoming ring for this row, soonest first. A plain reminder rings once, at
+// remindAt, unless the item is already checked. A repeating one rings at remindAt
+// and then every period after it (src/repeatTime.js), skipping any ring that falls
+// in a period the chore is already done for: done today means tonight stays quiet
+// and tomorrow still rings. Only the current period can be skipped that way, since
+// lastDoneAt is never in the future.
+function reminderTimes (item, now, max) {
+  if (!item || item.deleted === true) return []
+  const at = item.remindAt
+  if (typeof at !== 'number' || !Number.isFinite(at)) return []
+  const kind = repeatOf(item)
+  if (!kind) return at > now && !effectiveChecked(item, now) ? [at] : []
+  return occurrencesAfter(at, kind, now, max ?? REMINDER_LOOKAHEAD[kind], (t) => !effectiveChecked(item, t))
 }
 
 // iOS keeps at most 64 pending local notifications per app and SILENTLY drops the
@@ -763,4 +780,4 @@ function isReminderPending (item, list, selfKey, now) {
 // fire. 32 leaves generous headroom, plus a slot for the daily digest.
 const MAX_SCHEDULED_REMINDERS = 32
 
-module.exports = { applyListOp, rowApplyDecision, sameIdentityAsOwner, myDeviceKeys, isSelfKey, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
+module.exports = { applyListOp, rowApplyDecision, sameIdentityAsOwner, myDeviceKeys, isSelfKey, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, FUTURE_TS_TOLERANCE_MS, LIST_KINDS, normalizeKind, NOTIFY_MODES, normalizeNotifyMode, effectiveNotifyMode, isEvicted, isMemberVisible, writerKeyOf, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, hasCap, allMembersSupportCap, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, reminderTargetOf, isReminderPending, reminderTimes, REMINDER_LOOKAHEAD, MAX_SCHEDULED_REMINDERS, REPEAT_KINDS, normalizeRepeat, periodStart, isRecurringOpen, effectiveChecked, nextDueAt }
