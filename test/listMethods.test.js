@@ -1483,11 +1483,16 @@ test('reminder:pending skips a recurring chore already done this period', async 
   const { listId } = await call('list:create', { groupId, name: 'Jobs', kind: 'chore' })
   const { itemId } = await call('item:add', { groupId, listId, text: 'bins' })
   await call('item:setRepeat', { groupId, listId, itemId, repeat: 'weekly' })
-  await call('item:setReminder', { groupId, listId, itemId, remindAt: Date.now() + 60 * 60 * 1000 })
+  const first = Date.now() + 60 * 60 * 1000
+  await call('item:setReminder', { groupId, listId, itemId, remindAt: first })
 
-  assert.equal((await call('reminder:pending', {})).reminders.length, 1)
+  assert.equal((await call('reminder:pending', {})).reminders[0].remindAt, first)
   await call('item:toggle', { groupId, listId, itemId, checked: true })
-  assert.equal((await call('reminder:pending', {})).reminders.length, 0, 'done this week, so it must not ring')
+  // Done this week, so this week's ring is gone. Later weeks still ring.
+  const [row] = await call('item:getAll', { groupId, listId })
+  const after = (await call('reminder:pending', {})).reminders
+  assert.ok(after.length > 0, 'next week still rings')
+  assert.ok(after.every((r) => r.remindAt >= row.nextDueAt), 'nothing rings before it is due again')
   await engine.close()
 })
 
@@ -1545,5 +1550,28 @@ test('reminder:pending distinguishes "none exist" from "none are MINE"', async (
   s = await call('reminder:pending', {})
   assert.deepEqual([s.reminders.length, s.elsewhere], [0, 1],
     'these two cases look identical without the count, which is what made a working iPhone look broken')
+  await engine.close()
+})
+
+// A repeating item's reminder rings every period (test/repeatingReminders.test.js
+// has the date maths). Here: the past time is accepted, and each booked ring gets
+// its own OS identifier.
+test('a repeating item accepts a past reminder and books several rings ahead', async () => {
+  const { engine, call } = driver()
+  await call('init', {})
+  const { groupId } = await call('group:create', { name: 'H' })
+  const { listId } = await call('list:create', { groupId, name: 'To do', kind: 'todo' })
+  const { itemId } = await call('item:add', { groupId, listId, text: 'pills' })
+  const lastNight = Date.now() - 12 * 60 * 60 * 1000
+
+  await assert.rejects(call('item:setReminder', { groupId, listId, itemId, remindAt: lastNight }), /already passed/, 'a one-off still refuses')
+  await call('item:setRepeat', { groupId, listId, itemId, repeat: 'daily' })
+  await call('item:setReminder', { groupId, listId, itemId, remindAt: lastNight })
+
+  const { reminders } = await call('reminder:pending', {})
+  assert.equal(reminders.length, 7, 'a week of rings')
+  assert.equal(new Set(reminders.map((r) => r.key)).size, 7, 'one identifier per ring, or the OS keeps only one')
+  assert.ok(reminders.every((r) => r.key.startsWith(`item:${listId}:${itemId}@`) && r.itemId === itemId))
+  assert.ok(reminders[0].remindAt > Date.now() && reminders[0].remindAt <= Date.now() + 24 * 60 * 60 * 1000, 'next one within a day')
   await engine.close()
 })

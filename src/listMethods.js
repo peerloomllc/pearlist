@@ -10,7 +10,7 @@ const { defaultEncodeInvite } = require('@peerloom/core/engine')
 const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
-const { sameIdentityAsOwner, myDeviceKeys, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
+const { sameIdentityAsOwner, myDeviceKeys, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, reminderTimes, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave } = require('./noteText')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
@@ -2262,7 +2262,9 @@ const methods = {
   //
   // Refuses a time in the past. Scheduling one would be a silent no-op (the OS
   // fires nothing) and it would then sit on the row looking set forever, which is
-  // worse than an error the UI can show.
+  // worse than an error the UI can show. A REPEATING item is the exception: its
+  // remindAt is the first ring and later ones follow from it, so a past one still
+  // rings tomorrow (listWire reminderTimes).
   'item:setReminder': async ({ groupId, listId, itemId, remindAt }, ctx) => {
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))
@@ -2271,7 +2273,7 @@ const methods = {
     if (remindAt !== null && remindAt !== undefined) {
       const t = Number(remindAt)
       if (!Number.isFinite(t)) throw new Error('remindAt must be a timestamp')
-      if (t <= Date.now()) throw new Error('that time has already passed')
+      if (t <= Date.now() && !normalizeRepeat(existing.repeat)) throw new Error('that time has already passed')
       next = Math.trunc(t)
     }
     // Record WHO asked. reminderTargetOf uses it so the reminder rings on the
@@ -2313,16 +2315,24 @@ const methods = {
         const myKeys = await myDeviceKeys({ view: base.view, groupId, selfKey })
         for (const [listId, list] of lists) {
           for await (const { value: it } of base.view.createReadStream(itemRange(listId))) {
+            const times = reminderTimes(it, now)
+            if (!times.length) continue
             if (!isReminderPending(it, list, myKeys, now)) {
               // Would have been pending for SOMEONE, just not us.
-              if (it && !it.deleted && !effectiveChecked(it, now) && typeof it.remindAt === 'number' && it.remindAt > now && reminderTargetOf(it, list)) elsewhere++
+              if (reminderTargetOf(it, list)) elsewhere++
               continue
             }
-            out.push({
-              key: itemKey(listId, it.id), groupId, listId, itemId: it.id,
-              text: String(it.text || 'an item'), listName: String(list.name || 'a list'),
-              kind: list.kind || 'list', remindAt: it.remindAt,
-            })
+            // A repeating item books several rings ahead, one OS notification each,
+            // so each needs its own identifier. The ring time keeps it stable across
+            // reconciles. A one-off keeps the bare item key it always had.
+            const repeats = !!normalizeRepeat(it.repeat)
+            for (const t of times) {
+              out.push({
+                key: repeats ? `${itemKey(listId, it.id)}@${t}` : itemKey(listId, it.id), groupId, listId, itemId: it.id,
+                text: String(it.text || 'an item'), listName: String(list.name || 'a list'),
+                kind: list.kind || 'list', remindAt: t,
+              })
+            }
           }
         }
       } catch { continue }

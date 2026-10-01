@@ -415,7 +415,7 @@ test('digest survives a nameless list rather than quoting an empty string', () =
 
 // --- per-item reminders (P2 of 2026-07-27-reminder-notifications.md) --------
 
-const { reminderTargetOf, isReminderPending, MAX_SCHEDULED_REMINDERS } = require('../src/listWire')
+const { reminderTargetOf, isReminderPending, reminderTimes, MAX_SCHEDULED_REMINDERS } = require('../src/listWire')
 
 const KID = 'k'.repeat(64)
 const PARENT = 'p'.repeat(64)
@@ -551,7 +551,8 @@ test('a recurring chore done this period does NOT ring its reminder', () => {
   const list = { createdBy: PUB }
   const base = { repeat: 'weekly', assignee: PUB, remindAt: at(2026, 7, 29, 18, 0) }
   assert.equal(isReminderPending(base, list, PUB, wed), true, 'not done this week, so it rings')
-  assert.equal(isReminderPending({ ...base, lastDoneAt: at(2026, 7, 27) }, list, PUB, wed), false, 'already done this week')
+  // Done this week: this week's ring is skipped, but next week's is still booked.
+  assert.deepEqual(reminderTimes({ ...base, lastDoneAt: at(2026, 7, 27) }, wed, 1), [at(2026, 8, 5, 18, 0)], 'already done this week')
   assert.equal(isReminderPending({ ...base, lastDoneAt: at(2026, 7, 20) }, list, PUB, wed), true, 'done last week, so it is back')
   // The old rule (raw `checked`) would have silenced this one forever.
   assert.equal(isReminderPending({ ...base, checked: true, lastDoneAt: at(2026, 7, 20) }, list, PUB, wed), true)
