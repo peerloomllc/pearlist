@@ -170,39 +170,6 @@ _asc_auth_linux() {
     --private-key "$key_file" >/dev/null 2>&1
 }
 
-# ---------------------------------------------------------------------------
-# _asc_build_id <buildNumber>
-#
-# Prints "<uuid> <processingState>" for the build with that CFBundleVersion, or
-# nothing if App Store Connect has not registered it yet. `asc builds list`
-# reports CFBundleVersion in `version` (NOT the marketing version), and build
-# numbers are unique per app, so this is an exact match rather than a guess.
-# ---------------------------------------------------------------------------
-# The newest build App Store Connect knows about, as "id STATE version". Used
-# when the build number could not be read back from the Mac.
-_asc_newest_build() {
-  asc builds list --app "$ASC_APP_ID" --limit 20 --output json 2>/dev/null \
-    | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-items = d.get('data', d if isinstance(d, list) else [])
-best = None
-for x in items:
-    a = x.get('attributes', x)
-    try:
-        n = int(str(a.get('version', '')).strip())
-    except ValueError:
-        continue
-    if best is None or n > best[0]:
-        best = (n, x.get('id', ''), a.get('processingState', 'UNKNOWN'))
-if best:
-    print('%s %s %s' % (best[1], best[2], best[0]))
-"
-}
-
 # Uses $REPO_ROOT so this works regardless of invocation directory.
 # ---------------------------------------------------------------------------
 
@@ -2209,12 +2176,12 @@ if priors:
       # build is safe because ios-appstore.sh takes its number from
       # `asc builds next-build-number`, which is the app-wide max + 1 - so the
       # build this run just uploaded IS the newest one.
-      if [ -n "${_ios_build_number:-}" ]; then
-        _BUILD_INFO=$(_asc_build_id "$_ios_build_number")
-      else
-        _BUILD_INFO=$(_asc_newest_build)
-        [ -n "$_BUILD_INFO" ] && echo "    Using the newest build on App Store Connect: ${_BUILD_INFO##* } (${_BUILD_INFO%% *})"
-      fi
+      # _asc_wait_for_build waits for Apple to finish processing and matches the
+      # marketing version too, since build numbers repeat across versions. With
+      # no number it takes the newest build of this version.
+      _BUILD_INFO=$(_asc_wait_for_build "$APP_VERSION" "${_ios_build_number:-}")
+      [ -z "${_ios_build_number:-}" ] && [ -n "$_BUILD_INFO" ] \
+        && echo "    Using the newest ${APP_VERSION} build on App Store Connect (${_BUILD_INFO%% *})"
       _BUILD_ID="${_BUILD_INFO%% *}"
       _BUILD_STATE=$(printf '%s' "$_BUILD_INFO" | cut -d' ' -f2)
 
@@ -2227,24 +2194,16 @@ if priors:
         echo "    Build ${_ios_build_number} is still ${_BUILD_STATE}, not VALID."
         echo "    Wait for processing to finish, then re-run. Skipping submission."
       else
-        echo "    Attaching build ${_ios_build_number:-${_BUILD_INFO##* }} (${_BUILD_ID})..."
         # FATAL, not a warning. This used to be `|| echo WARNING (it may already be
         # attached)`, so a genuine failure carried on into submission and surfaced
         # as "The build associated with appStoreVersions ... was not found" - a
         # message that points nowhere near the real cause. If the build will not
         # attach there is nothing to submit, so stop here and say so.
-        if ! asc versions attach-build --version-id "$ASC_VERSION_ID" --build "$_BUILD_ID" >/dev/null 2>&1; then
-          # Already-attached is the one benign failure, so check before giving up.
-          if asc versions get --version-id "$ASC_VERSION_ID" --output json 2>/dev/null | grep -q "$_BUILD_ID"; then
-            echo "    Build is already attached to ${APP_VERSION}."
-          else
-            echo "    ERROR: could not attach build ${_BUILD_ID} to ${APP_VERSION}." >&2
-            echo "    NOT submitting - a submission without a build fails with a" >&2
-            echo "    misleading 'build not found'. Attach it in App Store Connect" >&2
-            echo "    (version page -> Build -> +) and submit from there." >&2
-            PUBLISH_FAILED=true
-            _SKIP_SUBMIT=true
-          fi
+        # _asc_attach_build treats already-attached as success. Its old inline
+        # check called `asc versions get`, which asc has since removed.
+        if ! _asc_attach_build "$ASC_VERSION_ID" "$_BUILD_ID"; then
+          PUBLISH_FAILED=true
+          _SKIP_SUBMIT=true
         fi
 
         # Nothing to submit if the build never attached. Guarding the whole
@@ -2281,8 +2240,7 @@ if priors:
           echo "    Readiness check:"
           asc validate --app "$ASC_APP_ID" --version "$APP_VERSION" || true
           echo ""
-          echo "    Note: submission fails if the build is still processing."
-          _confirm "Submit version ${APP_VERSION} for App Store review?"
+            _confirm "Submit version ${APP_VERSION} for App Store review?"
 
           echo "    Submitting ${APP_VERSION} for review..."
           _SUBMISSION_ID=$(asc review submissions-create --app "$ASC_APP_ID" --platform IOS --output json 2>/dev/null \
