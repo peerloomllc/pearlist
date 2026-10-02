@@ -1863,6 +1863,15 @@ else
   MAC_MINI="${MAC_MINI_HOST:-Tims-Mac-mini.local}"
   MAC_MINI_REPO_PATH="${MAC_MINI_REPO_PATH:-peerloomllc/pearlist}"
 
+  # ── Step 0: Regenerate ios/ from app.json and the config plugins ──
+  # ios/ is gitignored and the rsync below ships this box's copy as-is, so a copy
+  # generated before a plugin was added keeps shipping without it. 1.1.12 (build
+  # 20) went to App Review without with-ios-scene-lifecycle for exactly this
+  # reason and crashed at launch on iOS 27. ios-appstore.sh still sets the
+  # version and build number in Info.plist after this.
+  echo "    Regenerating ios/ (expo prebuild -p ios)..."
+  CI=1 npx expo prebuild -p ios --no-install
+
   # ── Step 1: Sync repo to Mac Mini ──
   echo "    Syncing repo to $MAC_MINI (including freshly built bundles)..."
   rsync -az --rsync-path=/opt/homebrew/bin/rsync \
