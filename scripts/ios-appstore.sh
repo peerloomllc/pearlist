@@ -140,8 +140,8 @@ echo "Running pod install..."
 # build number). NOTHING else reaches the bundle:
 #
 #   - `expo prebuild` is the only thing that rewrites Info.plist from app.json,
-#     and release.sh runs it as `--clean -p android` - ANDROID ONLY. The iOS
-#     project is never regenerated.
+#     and release.sh runs it for iOS before the sync, but it writes app.json's
+#     build number, which is stale, so this script still sets both literals.
 #   - The pbxproj MARKETING_VERSION / CURRENT_PROJECT_VERSION that release.sh
 #     seds are inert: this Info.plist holds literals and does not reference
 #     $(MARKETING_VERSION) or $(CURRENT_PROJECT_VERSION).
@@ -238,6 +238,16 @@ NEXT_BUILD="$NEXT_BUILD" node -e "
   j.expo.ios.buildNumber = String(process.env.NEXT_BUILD);
   fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
 "
+
+# ── Refuse a stale native project ───────────────────────────────────────────
+# Without a scene manifest an Xcode 27 build is killed at launch on iOS 27. The
+# manifest comes from plugins/with-ios-scene-lifecycle at prebuild time, so its
+# absence means ios/ predates that plugin (1.1.12 build 20 shipped that way).
+if ! /usr/libexec/PlistBuddy -c "Print :UIApplicationSceneManifest" "$INFO_PLIST" >/dev/null 2>&1; then
+  echo "Error: $INFO_PLIST has no UIApplicationSceneManifest, so the app would crash at launch on iOS 27."
+  echo "  ios/ is stale. Run 'CI=1 npx expo prebuild -p ios --no-install' and sync again."
+  exit 1
+fi
 
 # ── Archive ─────────────────────────────────────────────────────────────────
 # $HOME, not ~: inside the quotes ~ is never expanded, and codesign then fails with
