@@ -108,29 +108,51 @@ if ! pgrep -f -- "-avd $AVD -" >/dev/null 2>&1; then
 fi
 
 LOG="/tmp/pearlist-emu-$PORT.log"
-# -gpu host is the whole point of this script. Do not "simplify" it away.
-nohup "$EMU" -avd "$AVD" -gpu host -no-window -no-audio -no-snapshot -port "$PORT" \
-  >"$LOG" 2>&1 &
-EMUPID=$!
 
-echo "booting $AVD on $PORT (log: $LOG)..." >&2
-for _ in $(seq 1 60); do
-  sleep 5
-  if ! kill -0 $EMUPID 2>/dev/null; then
-    echo "emulator died - see $LOG" >&2
-    grep -iE "segmentation|fatal|ERROR" "$LOG" | tail -3 >&2
-    exit 1
-  fi
-  # A failed renderer does not end the process, so do not wait five minutes for it.
-  if grep -q "Could not start renderer" "$LOG" 2>/dev/null; then
-    echo "the emulator's renderer failed (DISPLAY=${DISPLAY:-unset}) - see $LOG" >&2
-    kill -9 $EMUPID 2>/dev/null || true
-    pkill -9 -f "emulator.*-port $PORT" 2>/dev/null || true
-    exit 1
-  fi
-  [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && {
-    echo "$SERIAL"; exit 0
-  }
-done
-echo "timed out waiting for $SERIAL - see $LOG" >&2
-exit 1
+# VULKAN FALLBACK. On 2026-10-06 PearOffice_Pixel_9 died twice at boot with
+# "Failed to create Vulkan device. Error VK_ERROR_INITIALIZATION_FAILED", after
+# booting fine twice the same day, and booted fine again that evening. It comes
+# and goes, so when a boot dies with it, boot once more with the guest's Vulkan
+# turned off (-feature -Vulkan). GLES still runs on the real GPU, which is all
+# the apps here need. EMU_NO_VULKAN=1 starts with Vulkan off.
+boot () { # $1: extra emulator flags. Prints the serial on success.
+  # -gpu host is the whole point of this script. Do not "simplify" it away.
+  # shellcheck disable=SC2086
+  nohup "$EMU" -avd "$AVD" -gpu host $1 -no-window -no-audio -no-snapshot -port "$PORT" \
+    >"$LOG" 2>&1 &
+  EMUPID=$!
+  echo "booting $AVD on $PORT${1:+ ($1)} (log: $LOG)..." >&2
+  for _ in $(seq 1 60); do
+    sleep 5
+    if ! kill -0 $EMUPID 2>/dev/null; then
+      if grep -q "VK_ERROR_INITIALIZATION_FAILED" "$LOG" 2>/dev/null; then return 2; fi
+      echo "emulator died - see $LOG" >&2
+      grep -iE "segmentation|fatal|ERROR" "$LOG" | tail -3 >&2
+      return 1
+    fi
+    # A failed renderer does not end the process, so do not wait five minutes for it.
+    if grep -q "Could not start renderer" "$LOG" 2>/dev/null; then
+      echo "the emulator's renderer failed (DISPLAY=${DISPLAY:-unset}) - see $LOG" >&2
+      kill -9 $EMUPID 2>/dev/null || true
+      pkill -9 -f "emulator.*-port $PORT" 2>/dev/null || true
+      return 1
+    fi
+    if [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+      echo "$SERIAL"; return 0
+    fi
+  done
+  echo "timed out waiting for $SERIAL - see $LOG" >&2
+  return 1
+}
+
+FLAGS=""
+[ "${EMU_NO_VULKAN:-0}" = "1" ] && FLAGS="-feature -Vulkan"
+set +e
+boot "$FLAGS"; RC=$?
+if [ $RC -eq 2 ]; then
+  echo "Vulkan failed to start; booting again with Vulkan off" >&2
+  rm -f "$AVD_DIR/multiinstance.lock" "$AVD_DIR/hardware-qemu.ini.lock"
+  boot "-feature -Vulkan"; RC=$?
+  [ $RC -eq 2 ] && { echo "emulator died - see $LOG" >&2; RC=1; }
+fi
+exit $RC
