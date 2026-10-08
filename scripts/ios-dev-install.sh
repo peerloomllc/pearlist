@@ -114,6 +114,16 @@ if [ "${SKIP_SYNC:-0}" != "1" ]; then
     --exclude='android/app/build/' \
     --exclude='.git/' \
     --exclude='.expo/' \
+    --exclude='/*.apk' \
+    --exclude='/*.aab' \
+    --exclude='/*.AppImage' \
+    --exclude='/*.deb' \
+    --exclude='/*.exe' \
+    --exclude='/*.dmg' \
+    --exclude='/*.ipa' \
+    --exclude='/*.sha256' \
+    --exclude='/*.blockmap' \
+    --exclude='/latest*.yml' \
     "$REPO_ROOT/" \
     "${MAC_MINI}:${MAC_REPO_PATH}/"
 fi
