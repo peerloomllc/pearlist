@@ -195,7 +195,9 @@ test('device-link rotates on a RE-pair, defers the reconnect, and re-applies on 
   assert.match(src, /const LOCAL_NAME_KEY = 'personalMeta:localName'/, 'the rotation is recorded')
   assert.match(src, /await applyRotatedLocal\(base\)/, 'and re-applied on every base open')
   // Before joining the swarm / seeding, both of which act on personalBase.local.
-  const openAt = src.indexOf('async function openPersonalBase')
+  // In whichever function re-applies it: openPersonalBase, or adoptBase since
+  // device-link split construction from adoption for the encrypted-base move.
+  const openAt = src.lastIndexOf('async function', src.indexOf('await applyRotatedLocal(base)'))
   const openBody = src.slice(openAt, src.indexOf('\n  }', src.indexOf('return base', openAt)))
   assert.ok(openBody.indexOf('applyRotatedLocal') < openBody.indexOf('joinPersonalSwarm'),
     'rotation is applied BEFORE the swarm join and the deviceMeta seed')
