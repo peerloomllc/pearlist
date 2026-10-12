@@ -3701,6 +3701,51 @@ function Setting ({ title, about, aboutLink, control, extra, first, alignTop, on
   )
 }
 
+// Backing spaces up to a blind seeder (src/seeders.js). Off until a seeder is
+// paired. The seeder is an always-on computer the person runs; it stores the
+// scrambled data and can never read the lists.
+function SeederBackup ({ onAbout, about }) {
+  const [list, setList] = useState([])
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = useCallback(async () => { setList(await call('seeder:list', {}).catch(() => [])) }, [])
+  useEffect(() => { load() }, [load])
+  async function pair () {
+    if (!link.trim()) return
+    setBusy(true); setMsg('')
+    try { await call('seeder:pair', { link: link.trim() }); setLink(''); setMsg('Paired. Your spaces are backing up.') } catch (e) { setMsg(e.message || 'Could not pair') }
+    setBusy(false); load()
+  }
+  async function stop (seederKey) {
+    setBusy(true); setMsg('')
+    try { await call('seeder:stop', { seederKey }); setMsg('Stopped. The seeder deletes your spaces in 7 days unless another member still uses it.') } catch (e) { setMsg(e.message || 'Could not stop') }
+    setBusy(false); load()
+  }
+  const btn = { padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }
+  return (
+    <Setting onAbout={onAbout} title='Seeder backup' about={about} alignTop
+      extra={
+        <span style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
+          {list.length === 0 && <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Off. Paste the link a seeder shows to keep your spaces syncing while your phones are asleep.</span>}
+          {list.map((s) => (
+            <span key={s.seederKey} style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
+              <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 13, fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.seederKey.slice(0, 12)}... {s.spaces} space{s.spaces === 1 ? '' : 's'}</span>
+              <button disabled={busy} onClick={() => stop(s.seederKey)} style={btn}>Stop</button>
+            </span>
+          ))}
+          <span style={{ display: 'flex', gap: sp.sm }}>
+            <input value={link} onChange={(e) => setLink(e.target.value)} placeholder='peerloom://seeder?...' aria-label='Seeder pairing link'
+              style={{ flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: r.md, border: `1px solid ${c.divider}`, background: c.surface.input, color: c.text.primary, fontSize: 13 }} />
+            <button disabled={busy || !link.trim()} onClick={pair} style={btn}>Pair</button>
+          </span>
+          {msg && <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{msg}</span>}
+        </span>
+      }
+      control={null} />
+  )
+}
+
 function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, clearOnChecked, onClearOnChecked, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
@@ -3923,6 +3968,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
     Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
     'Background Sync': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
+    'Seeder backup': "A seeder is an always-on computer you run at home, such as an Umbrel or a spare PC. Pair this phone with one and every member of your spaces backs up to it, so changes still reach a phone whose household is asleep. Everything it stores is scrambled: it cannot read your lists, and it cannot let a new phone join a space. That still needs a member's phone to be on.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
     'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
@@ -4083,6 +4129,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
         <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
           extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
           control={<Toggle on={relayOn} onChange={toggleRelay} />} />
+        <SeederBackup onAbout={setInfo} about={ABOUT['Seeder backup']} />
       </Collapsible>
       <Collapsible title='Appearance' icon={Palette} {...sect('appearance')}>
         <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />

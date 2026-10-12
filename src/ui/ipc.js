@@ -209,6 +209,9 @@ const mockMethods = {
   },
   // Off-LAN relay toggle. In the preview it is just a remembered boolean.
   'relay:get': async () => ({ useRelay: mock.useRelay !== false, configured: true }),
+  'seeder:list': async () => [],
+  'seeder:pair': async () => { throw new Error('Pairing needs the app') },
+  'seeder:stop': async () => ({ stopped: true, dropping: 0 }),
   'relay:set': async ({ on }) => { mock.useRelay = on !== false; return { useRelay: mock.useRelay } },
   'relay:stats': async () => ({ useRelay: mock.useRelay !== false, relaying: { attempts: 0, successes: 0, aborts: 0 }, punches: { consistent: 0, random: 0, open: 0 }, connections: 1, randomized: false }),
   // Shell actions (real shell intercepts these; here we approximate for preview).
