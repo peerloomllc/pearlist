@@ -103,3 +103,12 @@ const engine = createGroupEngine({
 _engine = engine
 
 engine.start()
+
+// Blind seeder backup (src/seeders.js). Started once the engine has its swarm,
+// which arrives with `init`. It stays idle until this device pairs with a seeder
+// or another member of a space lists one.
+const seedingTimer = setInterval(() => {
+  if (!engine.swarm || !engine.localDb) return
+  clearInterval(seedingTimer)
+  try { require('./seeders').getSeeding(engine).start() } catch (e) { mark('seeding:failed', { err: e && e.message }) }
+}, 1000)

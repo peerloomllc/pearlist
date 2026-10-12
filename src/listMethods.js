@@ -19,6 +19,7 @@ const { collapseMembers, sameIdentityKeys, identityRootOf, evictionTargets, setT
 const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, setSpaceMirror, putSpaceRecord, delSpaceRecord, _trace: _dlTrace } = require('./deviceLink')
 const { decideProfileMirror, shouldFetchAvatar } = require('./profileSync')
 const { photoMethods, prefetchRows } = require('./photos')
+const seeders = require('./seeders')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
 // `classifyItem` is the single seam a smarter classifier would swap into; the RN
@@ -584,6 +585,10 @@ async function publishMember (ctx, onlyGroupId) {
   // is not evidence that two people are the same person.
   const proof = await deviceIdentityProof(ctx)
   if (proof) value.identityProof = proof
+  // The seeders this device backs up to (src/seeders.js). Absent until it pairs
+  // with one, so a row from a device without a seeder is unchanged.
+  const seederKeys = await seeders.pairedKeys(ctx.engine).catch(() => [])
+  if (seederKeys.length) value.seeders = seederKeys
   _dlTrace('dl:publishMember', { proof: !!proof })
 
   const key = memberKey(pubkeyHex(ctx))
@@ -1928,6 +1933,46 @@ const methods = {
     const useRelay = relay.setUseRelay(on)
     await ctx.localDb.put(relay.PREF_KEY, { useRelay })
     return { useRelay }
+  },
+
+  // --- blind seeder backup (src/seeders.js) ---------------------------------
+  // Pair with a seeder from its link, then list it on our member row in every
+  // space so the other members back up to it too.
+  'seeder:pair': async ({ link }, ctx) => {
+    if (typeof link !== 'string' || !link.trim()) throw new Error('Paste the link the seeder shows')
+    const s = seeders.getSeeding(ctx.engine)
+    s.start()
+    const { seederKey } = await s.pair(link.trim())
+    await publishMember(ctx)
+    s.sweep().catch(() => {})
+    return { seederKey }
+  },
+  // Paired seeders, with how many spaces back up to each.
+  'seeder:list': async (_args, ctx) => {
+    const s = seeders.getSeeding(ctx.engine)
+    const out = []
+    for (const p of await s.paired()) {
+      let spaces = 0
+      for (const [, base] of ctx.bases) { if ((await seeders.seedersOfSpace(base).catch(() => [])).includes(p.seederKey)) spaces++ }
+      out.push({ seederKey: p.seederKey, pairedAt: p.pairedAt, spaces })
+    }
+    return out
+  },
+  // Stop using a seeder: take it off our member rows and ask it to drop each
+  // space nobody else still backs up there.
+  'seeder:stop': async ({ seederKey }, ctx) => {
+    if (typeof seederKey !== 'string' || !/^[0-9a-f]{64}$/.test(seederKey)) throw new Error('seederKey required')
+    const s = seeders.getSeeding(ctx.engine)
+    await s.forget(seederKey)
+    await publishMember(ctx)
+    let dropping = 0
+    for (const [, base] of ctx.bases) {
+      try { await base.update() } catch {}
+      if ((await seeders.seedersOfSpace(base).catch(() => [])).includes(seederKey)) continue
+      try { await s.drop(seederKey, b4a.toString(base.key, 'hex')); dropping++ } catch {}
+    }
+    await s.sweep().catch(() => {})
+    return { stopped: true, dropping }
   },
 
   // --- saved list templates (device-local) ---------------------------------

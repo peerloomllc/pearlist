@@ -2,6 +2,23 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-10-12 - Spaces can back up to a blind seeder, listed on member rows
+Tier: T2
+Context: suite proposals/2026-10-12-generic-seeder.md, phase 2. An all-iPhone
+household only syncs while someone has the app open; a seeder keeps the encrypted
+space available.
+Choice: each device lists the seeders it paired with in a `seeders` field on its own
+signed member row, and every member registers the space with every seeder a visible
+member lists (src/seeders.js, on @peerloom/core's seeding). Off until a device pairs.
+Stopping takes the seeder off the row and asks it to drop each space no other member
+still lists.
+Alternatives: a new `seeder:` namespace (old peers drop unknown namespaces and the view
+forks, listWire.js top); only the paired device registering (other members' writes
+would wait for it to come online).
+Consequences: an added field, stored as is by older versions. A seeder cannot admit a
+new phone; joining still needs a member online. Device-link stays off, so the personal
+base is not involved.
+
 ## 2026-09-10 - Repair is OFFERED to everyone, because we cannot know who it will help
 Tier: T3 (it re-runs the pairing flow). Proposal: PR #188. Implementation: PR #189.
 
