@@ -8,7 +8,7 @@ const assert = require('node:assert/strict')
 // device-link's package.json `exports` blocks deep subpath imports, so the test
 // reaches the library by path. Only the TEST needs it - src/memberIdentity.js goes
 // through device-link's own identity module, which is the point.
-const IdentityKey = require('../../peerloom-device-link/node_modules/keet-identity-key')
+const IdentityKey = require('keet-identity-key')
 const sodium = require('sodium-universal')
 const b4a = require('b4a')
 
