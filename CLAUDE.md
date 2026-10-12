@@ -24,6 +24,12 @@ supplies only:
 - the IPC method table and Hyperbee key schema.
 - `src/ui/` - the list UI.
 
+`.npmrc` sets `install-links=true`, so `npm install` copies `../peerloom-core`
+and `../peerloom-device-link` into `node_modules` instead of linking them. The bundles then carry one copy of each
+library. With the link, core's own `node_modules` put a second set into them
+(an older hypercore and a second copy of each native addon). After changing either,
+run `npm install` here to pick it up.
+
 Wire protocol and apply rules are specified in the proposal. Data model:
 `list:{listId}` and `item:{listId}:{pubkey}:{seqPad}`, signed values,
 last-writer-wins, no-resurrection tombstones.

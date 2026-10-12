@@ -40,7 +40,7 @@ const sodium = require('sodium-universal')
 const Autobase = require('autobase')
 const Corestore = require('corestore')
 const Hyperbee = require('hyperbee')
-const IdentityKey = require('../../peerloom-device-link/node_modules/keet-identity-key')
+const IdentityKey = require('keet-identity-key')
 const { signValue } = require('@peerloom/core/records')
 
 const REPO = path.join(__dirname, '..')

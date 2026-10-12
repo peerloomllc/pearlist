@@ -18,7 +18,7 @@ const path = require('path')
 const ROOT = path.join(__dirname, '..')
 const imports = require('../scripts/bare-imports.js')
 
-const BIP39 = path.join(ROOT, 'node_modules', '@peerloom', 'device-link', 'node_modules', 'bip39-mnemonic')
+const BIP39 = path.join(ROOT, 'node_modules', 'bip39-mnemonic')
 
 test('every import override points at a file that exists', () => {
   for (const [specifier, target] of Object.entries(imports)) {
@@ -39,7 +39,7 @@ test('the ./wordlist override has exactly one consumer, and it is bip39-mnemonic
     if (/require\(['"]\.\/wordlist['"]\)/.test(file._data.toString())) consumers.push(key)
   }
 
-  assert.deepStrictEqual(consumers, ['/node_modules/@peerloom/device-link/node_modules/bip39-mnemonic/index.js'])
+  assert.deepStrictEqual(consumers, ['/node_modules/bip39-mnemonic/index.js'])
 })
 
 test('the bundle carries our wordlist and none of upstream twelve', () => {

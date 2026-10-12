@@ -17,7 +17,7 @@ const b4a = require('b4a')
 
 const deviceLink = require('../src/deviceLink.js')
 const { identityRootOf } = require('../src/memberIdentity.js')
-const IdentityKey = require('../../peerloom-device-link/node_modules/keet-identity-key')
+const IdentityKey = require('keet-identity-key')
 
 const kp = () => {
   const publicKey = b4a.alloc(32); const secretKey = b4a.alloc(64)

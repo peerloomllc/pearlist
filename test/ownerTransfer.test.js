@@ -16,7 +16,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const b4a = require('b4a')
-const IdentityKey = require('../../peerloom-device-link/node_modules/keet-identity-key')
+const IdentityKey = require('keet-identity-key')
 const { generateKeypair } = require('@peerloom/core/identity')
 const { signValue } = require('@peerloom/core/records')
 const { applyListOp, memberKey, REVOKE_CAP, REVOKE_SELF_CAP } = require('../src/listWire.js')
