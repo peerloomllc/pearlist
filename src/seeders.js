@@ -12,6 +12,7 @@
 
 const { createSeeding } = require('@peerloom/core/seeding')
 const { MEMBER_RANGE, isMemberVisible } = require('./listWire')
+const { relayingDht } = require('./relay')
 
 const HEX64 = /^[0-9a-f]{64}$/
 const instances = new WeakMap() // engine -> seeding (one per worklet; tests run several)
@@ -31,7 +32,10 @@ async function seedersOfSpace (base) {
 function getSeeding (engine) {
   let s = instances.get(engine)
   if (!s) {
-    s = createSeeding({ ctx: engine, app: 'PearList', seedersFor: (_groupId, base) => seedersOfSpace(base) })
+    // Seeder dials go direct first, then through the relay (src/relay.js).
+    const wrapped = new WeakMap()
+    const dhtOf = (dht) => { if (!wrapped.has(dht)) wrapped.set(dht, relayingDht(dht)); return wrapped.get(dht) }
+    s = createSeeding({ ctx: engine, app: 'PearList', seedersFor: (_groupId, base) => seedersOfSpace(base), dhtOf })
     instances.set(engine, s)
   }
   return s
