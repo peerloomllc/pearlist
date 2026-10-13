@@ -77,3 +77,27 @@ test('swarmRelayThrough reads randomized off the live swarm', async () => {
   assert.equal(relay.swarmRelayThrough(false, { dht: { randomized: true } }), relay.RELAY_PUBLIC_KEY)
   assert.equal(relay.swarmRelayThrough(false, undefined), null) // no swarm handed in: direct
 })
+
+test('relayingDht: nothing relays before hydration, then direct first and relay after a failed punch', () => {
+  const EventEmitter = require('node:events')
+  const calls = []
+  const dht = { randomized: false, other () { return 'kept' }, connect (key, opts) { const s = new EventEmitter(); calls.push({ opts, s }); return s } }
+  const punch = Object.assign(new Error('x'), { code: 'HOLEPUNCH_ABORTED' })
+  const SEEDER = b4a.alloc(32, 7)
+  relay._reset()
+  const w = relay.relayingDht(dht)
+  w.connect(SEEDER, {})
+  calls[0].s.emit('error', punch)
+  w.connect(SEEDER, {})
+  assert.deepEqual(calls[1].opts, {}, 'not hydrated: never relays')
+  relay.setUseRelay(true)
+  w.connect(SEEDER, { keyPair: 'kp' })
+  assert.deepEqual(calls[2].opts, { keyPair: 'kp', relayThrough: relay.RELAY_PUBLIC_KEY })
+  w.connect(b4a.alloc(32, 1), {})
+  assert.deepEqual(calls[3].opts, {}, 'another seeder still goes direct')
+  relay.setUseRelay(false)
+  w.connect(SEEDER, {})
+  assert.deepEqual(calls[4].opts, {}, 'switched off: never relays')
+  assert.equal(w.other(), 'kept')
+  relay._reset()
+})

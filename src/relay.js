@@ -15,6 +15,7 @@
 // on the fail path.
 
 const z32 = require('z32')
+const b4a = require('b4a')
 
 // The deployed PeerLoom relay's public key (2026-07-23), shared suite-wide - a
 // blind byte-forwarder cares nothing about which app is talking. Its private seed
@@ -91,6 +92,34 @@ function swarmRelayThrough (force, swarm) {
   })
 }
 
+// PeerLoom Seeder dials (blind-peering backups and requests, in
+// @peerloom/core's seeding) use dht.connect outside Hyperswarm, where a relay
+// key means "relay from the first attempt". This wraps the DHT so those are
+// direct first too, per remote key: after a failed holepunch to a key, later
+// dials to it relay. A seeder on a Start9 is reachable from a phone on the
+// same network only through the relay. Nothing relays before the switch is
+// read. Same as PearOffice's, PearCircle's (#245) and PearCal's (#342).
+const PUNCH_FAILED = new Set(['HOLEPUNCH_ABORTED', 'HOLEPUNCH_DOUBLE_RANDOMIZED_NATS', 'REMOTE_NOT_HOLEPUNCHABLE'])
+function relayingDht (dht) {
+  const failed = new Set()
+  function connect (remotePublicKey, opts = {}) {
+    const key = b4a.toString(remotePublicKey, 'hex')
+    const relayThrough = prefs.hydrated
+      ? relayThroughFor({ force: failed.has(key), randomized: !!dht.randomized, useRelay: prefs.useRelay, relayKey: RELAY_PUBLIC_KEY })
+      : null
+    const socket = dht.connect(remotePublicKey, relayThrough ? { ...opts, relayThrough } : opts)
+    socket.on('error', (err) => { if (err && PUNCH_FAILED.has(err.code)) failed.add(key) })
+    return socket
+  }
+  return new Proxy(dht, {
+    get (target, prop) {
+      if (prop === 'connect') return connect
+      const v = Reflect.get(target, prop, target)
+      return typeof v === 'function' ? v.bind(target) : v
+    },
+  })
+}
+
 // Test-only: drop back to the pre-hydration state.
 function _reset () { prefs.useRelay = true; prefs.hydrated = false }
 
@@ -100,6 +129,7 @@ module.exports = {
   PREF_KEY,
   relayThroughFor,
   swarmRelayThrough,
+  relayingDht,
   hydrate,
   setUseRelay,
   getUseRelay,
