@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 import { call, on, isMock, haptic } from './ipc.js'
@@ -3701,45 +3702,131 @@ function Setting ({ title, about, aboutLink, control, extra, first, alignTop, on
   )
 }
 
-// Backing spaces up to a blind seeder (src/seeders.js). Off until a seeder is
-// paired. The seeder is an always-on computer the person runs; it stores the
-// scrambled data and can never read the lists.
+// The seeder section's modal: a question with two buttons, a spinner while
+// something runs, or a result with one button. The same design as PearCircle's.
+function SeederModal ({ title, text, busy = false, confirmLabel, danger = false, onConfirm, onClose, closeLabel = 'Cancel' }) {
+  return (
+    <div data-testid='seeder-modal' style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', padding: sp.lg }}>
+      <div style={{ background: c.surface.elevated, borderRadius: r.lg, padding: sp.lg, maxWidth: 400, width: '100%', border: `1px solid ${c.divider}`, textAlign: 'center' }}>
+        {busy && (
+          <span data-testid='seeder-modal-spinner' style={{ width: 28, height: 28, borderRadius: '50%', display: 'inline-block', marginBottom: sp.md,
+            border: `3px solid ${c.divider}`, borderTopColor: c.primary, animation: 'pearlist-spin 0.8s linear infinite' }} />
+        )}
+        <div style={{ color: c.text.primary, fontSize: 18, fontWeight: 400, marginBottom: text ? sp.sm : 0 }}>{title}</div>
+        {text && <div style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, lineHeight: 1.5 }}>{text}</div>}
+        {!busy && (onConfirm || onClose) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: sp.sm, marginTop: sp.lg }}>
+            {onConfirm && <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm}>{confirmLabel}</Button>}
+            {onClose && <Button variant='secondary' onClick={onClose}>{closeLabel}</Button>}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Backing spaces up to a seeder (src/seeders.js). Off until a seeder is paired.
+// One scan or pasted link pairs it; every member then backs each space up to
+// every seeder any member lists, so there is no per-space switch.
 function SeederBackup ({ onAbout, about }) {
   const [list, setList] = useState([])
   const [link, setLink] = useState('')
+  const [pasting, setPasting] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [modal, setModal] = useState(null) // SeederModal props, or null
   const load = useCallback(async () => { setList(await call('seeder:list', {}).catch(() => [])) }, [])
   useEffect(() => { load() }, [load])
-  async function pair () {
-    if (!link.trim()) return
+  const close = () => setModal(null)
+  async function pair (text) {
+    // Phone keyboards capitalise the first letter of a typed link.
+    const clean = String(text || '').trim().replace(/^[a-z]+:/i, (m) => m.toLowerCase())
+    if (!clean) return
     setBusy(true); setMsg('')
-    try { await call('seeder:pair', { link: link.trim() }); setLink(''); setMsg('Paired. Your spaces are backing up.') } catch (e) { setMsg(e.message || 'Could not pair') }
+    setModal({ busy: true, title: 'Pairing...', text: 'This can take up to a minute.' })
+    try {
+      await call('seeder:pair', { link: clean })
+      setLink(''); setPasting(false); close()
+      setMsg('Paired. Your spaces are backing up to it.')
+    } catch (e) {
+      const m = e?.message || 'Could not pair'
+      const t = /link|rendezvous|seeder key|invalid/i.test(m) && !/answer|reach|time/i.test(m)
+        ? 'That is not a seeder pairing code.'
+        : /time|answer|reach/i.test(m)
+          ? 'Could not reach the seeder. Check that its dashboard still shows the code, then try again.'
+          : m
+      setModal({ title: 'Could not pair', text: t, onClose: close, closeLabel: 'OK' })
+    }
     setBusy(false); load()
   }
   async function stop (seederKey) {
-    setBusy(true); setMsg('')
-    try { await call('seeder:stop', { seederKey }); setMsg('Stopped. The seeder deletes your spaces in 7 days unless another member still uses it.') } catch (e) { setMsg(e.message || 'Could not stop') }
-    setBusy(false); load()
+    setMsg('')
+    setModal({ busy: true, title: 'Stopping...' })
+    try {
+      const res = await call('seeder:stop', { seederKey })
+      await load()
+      const kept = res?.kept || []
+      if (kept.length) {
+        setModal({ title: 'Stopped on this phone', text: `${kept.length === 1 ? 'This space still uses it' : 'These spaces still use it'}: ${kept.join(', ')}. Another member there paired with it.`, onClose: close, closeLabel: 'OK' })
+      } else {
+        close()
+        setMsg('Stopped using this seeder.')
+      }
+    } catch (e) {
+      await load()
+      setModal({ title: 'Could not stop', text: e?.message || 'Try again in a moment.', onClose: close, closeLabel: 'OK' })
+    }
   }
-  const btn = { padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }
+  const askStop = (seederKey) => setModal({
+    title: 'Stop using this seeder?',
+    text: 'Your spaces stop backing up to it, except where another member paired with it.',
+    confirmLabel: 'Stop using', danger: true,
+    onConfirm: () => stop(seederKey), onClose: close,
+  })
+  const linkBtn = { padding: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.primary, fontSize: 13, fontFamily: FONT }
+  const small = { color: c.text.muted, fontSize: 12, lineHeight: 1.35 }
   return (
-    <Setting onAbout={onAbout} title='Seeder backup' about={about} alignTop
+    <Setting onAbout={onAbout} title='Seeder' about={about} alignTop
       extra={
         <span style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
-          {list.length === 0 && <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Off. Paste the link a seeder shows to keep your spaces syncing while your phones are asleep.</span>}
+          <span style={small}>A seeder is an always-on computer that keeps your lists in sync while phones sleep. It stores them scrambled and cannot read them.</span>
+          <Button onClick={() => setScanning(true)} disabled={busy} style={{ marginTop: sp.xs }}>Scan seeder QR</Button>
+          {pasting && (
+            <span style={{ display: 'flex', gap: sp.sm }}>
+              <input value={link} onChange={(e) => setLink(e.target.value)} placeholder='Paste the seeder link' aria-label='Seeder pairing link'
+                autoCapitalize='none' autoCorrect='off' spellCheck={false} autoFocus
+                style={{ flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: r.md, border: `1px solid ${c.divider}`, background: c.surface.input, color: c.text.primary, fontSize: 13 }} />
+              <button disabled={busy || !link.trim()} onClick={() => pair(link)}
+                style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.primary}`, background: 'transparent', color: c.primary, fontSize: 14, cursor: 'pointer', opacity: busy || !link.trim() ? 0.5 : 1 }}>Pair</button>
+            </span>
+          )}
+          <span style={{ display: 'flex', justifyContent: 'space-between', gap: sp.sm }}>
+            <button onClick={() => setPasting((v) => !v)} style={linkBtn}>{pasting ? 'Cancel' : 'Paste a link instead'}</button>
+            <button onClick={() => openUrl('https://peerloomllc.com/seeder')} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              Get PeerLoom Seeder <ArrowSquareOut size={14} weight='regular' />
+            </button>
+          </span>
+          {msg && <span style={small}>{msg}</span>}
           {list.map((s) => (
-            <span key={s.seederKey} style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
-              <span style={{ flex: 1, minWidth: 0, color: c.text.primary, fontSize: 13, fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.seederKey.slice(0, 12)}... {s.spaces} space{s.spaces === 1 ? '' : 's'}</span>
-              <button disabled={busy} onClick={() => stop(s.seederKey)} style={btn}>Stop</button>
+            <span key={s.seederKey} style={{ display: 'flex', alignItems: 'center', gap: sp.sm, padding: `${sp.sm}px 0`, borderTop: `1px solid ${c.divider}` }}>
+              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ color: c.text.primary, fontSize: 13, fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.seederKey.slice(0, 16)}...</span>
+                <span style={small}>
+                  {s.spaces ? `Backs up ${(s.spaceNames || []).join(', ')}` : 'No spaces yet'}
+                  {s.paired ? '' : '. Another member paired with it.'}
+                </span>
+              </span>
+              {s.paired && (
+                <button onClick={() => askStop(s.seederKey)}
+                  style={{ padding: '6px 10px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.error}`, background: 'transparent', color: c.error, fontSize: 12, cursor: 'pointer' }}>
+                  Stop using
+                </button>
+              )}
             </span>
           ))}
-          <span style={{ display: 'flex', gap: sp.sm }}>
-            <input value={link} onChange={(e) => setLink(e.target.value)} placeholder='peerloom://seeder?...' aria-label='Seeder pairing link'
-              style={{ flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: r.md, border: `1px solid ${c.divider}`, background: c.surface.input, color: c.text.primary, fontSize: 13 }} />
-            <button disabled={busy || !link.trim()} onClick={pair} style={btn}>Pair</button>
-          </span>
-          {msg && <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{msg}</span>}
+          <ScannerView open={scanning} onClose={() => setScanning(false)} onDecode={(txt) => { setScanning(false); pair(txt) }} />
+          {modal && createPortal(<SeederModal {...modal} />, document.body)}
         </span>
       }
       control={null} />
@@ -3968,7 +4055,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
     Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
     'Background Sync': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
     'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
-    'Seeder backup': "A seeder is an always-on computer you run at home, such as an Umbrel or a spare PC. Pair this phone with one and every member of your spaces backs up to it, so changes still reach a phone whose household is asleep. Everything it stores is scrambled: it cannot read your lists, and it cannot let a new phone join a space. That still needs a member's phone to be on.",
+    'Seeder backup': "Run PeerLoom Seeder on a computer that stays on, such as an Umbrel or a spare PC, and pair this phone with it. Every member of your spaces then backs up to it. A new phone still needs a member's phone online to join a space.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
     'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",

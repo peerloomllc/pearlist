@@ -558,6 +558,20 @@ function adoptProfileFromMyOtherDevice (ctx, rows) {
   })().catch(() => {})
 }
 
+// groupId -> the space's name, from this phone's joined-groups records.
+async function spaceNames (ctx) {
+  const names = new Map()
+  for await (const { value } of ctx.localDb.createReadStream({ gt: 'groups:joined:', lt: 'groups:joined:~' })) {
+    if (value && value.groupId) names.set(value.groupId, String(value.name || ''))
+  }
+  // A rename lands on the space row; prefer it.
+  for (const [groupId, base] of ctx.bases) {
+    const name = (await base.view.get('space').catch(() => null))?.value?.name
+    if (typeof name === 'string' && name) names.set(groupId, name)
+  }
+  return names
+}
+
 async function publishMember (ctx, onlyGroupId) {
   const prof = (await ctx.localDb.get('profile'))?.value
   // `caps` advertises what this build understands. It is the capability gate for
@@ -1947,32 +1961,42 @@ const methods = {
     s.sweep().catch(() => {})
     return { seederKey }
   },
-  // Paired seeders, with how many spaces back up to each.
+  // Seeders this phone paired with plus any another member still lists, each
+  // with the spaces that back up to it. A seeder nobody lists any more and this
+  // phone is not paired with is left out.
   'seeder:list': async (_args, ctx) => {
     const s = seeders.getSeeding(ctx.engine)
-    const out = []
-    for (const p of await s.paired()) {
-      let spaces = 0
-      for (const [, base] of ctx.bases) { if ((await seeders.seedersOfSpace(base).catch(() => [])).includes(p.seederKey)) spaces++ }
-      out.push({ seederKey: p.seederKey, pairedAt: p.pairedAt, spaces })
+    const names = await spaceNames(ctx)
+    const out = new Map()
+    for (const p of await s.paired()) out.set(p.seederKey, { seederKey: p.seederKey, pairedAt: p.pairedAt, paired: true, spaceNames: [] })
+    for (const [groupId, base] of ctx.bases) {
+      for (const k of await seeders.seedersOfSpace(base).catch(() => [])) {
+        if (!out.has(k)) out.set(k, { seederKey: k, pairedAt: null, paired: false, spaceNames: [] })
+        out.get(k).spaceNames.push(names.get(groupId) || 'Space')
+      }
     }
-    return out
+    return [...out.values()].map((x) => ({ ...x, spaces: x.spaceNames.length }))
   },
-  // Stop using a seeder: take it off our member rows and ask it to drop each
-  // space nobody else still backs up there.
+  // Stop using a seeder: take it off our member rows, then ask it to drop each
+  // space nobody else still backs up there. The requests go in the background so
+  // an offline seeder does not hold up the screen. Returns the spaces that keep
+  // it because another member still lists it.
   'seeder:stop': async ({ seederKey }, ctx) => {
     if (typeof seederKey !== 'string' || !/^[0-9a-f]{64}$/.test(seederKey)) throw new Error('seederKey required')
     const s = seeders.getSeeding(ctx.engine)
     await s.forget(seederKey)
     await publishMember(ctx)
-    let dropping = 0
-    for (const [, base] of ctx.bases) {
+    const names = await spaceNames(ctx)
+    const kept = []
+    const drops = []
+    for (const [groupId, base] of ctx.bases) {
       try { await base.update() } catch {}
-      if ((await seeders.seedersOfSpace(base).catch(() => [])).includes(seederKey)) continue
-      try { await s.drop(seederKey, b4a.toString(base.key, 'hex')); dropping++ } catch {}
+      if ((await seeders.seedersOfSpace(base).catch(() => [])).includes(seederKey)) kept.push(names.get(groupId) || 'Space')
+      else drops.push(b4a.toString(base.key, 'hex'))
     }
-    await s.sweep().catch(() => {})
-    return { stopped: true, dropping }
+    for (const bootstrap of drops) s.drop(seederKey, bootstrap).catch(() => {})
+    s.sweep().catch(() => {})
+    return { stopped: true, dropping: drops.length, kept }
   },
 
   // --- saved list templates (device-local) ---------------------------------
