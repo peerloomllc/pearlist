@@ -92,7 +92,9 @@ test('a space backs up to a seeder', { skip: !haveSeeder && 'no ../peerloom-seed
     await base.update()
     return (await seeders.seedersOfSpace(base)).includes(seederKey)
   })
-  assert.deepEqual((await A.call('seeder:list')).map((s) => [s.seederKey, s.spaces]), [[seederKey, 1]])
+  assert.deepEqual((await A.call('seeder:list')).map((s) => [s.seederKey, s.spaces, s.paired, s.spaceNames]), [[seederKey, 1, true, ['Home']]])
+  // B did not pair but sees it, since A lists it on the space.
+  await waitFor('B lists the seeder as another member\'s', async () => (await B.call('seeder:list')).some((s) => s.seederKey === seederKey && !s.paired))
 
   async function seederHas (key, length) {
     const core = seeder.peer.store.get({ key })
@@ -138,6 +140,7 @@ test('a space backs up to a seeder', { skip: !haveSeeder && 'no ../peerloom-seed
   await waitFor('A has the space again', () => !!A.engine.bases.get(groupId))
   const stop = await A.call('seeder:stop', { seederKey })
   assert.equal(stop.stopped, true)
+  assert.deepEqual(stop.kept, [], 'no other member lists it')
   assert.deepEqual(await A.call('seeder:list'), [])
   await waitFor('the seeder schedules the drop', async () => (await seeder.drops()).some((d) => d.space === bootstrap))
   await waitFor('B no longer sees the seeder listed', async () => {
