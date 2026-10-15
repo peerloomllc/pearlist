@@ -99,13 +99,33 @@ function swarmRelayThrough (force, swarm) {
 // dials to it relay. A seeder on a Start9 is reachable from a phone on the
 // same network only through the relay. Nothing relays before the switch is
 // read. Same as PearOffice's, PearCircle's (#245) and PearCal's (#342).
-const PUNCH_FAILED = new Set(['HOLEPUNCH_ABORTED', 'HOLEPUNCH_DOUBLE_RANDOMIZED_NATS', 'REMOTE_NOT_HOLEPUNCHABLE'])
-function relayingDht (dht) {
+//
+// The swarm's own dials go through this too (see bare.js createSwarm), because
+// Hyperswarm only switches a peer to the relay after the first three codes below.
+// A phone that has just started on mobile data often has not worked out its NAT
+// type yet, and its punch then fails with HOLEPUNCH_PROBE_TIMEOUT instead, which
+// Hyperswarm does not count, so it retried direct until it gave up and never
+// tried the relay. Field report 2026-10-15: an Android and an iPhone, both on
+// mobile data, joined a space but never synced until both were put on one wifi.
+// The last three codes are those other punch failures. Each one means the two
+// phones found each other but could not open a direct path, which is exactly
+// what the relay is for.
+const PUNCH_FAILED = new Set([
+  'HOLEPUNCH_ABORTED', 'HOLEPUNCH_DOUBLE_RANDOMIZED_NATS', 'REMOTE_NOT_HOLEPUNCHABLE',
+  'HOLEPUNCH_PROBE_TIMEOUT', 'REMOTE_NOT_HOLEPUNCHING', 'REMOTE_ABORTED',
+])
+// `relayKey` is overridable for TESTS ONLY, so a test can relay through its own
+// node on a local testnet.
+function relayingDht (dht, { relayKey = RELAY_PUBLIC_KEY } = {}) {
   const failed = new Set()
+  // A failed punch is a fact about the network it happened on. After a network
+  // change (mobile data to wifi, say) go direct first again, so two phones that
+  // now share a wifi do not keep routing through the relay.
+  if (typeof dht.on === 'function') dht.on('network-change', () => failed.clear())
   function connect (remotePublicKey, opts = {}) {
     const key = b4a.toString(remotePublicKey, 'hex')
     const relayThrough = prefs.hydrated
-      ? relayThroughFor({ force: failed.has(key), randomized: !!dht.randomized, useRelay: prefs.useRelay, relayKey: RELAY_PUBLIC_KEY })
+      ? relayThroughFor({ force: failed.has(key), randomized: !!dht.randomized, useRelay: prefs.useRelay, relayKey })
       : null
     const socket = dht.connect(remotePublicKey, relayThrough ? { ...opts, relayThrough } : opts)
     socket.on('error', (err) => { if (err && PUNCH_FAILED.has(err.code)) failed.add(key) })

@@ -95,9 +95,17 @@ const engine = createGroupEngine({
   // The engine calls this during init(), right after localDb is ready, which is
   // why hydrating the toggle from here is safe. It is deliberately not awaited
   // (createSwarm is sync): until the read lands the policy relays nothing.
+  //
+  // The swarm's DHT is then wrapped by relayingDht, so a peer whose punch failed
+  // with any of the codes in relay.js's PUNCH_FAILED is relayed on the next dial.
+  // Hyperswarm alone only counts three of them (field report 2026-10-15, see
+  // relay.js). The server it created before the swarm was wrapped is unaffected,
+  // which is fine: only outbound dials pick a relay.
   createSwarm: ({ keyPair }) => {
     relay.hydrate(engine.localDb).catch(() => {})
-    return new Hyperswarm({ keyPair, relayThrough: relay.swarmRelayThrough })
+    const swarm = new Hyperswarm({ keyPair, relayThrough: relay.swarmRelayThrough })
+    swarm.dht = relay.relayingDht(swarm.dht)
+    return swarm
   },
 })
 _engine = engine
