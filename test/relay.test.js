@@ -101,3 +101,48 @@ test('relayingDht: nothing relays before hydration, then direct first and relay 
   assert.equal(w.other(), 'kept')
   relay._reset()
 })
+
+test('relayingDht: the punch failures Hyperswarm ignores also switch a peer to the relay', () => {
+  const EventEmitter = require('node:events')
+  for (const code of ['HOLEPUNCH_PROBE_TIMEOUT', 'REMOTE_NOT_HOLEPUNCHING', 'REMOTE_ABORTED']) {
+    const calls = []
+    const dht = { randomized: false, connect (key, opts) { const s = new EventEmitter(); calls.push({ opts, s }); return s } }
+    relay._reset()
+    relay.setUseRelay(true)
+    const w = relay.relayingDht(dht)
+    w.connect(KEY, {})
+    calls[0].s.emit('error', Object.assign(new Error('x'), { code }))
+    w.connect(KEY, {})
+    assert.deepEqual(calls[1].opts, { relayThrough: relay.RELAY_PUBLIC_KEY }, code)
+  }
+  relay._reset()
+})
+
+test('relayingDht: a network change sends every peer direct first again', () => {
+  const EventEmitter = require('node:events')
+  const calls = []
+  const dht = Object.assign(new EventEmitter(), { randomized: false, connect (key, opts) { const s = new EventEmitter(); calls.push({ opts, s }); return s } })
+  relay._reset()
+  relay.setUseRelay(true)
+  const w = relay.relayingDht(dht)
+  w.connect(KEY, {})
+  calls[0].s.emit('error', Object.assign(new Error('x'), { code: 'HOLEPUNCH_PROBE_TIMEOUT' }))
+  dht.emit('network-change')
+  w.connect(KEY, {})
+  assert.deepEqual(calls[1].opts, {}, 'direct again after moving to a new network')
+  relay._reset()
+})
+
+test('relayingDht: a connection error that is not a punch failure does not relay', () => {
+  const EventEmitter = require('node:events')
+  const calls = []
+  const dht = { randomized: false, connect (key, opts) { const s = new EventEmitter(); calls.push({ opts, s }); return s } }
+  relay._reset()
+  relay.setUseRelay(true)
+  const w = relay.relayingDht(dht)
+  w.connect(KEY, {})
+  calls[0].s.emit('error', Object.assign(new Error('x'), { code: 'PEER_NOT_FOUND' }))
+  w.connect(KEY, {})
+  assert.deepEqual(calls[1].opts, {})
+  relay._reset()
+})
