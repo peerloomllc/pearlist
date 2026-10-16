@@ -4,6 +4,10 @@
 // BareKit IPC; group:create / group:join / init are engine builtins, the
 // list:* / item:* methods come from listMethods.
 
+// Fix hypercore's crash after a flush before any core opens
+// (see hypercoreSnapshotPatch.js).
+require('./hypercoreSnapshotPatch').applySnapshotFlushFix(require('hypercore/lib/session-state'))
+
 const { createGroupEngine } = require('@peerloom/core/engine')
 const Hyperswarm = require('hyperswarm')
 const { applyListOp } = require('./listWire')
