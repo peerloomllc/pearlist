@@ -4,7 +4,7 @@
 // WebView camera permission for the in-WebView QR scanner.
 
 import { useEffect, useRef, useState } from 'react'
-import { View, Platform, Share, StatusBar, BackHandler, AppState, PermissionsAndroid } from 'react-native'
+import { View, Platform, Share, StatusBar, BackHandler, AppState, PermissionsAndroid, Keyboard } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Worklet } from 'react-native-bare-kit'
@@ -628,6 +628,16 @@ export default function Shell () {
   const webViewRef = useRef<any>(null)
   const [html, setHtml] = useState<string | null>(null)
   const [statusBarStyle, setStatusBarStyle] = useState<'light-content' | 'dark-content'>('light-content')
+  // Android keyboard padding, see the comment on the View that uses it.
+  const [kbHeight, setKbHeight] = useState(0)
+  const [shellHeight, setShellHeight] = useState(0)
+  const fullHeight = useRef(0)
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setKbHeight(e.endCoordinates.height))
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0))
+    return () => { show.remove(); hide.remove() }
+  }, [])
   const webViewLoaded = useRef(false)
   const pendingDeeplink = useRef<string | null>(null)
   const pendingNotifNav = useRef<any>(null) // notification-tap target, buffered until the WebView mounts
@@ -1090,34 +1100,54 @@ export default function Shell () {
   return (
     <>
       <StatusBar barStyle={statusBarStyle} translucent backgroundColor='transparent' />
-      <WebView
-        ref={webViewRef}
-        source={{ html, baseUrl: 'https://localhost/' }}
-        onMessage={onMessage}
-        onLoad={onLoad}
-        // The other half of BOTH recoveries above (resume-freeze and boot
-        // watchdog): reload into the fresh render process, whichever one asked for
-        // it. didCrash=false is our own deliberate terminate;
-        // didCrash=true is a real renderer crash, and reloading is the right
-        // response to both. webViewLoaded is reset so queued IPC waits for the
-        // reloaded UI rather than being injected into a dead page.
-        onRenderProcessGone={(e: any) => {
-          console.warn('[webview] render process gone, didCrash=' + e?.nativeEvent?.didCrash + ' -> reload')
-          webViewLoaded.current = false
-          webViewRef.current?.reload()
+      {/* Android 16 no longer shrinks an edge-to-edge window for the keyboard, so
+          the WebView kept its full height and the keyboard covered the bottom of
+          the page: every bottom sheet with a text field, typed into blind. This
+          pads the WebView up to the keyboard's top edge. Where the OS still
+          resizes the window (the TCL on Android 15) the overlap is zero and it
+          does nothing. iOS is left alone: WKWebView handles the keyboard itself.
+          Not KeyboardAvoidingView: on an edge-to-edge window it left ~80dp of
+          padding behind after the keyboard closed. */}
+      <View
+        style={{ flex: 1, backgroundColor: '#0d0d0d', paddingBottom: kbHeight ? Math.max(0, kbHeight - (fullHeight.current - shellHeight)) : 0 }}
+        onLayout={(e) => {
+          // The tallest layout seen is the window without a keyboard. Where the OS
+          // resizes, the shrink can land before keyboardDidShow, so "height while
+          // no keyboard" would catch the shrunk value. The app is portrait-only.
+          const h = e.nativeEvent.layout.height
+          fullHeight.current = Math.max(fullHeight.current, h)
+          setShellHeight(h)
         }}
-        style={{ flex: 1, backgroundColor: '#0d0d0d' }}
-        originWhitelist={['*']}
-        javaScriptEnabled
-        domStorageEnabled
-        // In-WebView camera for the QR scanner (getUserMedia). Not in PearCircle
-        // (it scans natively); the https://localhost/ baseUrl gives the secure
-        // context getUserMedia requires.
-        allowsInlineMediaPlayback
-        mediaPlaybackRequiresUserAction={false}
-        mediaCapturePermissionGrantType='grant'
-        onPermissionRequest={(ev: any) => { try { ev?.grant?.(ev.resources) } catch {} }}
-      />
+      >
+        <WebView
+          ref={webViewRef}
+          source={{ html, baseUrl: 'https://localhost/' }}
+          onMessage={onMessage}
+          onLoad={onLoad}
+          // The other half of BOTH recoveries above (resume-freeze and boot
+          // watchdog): reload into the fresh render process, whichever one asked for
+          // it. didCrash=false is our own deliberate terminate;
+          // didCrash=true is a real renderer crash, and reloading is the right
+          // response to both. webViewLoaded is reset so queued IPC waits for the
+          // reloaded UI rather than being injected into a dead page.
+          onRenderProcessGone={(e: any) => {
+            console.warn('[webview] render process gone, didCrash=' + e?.nativeEvent?.didCrash + ' -> reload')
+            webViewLoaded.current = false
+            webViewRef.current?.reload()
+          }}
+          style={{ flex: 1, backgroundColor: '#0d0d0d' }}
+          originWhitelist={['*']}
+          javaScriptEnabled
+          domStorageEnabled
+          // In-WebView camera for the QR scanner (getUserMedia). Not in PearCircle
+          // (it scans natively); the https://localhost/ baseUrl gives the secure
+          // context getUserMedia requires.
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          mediaCapturePermissionGrantType='grant'
+          onPermissionRequest={(ev: any) => { try { ev?.grant?.(ev.resources) } catch {} }}
+        />
+      </View>
     </>
   )
 }
