@@ -24,6 +24,7 @@
 #   ./scripts/sim-drive.sh start [SimName]   boot the sim, start Appium, open a session
 #   ./scripts/sim-drive.sh dump              every label on screen + where to tap it
 #   ./scripts/sim-drive.sh tap X Y
+#   ./scripts/sim-drive.sh swipe X1 Y1 X2 Y2 [ms]   drag, default 300ms
 #   ./scripts/sim-drive.sh type "some text"  into whatever has focus
 #   ./scripts/sim-drive.sh enter             the keyboard's return key
 #   ./scripts/sim-drive.sh home
@@ -135,6 +136,15 @@ cmd_tap () {
       {\"type\":\"pointerUp\",\"button\":0}]}]}" >/dev/null
 }
 
+cmd_swipe () {
+  api POST "/session/$(session)/actions" "{\"actions\":[{\"type\":\"pointer\",\"id\":\"f1\",
+    \"parameters\":{\"pointerType\":\"touch\"},\"actions\":[
+      {\"type\":\"pointerMove\",\"duration\":0,\"x\":$1,\"y\":$2},
+      {\"type\":\"pointerDown\",\"button\":0},
+      {\"type\":\"pointerMove\",\"duration\":${5:-300},\"x\":$3,\"y\":$4},
+      {\"type\":\"pointerUp\",\"button\":0}]}]}" >/dev/null
+}
+
 # Goes to whatever holds focus, so tap the field first. One keyDown/keyUp pair per
 # character: the W3C key action is the only typing path that reaches a WebView
 # input, which is most of this app.
@@ -175,6 +185,7 @@ case "${1:-}" in
   start) shift; cmd_start "$@" ;;
   dump)  cmd_dump ;;
   tap)   cmd_tap "$2" "$3" ;;
+  swipe) cmd_swipe "$2" "$3" "$4" "$5" "$6" ;;
   type)  shift; cmd_type "$*" ;;
   enter) cmd_enter ;;
   home)  cmd_home ;;
