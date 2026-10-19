@@ -2766,6 +2766,28 @@ export default function App () {
     for (const it of checked) await call('item:toggle', { groupId: gid, listId: openListId, itemId: it.id, checked: false })
     await loadItems(gid, openListId)
   }
+  // Delete every checked item at once (asked for 2026-10-19). Checked items stay
+  // on the list by default because a tick tells the household it is done, so this
+  // is the "tidy up afterwards" step. Deletes are shared and cannot be undone, so
+  // it asks first. Not offered on chore lists, which reuse their items each round.
+  async function deleteCheckedItems () {
+    if (!gid || !openListId) return
+    const checked = items.filter((i) => i.checked)
+    setSheet(null)
+    if (!checked.length) return
+    const n = checked.length
+    const ok = await askConfirm({
+      title: `Delete ${n} checked item${n === 1 ? '' : 's'}?`,
+      message: 'This removes them for everyone in the space. This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
+    const ids = new Set(checked.map((i) => i.id))
+    setItems((cur) => cur.filter((i) => !ids.has(i.id))) // optimistic
+    for (const it of checked) await call('item:delete', { groupId: gid, listId: openListId, itemId: it.id })
+    await loadItems(gid, openListId)
+  }
   async function applyTheme (mode) { setTheme(mode); setThemeMode(mode) }
   // Bottom-nav tab switch: always leave any open list (the tab bar only shows on
   // top-level screens) and map the tab to the view state.
@@ -2931,7 +2953,7 @@ export default function App () {
         onDelete={(s) => { setDeleteTarget(s); setSheet('deleteSpace') }} onLeave={leaveSpace} />
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
-      <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} canReset={items.some((i) => i.checked)} onClose={() => setSheet(null)}
+      <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} canReset={items.some((i) => i.checked)} checkedCount={items.filter((i) => i.checked).length} onClose={() => setSheet(null)}
         grouped={grouped && presentAisles.length > 1} allCollapsed={allCollapsed} groupNoun={groupNoun}
         onToggleCollapseAll={() => { toggleCollapseAll(); setSheet(null) }}
         onRename={() => setSheet('renameList')}
@@ -2939,6 +2961,7 @@ export default function App () {
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
         onReset={resetOpenList}
+        onDeleteChecked={deleteCheckedItems}
         onSaveTemplate={saveOpenListAsTemplate}
         onDelete={confirmDeleteOpenList} />
       <TemplatesSheet open={sheet === 'templates'} templates={templates} onClose={() => setSheet(null)} onUse={useTemplate} onDelete={deleteTemplate} />
@@ -3492,7 +3515,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 // a note, which is not a list. ListCompleteSheet still says "Delete list" and
 // should: it only ever fires when every item on a list is checked, and a note's
 // lines are never checked, so a note cannot reach it.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -3515,6 +3538,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, grouped,
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
       {grouped ? <Row onClick={onToggleCollapseAll}><span style={{ flex: 1, textAlign: 'left' }}>{allCollapsed ? `Expand all ${groupNoun}s` : `Collapse all ${groupNoun}s`}</span></Row> : null}
       {canReset ? <Row onClick={onReset}><span style={{ flex: 1, textAlign: 'left' }}>Uncheck all</span></Row> : null}
+      {checkedCount > 0 && list.kind !== 'chore' ? <Row onClick={onDeleteChecked} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete checked items</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{checkedCount}</span></Row> : null}
       <Row onClick={onSaveTemplate}><span style={{ flex: 1, textAlign: 'left' }}>Save as template</span><span style={{ color: c.text.muted, fontSize: 13 }}>this phone</span></Row>
       {canDelete ? <Row onClick={onDelete} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete</span></Row> : null}
     </BottomSheet>
