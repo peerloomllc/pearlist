@@ -350,19 +350,81 @@ function Field ({ value, onChange, placeholder, onEnter, autoFocus }) {
 
 // `z` lifts a sheet above the others. Every sheet shares zIndex 100, so without it
 // the one later in the page wins, whichever opened first.
+//
+// Three ways out besides the Android back button: tap the backdrop, tap the X, or
+// drag the sheet down. The drag only starts on a downward move while the sheet
+// (and anything scrollable under the finger) is scrolled to the top, so it never
+// fights scrolling. Listeners are native because React's touch handlers are
+// passive and cannot preventDefault the page from scrolling along.
+const SHEET_EASE = 'transform 280ms cubic-bezier(0.32,0.72,0,1)'
 function BottomSheet ({ open, onClose, title, children, z = 100 }) {
   const [render, setRender] = useState(open)
   const [shown, setShown] = useState(false)
+  const sheetRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     if (open) { setRender(true); const t = setTimeout(() => setShown(true), 20); return () => clearTimeout(t) }
     setShown(false); const t = setTimeout(() => setRender(false), 280); return () => clearTimeout(t)
   }, [open])
+  useEffect(() => {
+    const el = sheetRef.current
+    if (!render || !el) return
+    let start = null // { x, y, t, active, decided }
+    let dy = 0
+    const scrolledUnder = (node) => {
+      for (let n = node; n && n !== el; n = n.parentElement) if (n.scrollTop > 0) return true
+      return el.scrollTop > 0
+    }
+    const onStart = (e) => {
+      const t = e.touches[0]
+      start = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY, t: Date.now(), active: false, decided: false } : null
+      dy = 0
+    }
+    const onMove = (e) => {
+      const t = e.touches[0]
+      if (!start || !t) return
+      const mx = t.clientX - start.x
+      const my = t.clientY - start.y
+      if (!start.decided) {
+        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return
+        start.decided = true
+        start.active = my > 0 && my > Math.abs(mx) && !scrolledUnder(e.target)
+        if (start.active) { start.y = t.clientY; start.t = Date.now(); el.style.transition = 'none' }
+      }
+      if (!start.active) return
+      e.preventDefault()
+      dy = Math.max(0, t.clientY - start.y)
+      el.style.transform = `translateY(${dy}px)`
+    }
+    const onEnd = () => {
+      if (start?.active) {
+        const speed = dy / Math.max(1, Date.now() - start.t) // px per ms
+        const dismiss = dy > Math.min(120, el.offsetHeight * 0.3) || (speed > 0.5 && dy > 24)
+        el.style.transition = SHEET_EASE
+        el.style.transform = dismiss ? 'translateY(100%)' : 'translateY(0)'
+        if (dismiss) onCloseRef.current?.()
+      }
+      start = null
+    }
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd)
+    el.addEventListener('touchcancel', onEnd)
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
+    }
+  }, [render])
   if (!render) return null
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: z, background: shown ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0)', transition: 'background 280ms ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 600, background: c.surface.card, borderRadius: `${r.sheet}px ${r.sheet}px 0 0`, maxHeight: '85dvh', overflowY: 'auto', transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 280ms cubic-bezier(0.32,0.72,0,1)', padding: `${sp.sm}px ${sp.lg}px calc(var(--pear-safe-bottom) + ${sp.xl}px)` }}>
+      <div ref={sheetRef} onClick={(e) => e.stopPropagation()} style={{ position: 'relative', width: '100%', maxWidth: 600, background: c.surface.card, borderRadius: `${r.sheet}px ${r.sheet}px 0 0`, maxHeight: '85dvh', overflowY: 'auto', overscrollBehavior: 'contain', transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: SHEET_EASE, padding: `${sp.sm}px ${sp.lg}px calc(var(--pear-safe-bottom) + ${sp.xl}px)` }}>
         <div style={{ width: 36, height: 4, borderRadius: 2, background: c.text.muted, margin: '6px auto 14px' }} />
-        {title ? <h2 style={{ textAlign: 'center', fontSize: 17, fontWeight: 400, margin: `0 0 ${sp.base}px`, color: c.text.primary }}>{title}</h2> : null}
+        <IconButton label='Close' onClick={onClose} style={{ position: 'absolute', top: sp.xs, right: sp.xs, color: c.text.muted }}><X size={20} weight='regular' /></IconButton>
+        {title ? <h2 style={{ textAlign: 'center', fontSize: 17, fontWeight: 400, margin: `0 0 ${sp.base}px`, padding: '0 32px', color: c.text.primary }}>{title}</h2> : null}
         {children}
       </div>
     </div>
