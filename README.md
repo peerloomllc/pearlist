@@ -84,8 +84,8 @@ See the [full privacy policy](https://peerloomllc.com/pearlist/privacy) and a [p
 ## Known Limitations
 
 - **Both devices must be online at the same time** to sync in real time - you can always read and edit your own copy offline, and changes replicate the next time members' devices can reach each other
-- **Background sync depends on the OS** - on Android, PearList can keep syncing while closed (a foreground service, opt-in in Settings). iOS pauses apps in the background, so an all-iPhone space only syncs when someone has PearList open; keep an Android device in the space for always-on background sync
-- **No web dashboard or desktop client** - PearList is mobile-only, because there is no server to back a web view
+- **Background sync depends on the OS** - on Android, PearList can keep syncing while closed (a foreground service, opt-in in Settings). iOS pauses apps in the background, so an all-iPhone space only syncs when someone has PearList open. For always-on sync, add a [PeerLoom Seeder](https://peerloomllc.com/seeder/support) on a computer that stays on (Mac, Windows, Linux, Umbrel or StartOS), or keep an Android device in the space
+- **No web dashboard or desktop client** - you read and edit lists on phones only, because there is no server to back a web view. To keep a copy on a computer that stays on, use a [PeerLoom Seeder](https://peerloomllc.com/seeder/support): it keeps the space in sync while phones sleep but holds the lists encrypted, so it cannot show or edit them
 - **Aisle sorting only knows the words it ships with** - an unusual or misspelt item rests in "Other" until you drag it to an aisle, which PearList then remembers for that item
 
 ---
