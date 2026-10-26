@@ -29,12 +29,12 @@ license: MIT
 website: https://peerloomllc.com/pearlist/
 
 images:
-  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-1.png
-  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-2.png
-  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-3.png
-  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-4.png
-  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-5.png
-  - ./metadata/android/screenshots/Pixel_9_Framed/light/scene-6.png
+  - metadata/zapstore/01-light-scene-1.webp
+  - metadata/zapstore/02-light-scene-2.webp
+  - metadata/zapstore/03-light-scene-3.webp
+  - metadata/zapstore/04-light-scene-4.webp
+  - metadata/zapstore/05-light-scene-5.webp
+  - metadata/zapstore/06-light-scene-6.webp
 
 metadata_sources:
   - github
