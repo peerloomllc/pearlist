@@ -504,6 +504,7 @@ echo ""
 PUBLISH_GITHUB=true
 PUBLISH_ZAPSTORE=true
 PUBLISH_NOSTR=true
+NEEDS_BUILD=false  # set true in the destination prompt below; stays false in ZAPSTORE_ONLY mode, which skips that prompt. set -u is on.
 PUBLISH_PLAY=false
 PUBLISH_APP_STORE=false
 PUBLISH_DESKTOP=false
