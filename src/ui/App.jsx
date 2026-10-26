@@ -937,6 +937,14 @@ const CLEAR_ON_CHECKED_KEY = 'pearlist:clearonchecked'
 function loadClearOnChecked () { try { return localStorage.getItem(CLEAR_ON_CHECKED_KEY) === '1' } catch { return false } }
 function saveClearOnChecked (on) { try { localStorage.setItem(CLEAR_ON_CHECKED_KEY, on ? '1' : '0') } catch {} }
 
+// Device-local preference: ask "How many?" before a grocery item is added (GH #222).
+// On by default and read as on when the key is missing, so an update never takes
+// the step away from anyone who uses it. Off adds the item straight away with a
+// quantity of 1, which the item sheet can still change.
+const ASK_QTY_KEY = 'pearlist:askqty'
+function loadAskQty () { try { return localStorage.getItem(ASK_QTY_KEY) !== '0' } catch { return true } }
+function saveAskQty (on) { try { localStorage.setItem(ASK_QTY_KEY, on ? '1' : '0') } catch {} }
+
 // Which Settings sections are expanded. Device-local and purely presentational,
 // like the aisle view state above.
 //
@@ -2158,6 +2166,8 @@ export default function App () {
   const setAutoCollapse = useCallback((on) => { setAutoCollapseState(!!on); saveAutoCollapse(on) }, [])
   const [clearOnChecked, setClearOnCheckedState] = useState(loadClearOnChecked)
   const setClearOnChecked = useCallback((on) => { setClearOnCheckedState(!!on); saveClearOnChecked(on) }, [])
+  const [askQty, setAskQtyState] = useState(loadAskQty)
+  const setAskQty = useCallback((on) => { setAskQtyState(!!on); saveAskQty(on) }, [])
   // The group the header "+" aimed the composer at, or null for the ordinary
   // add bar. Device-local and momentary: it survives only until the next add or
   // until the user clears the chip, and never leaves this screen.
@@ -2580,9 +2590,17 @@ export default function App () {
     // row is added only after the quantity sheet closes, so it is not inserted
     // underneath the sheet where the just-added flash would be missed. The pin
     // rides along on the sheet, since the add happens on the other side of it.
-    if (openList?.kind === 'grocery') { setSheet({ type: 'qty', text: t, aisle: pin }); return }
-    const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t })
-    if (itemId && pin) await fileInto(itemId, t, pin, null)
+    if (openList?.kind === 'grocery' && askQty) { setSheet({ type: 'qty', text: t, aisle: pin }); return }
+    await addNow(t, pin, openList?.kind === 'grocery' ? 1 : undefined)
+  }
+
+  // The add itself, shared by the quantity sheet and a straight add. `qty` is set
+  // only for groceries, which also pick up a learned aisle for the text.
+  async function addNow (t, pin, qty) {
+    if (!t || !gid || !openListId) return
+    const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, ...(qty ? { qty } : {}) })
+    const ov = qty ? overrideFor(t) : null
+    if (itemId && (pin || ov)) await fileInto(itemId, t, pin, ov)
     await loadItems(gid, openListId)
     if (itemId) setFlashId(itemId) // scroll to + flash the new row
   }
@@ -2884,7 +2902,7 @@ export default function App () {
           )}
         </>
       ) : view === 'profile' ? (
-        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} clearOnChecked={clearOnChecked} onClearOnChecked={setClearOnChecked} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} clearOnChecked={clearOnChecked} onClearOnChecked={setClearOnChecked} askQty={askQty} onAskQty={setAskQty} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
           spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces}
           onLinkDevice={linkThisDevice} />
       ) : view === 'about' ? (
@@ -3012,7 +3030,7 @@ export default function App () {
         onDelete={async () => { await call('item:delete', { groupId: gid, listId: openListId, itemId: sheet.item.id }); await loadItems(gid, openListId); setSheet(null) }}
       />
       <QtySheet open={!!sheet && sheet.type === 'qty'}
-        onCommit={async (qty) => { const t = sheet?.text; const pin = sheet?.aisle; setSheet(null); if (!t || !gid || !openListId) return; const { itemId } = await call('item:add', { groupId: gid, listId: openListId, text: t, qty }); const ov = overrideFor(t); if (itemId && (pin || ov)) await fileInto(itemId, t, pin, ov); await loadItems(gid, openListId); if (itemId) setFlashId(itemId) }}
+        onCommit={async (qty) => { const t = sheet?.text; const pin = sheet?.aisle; setSheet(null); await addNow(t, pin, qty) }}
       />
       <AssigneePickerSheet open={!!listPicker} onClose={() => setListPicker(null)} members={members} selfPubkey={selfPubkey} current={listPicker?.current}
         onPick={(pk) => { if (listPicker) assignList(listPicker.listId, pk) }} />
@@ -3919,7 +3937,7 @@ function SeederBackup ({ onAbout, about }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, clearOnChecked, onClearOnChecked, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, clearOnChecked, onClearOnChecked, askQty, onAskQty, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
   // build shows nothing new.
@@ -4144,6 +4162,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
     'Seeder backup': "Run PeerLoom Seeder on a computer that stays on, such as an Umbrel or a spare PC, and pair this phone with it. Every member of your spaces then backs up to it. A new phone still needs a member's phone online to join a space.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
+    'Ask how many': "When you add something to a grocery list, PearList asks how many you need before it goes on the list. Turn this off to skip that step: the item goes straight on as one, and you can still tap it later to change the number. This only changes this phone.",
     'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
     'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
@@ -4279,6 +4298,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
           control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
         <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
           control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
+        <Setting onAbout={setInfo} title='Ask how many' about={ABOUT['Ask how many']}
+          control={<Toggle on={askQty !== false} onChange={(v) => onAskQty(v)} />} />
       <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
           extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
           control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
