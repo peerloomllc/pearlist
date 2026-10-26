@@ -1621,7 +1621,7 @@ if priors:
         # _asc_attach_build treats already-attached as success. Its old inline
         # check called `asc versions get`, which asc has since removed.
         if ! _asc_attach_build "$ASC_VERSION_ID" "$_BUILD_ID"; then
-          PUBLISH_FAILED=true
+          PUBLISH_FAILED=true; APP_STORE_FAILED=true
           _SKIP_SUBMIT=true
         fi
 
