@@ -18,6 +18,7 @@ import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { nextOccurrence } from '../repeatTime.js'
+import { groupByReminder } from '../reminderGroups.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
@@ -319,8 +320,10 @@ function Button ({ variant = 'primary', children, style, ...rest }) {
     primary: { background: c.primary, color: c.text.onPrimary, border: 'none' },
     secondary: { background: c.surface.input, color: c.text.primary, border: `1px solid ${c.text.muted}` },
     danger: { background: c.error, color: '#000', border: 'none' },
+    // A destructive choice that should not compete with the main one beside it.
+    dangerOutline: { background: 'transparent', color: c.error, border: `1px solid ${c.error}` },
   }
-  return <button data-haptic={variant === 'danger' ? 'warn' : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
+  return <button data-haptic={variant === 'danger' || variant === 'dangerOutline' ? 'warn' : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
 }
 
 function IconButton ({ children, label, style, ...rest }) {
@@ -1354,6 +1357,43 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, onAddTo, ai
   )
 }
 
+// The "Group by reminder" view (asked for 2026-10-26): Today, This week, This
+// month, Later, No reminder, with the bucketing in src/reminderGroups.js. A view
+// only, so there is no drag and no "+" per group: moving an item between these
+// groups would mean changing its reminder, which the item sheet already does.
+// Collapse state shares the list's aisle prefs under a `rem:` prefix, so a user
+// section called "Today" never collapses with the reminder group of that name.
+function ReminderGroupedItems ({ items, renderRow, collapsed, onToggle, flashId }) {
+  return (
+    <>
+      {groupByReminder(items, Date.now()).map(({ group, items: rows }) => {
+        const key = `rem:${group}`
+        const isCollapsed = !!collapsed?.has(key)
+        const open = rows.filter((it) => !it.checked).length
+        return (
+          <div key={key}>
+            <div style={{ top: 0, position: 'sticky', zIndex: 1, display: 'flex', alignItems: 'center', gap: sp.sm, background: c.surface.elevated, borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px` }}>
+              <button onClick={() => onToggle?.(key)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp.sm, background: 'none', border: 'none', padding: 0, cursor: 'pointer', minWidth: 0 }}>
+                <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.primary }}>{group}</span>
+              </button>
+              <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{open < rows.length ? `${open}/${rows.length}` : rows.length}</span>
+            </div>
+            <CollapsibleRows collapsed={isCollapsed}>
+              {rows.map((it) => (
+                <div key={it.id} data-item-id={it.id} style={{ position: 'relative' }}>
+                  {renderRow(it)}
+                  <ItemFlash on={flashId === it.id} />
+                </div>
+              ))}
+            </CollapsibleRows>
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
 // Three doors, not two, and they are peers on purpose. Restoring is not an
 // advanced case: a replacement phone is one of the ordinary ways to arrive here,
 // and it is the ONLY one of the three that needs no other device and no network -
@@ -2202,6 +2242,9 @@ export default function App () {
   // converted to a note can still carry stale aisle categories that would
   // otherwise light up the (unreachable) collapse-all option.
   const grouped = !isNoteList && (isGroceryList || items.some((i) => i.category))
+  // "Group by reminder" replaces the aisle/section grouping on this list, on this
+  // phone only (stored with the list's other view prefs).
+  const byReminder = !isNoteList && !!aisleView.byReminder
 
   // Drag: reorder items/groups (device-local) or drop an item into another group
   // to re-file it (recategorize, which syncs via ai:setCategory).
@@ -2788,13 +2831,15 @@ export default function App () {
   // on the list by default because a tick tells the household it is done, so this
   // is the "tidy up afterwards" step. Deletes are shared and cannot be undone, so
   // it asks first. Not offered on chore lists, which reuse their items each round.
-  async function deleteCheckedItems () {
+  // `confirmed` skips the ask when the caller was already a confirmation (the
+  // "All done" sheet).
+  async function deleteCheckedItems ({ confirmed = false } = {}) {
     if (!gid || !openListId) return
     const checked = items.filter((i) => i.checked)
     setSheet(null)
     if (!checked.length) return
     const n = checked.length
-    const ok = await askConfirm({
+    const ok = confirmed || await askConfirm({
       title: `Delete ${n} checked item${n === 1 ? '' : 's'}?`,
       message: 'This removes them for everyone in the space. This cannot be undone.',
       confirmLabel: 'Delete',
@@ -2879,6 +2924,7 @@ export default function App () {
                     <ItemRow item={it} groupId={gid} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} onPhoto={(item) => setViewPhoto(item)} dragHandle={handleProps} />
                   </SwipeRow>
                 )
+                if (byReminder) return <ReminderGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} flashId={flashId} />
                 return grouped
                   ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} onAddTo={startAddTo} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
                   : items.map((it) => (
@@ -2972,21 +3018,22 @@ export default function App () {
       <StartSheet open={sheet === 'start'} onClose={() => setSheet(null)} onCreate={createSpace} />
       <JoinSheet open={sheet === 'join'} onClose={() => setSheet(null)} onJoin={joinSpace} />
       <ListOptionsSheet open={sheet === 'listOptions'} list={openList} members={members} selfPubkey={selfPubkey} canReset={items.some((i) => i.checked)} checkedCount={items.filter((i) => i.checked).length} onClose={() => setSheet(null)}
-        grouped={grouped && presentAisles.length > 1} allCollapsed={allCollapsed} groupNoun={groupNoun}
+        grouped={!byReminder && grouped && presentAisles.length > 1} allCollapsed={allCollapsed} groupNoun={groupNoun}
         onToggleCollapseAll={() => { toggleCollapseAll(); setSheet(null) }}
+        byReminder={byReminder} onToggleByReminder={() => { patchAisleView({ byReminder: !byReminder }); setSheet(null) }}
         onRename={() => setSheet('renameList')}
         onCategory={() => setSheet('category')}
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
         onReset={resetOpenList}
-        onDeleteChecked={deleteCheckedItems}
+        onDeleteChecked={() => deleteCheckedItems()}
         onSaveTemplate={saveOpenListAsTemplate}
         onDelete={confirmDeleteOpenList} />
       <TemplatesSheet open={sheet === 'templates'} templates={templates} onClose={() => setSheet(null)} onUse={useTemplate} onDelete={deleteTemplate} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
-      <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
+      <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDeleteChecked={() => deleteCheckedItems({ confirmed: true })} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner} onRemove={removeMember} removed={removedMembers} onRestore={restoreMember} revoke={revoke} />
       <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => { setSheet(null); setDeleteTarget(null) }} spaceName={deleteTarget?.name} onConfirm={() => deleteSpace(deleteTarget?.groupId)} />
@@ -3533,7 +3580,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 // a note, which is not a list. ListCompleteSheet still says "Delete list" and
 // should: it only ever fires when every item on a list is checked, and a note's
 // lines are never checked, so a note cannot reach it.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, onClose, onRename, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, byReminder, onToggleByReminder, onClose, onRename, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -3554,6 +3601,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedC
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
+      {list.kind !== 'note' ? <Row onClick={onToggleByReminder}><span style={{ flex: 1, textAlign: 'left' }}>Group by reminder</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{byReminder ? 'On' : 'Off'}</span></Row> : null}
       {grouped ? <Row onClick={onToggleCollapseAll}><span style={{ flex: 1, textAlign: 'left' }}>{allCollapsed ? `Expand all ${groupNoun}s` : `Collapse all ${groupNoun}s`}</span></Row> : null}
       {canReset ? <Row onClick={onReset}><span style={{ flex: 1, textAlign: 'left' }}>Uncheck all</span></Row> : null}
       {checkedCount > 0 && list.kind !== 'chore' ? <Row onClick={onDeleteChecked} danger><span style={{ flex: 1, textAlign: 'left' }}>Delete checked items</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{checkedCount}</span></Row> : null}
@@ -3743,14 +3791,18 @@ function DeleteSpaceSheet ({ open, onClose, spaceName, onConfirm }) {
   )
 }
 
-// Offered when checking the last open item completes a list: delete it, or keep
-// it. Deleting removes the list for everyone in the space (a shared tombstone).
-function ListCompleteSheet ({ open, listName, onDelete, onKeep, onClose }) {
+// Offered when checking the last open item completes a list: clear the checked
+// items, delete the whole list, or leave it. Clearing comes first because it is
+// the common case (feedback 2026-10-26: "I never delete lists but I always want to
+// delete all checked items"). Both deletes are shared and this sheet is their
+// confirmation, so neither asks again.
+function ListCompleteSheet ({ open, listName, onDeleteChecked, onDelete, onKeep, onClose }) {
   return (
     <BottomSheet open={open} onClose={onClose} title='All done 🎉'>
-      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>Every item on {listName ? `"${listName}"` : 'this list'} is checked off. Delete the list? This removes it for everyone in the space.</p>
-      <Button variant='danger' onClick={onDelete}>Delete list</Button>
-      <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onKeep}>Keep it</Button>
+      <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>Every item on {listName ? `"${listName}"` : 'this list'} is checked off. Either delete removes it for everyone in the space.</p>
+      <Button variant='danger' onClick={onDeleteChecked}>Delete checked items</Button>
+      <Button variant='dangerOutline' style={{ marginTop: sp.sm }} onClick={onDelete}>Delete list</Button>
+      <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onKeep}>Cancel</Button>
     </BottomSheet>
   )
 }
