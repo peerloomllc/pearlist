@@ -320,8 +320,10 @@ function Button ({ variant = 'primary', children, style, ...rest }) {
     primary: { background: c.primary, color: c.text.onPrimary, border: 'none' },
     secondary: { background: c.surface.input, color: c.text.primary, border: `1px solid ${c.text.muted}` },
     danger: { background: c.error, color: '#000', border: 'none' },
+    // A destructive choice that should not compete with the main one beside it.
+    dangerOutline: { background: 'transparent', color: c.error, border: `1px solid ${c.error}` },
   }
-  return <button data-haptic={variant === 'danger' ? 'warn' : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
+  return <button data-haptic={variant === 'danger' || variant === 'dangerOutline' ? 'warn' : undefined} style={{ ...base, ...variants[variant], ...style }} {...rest}>{children}</button>
 }
 
 function IconButton ({ children, label, style, ...rest }) {
@@ -3799,7 +3801,7 @@ function ListCompleteSheet ({ open, listName, onDeleteChecked, onDelete, onKeep,
     <BottomSheet open={open} onClose={onClose} title='All done 🎉'>
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>Every item on {listName ? `"${listName}"` : 'this list'} is checked off. Either delete removes it for everyone in the space.</p>
       <Button variant='danger' onClick={onDeleteChecked}>Delete checked items</Button>
-      <Button variant='danger' style={{ marginTop: sp.sm }} onClick={onDelete}>Delete list</Button>
+      <Button variant='dangerOutline' style={{ marginTop: sp.sm }} onClick={onDelete}>Delete list</Button>
       <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onKeep}>Cancel</Button>
     </BottomSheet>
   )
