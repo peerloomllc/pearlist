@@ -1151,63 +1151,13 @@ print(json.dumps({'tag_name': '${RELEASE_TAG}', 'name': '${RELEASE_TAG}', 'body'
   UPLOAD_URL=$(printf '%s' "$RELEASE_RESP" \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['upload_url'].split('{')[0])")
 
-  # Existing assets on this release, as "<id>\t<name>" lines, so we can delete
-  # any name collision before re-uploading (GitHub rejects a duplicate asset
-  # name with already_exists). Empty for a freshly created release.
-  EXISTING_ASSETS=$(printf '%s' "$RELEASE_RESP" \
-    | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    for a in d.get('assets', []):
-        print(str(a.get('id','')) + '\t' + a.get('name',''))
-except Exception:
-    pass
-" 2>/dev/null || echo "")
-
-  # --- Upload each asset in order ---
-  for _asset in "${RELEASE_ASSETS[@]}"; do
-    _ctype=$(_asset_content_type "$_asset")
-    _basename=$(basename "$_asset")
-
-    # Overwrite support: drop any pre-existing asset with the same name first.
-    _existing_id=$(printf '%s\n' "$EXISTING_ASSETS" \
-      | awk -F'\t' -v n="$_basename" '$2 == n {print $1; exit}')
-    if [ -n "$_existing_id" ]; then
-      echo "==> Replacing existing asset $_basename (id $_existing_id)..."
-      curl -s -X DELETE \
-        -H "Authorization: Bearer $GH_TOKEN" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/${REPO_SLUG}/releases/assets/${_existing_id}" >/dev/null
-    fi
-
-    echo "==> Uploading $_basename ($_ctype)..."
-    UPLOAD_RESP_FILE=$(mktemp)
-    curl \
-      -X POST \
-      -H "Authorization: Bearer $GH_TOKEN" \
-      -H "Accept: application/vnd.github+json" \
-      -H "Content-Type: $_ctype" \
-      "${UPLOAD_URL}?name=${_basename}" \
-      --data-binary "@${_asset}" \
-      --progress-bar \
-      -o "$UPLOAD_RESP_FILE" 2>&1
-    UPLOAD_RESP=$(cat "$UPLOAD_RESP_FILE"); rm -f "$UPLOAD_RESP_FILE"
-
-    UPLOAD_ERROR=$(printf '%s' "$UPLOAD_RESP" \
-      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))" \
-      2>/dev/null || echo "")
-    if [ -n "$UPLOAD_ERROR" ]; then
-      echo ""
-      echo "ERROR: Upload of $_basename failed:"
-      printf '%s\n' "$UPLOAD_RESP" | python3 -m json.tool 2>/dev/null || printf '%s\n' "$UPLOAD_RESP"
-      echo ""
-      echo "The GitHub release was created but $_basename was not attached."
-      echo "You can upload it manually at: https://github.com/${REPO_SLUG}/releases/tag/${RELEASE_TAG}"
-      exit 1
-    fi
-    echo "    Uploaded successfully."
-  done
+  # Several at a time with one progress line (shared library).
+  if ! release_upload_assets "$UPLOAD_URL" "${RELEASE_ASSETS[@]}"; then
+    echo ""
+    echo "ERROR: The GitHub release was created but ${#RELEASE_UPLOAD_FAILED[@]} file(s) were not attached."
+    echo "You can upload them manually at: https://github.com/${REPO_SLUG}/releases/tag/${RELEASE_TAG}"
+    exit 1
+  fi
 
 else
   # Fallback: gh CLI (requires working auth). gh accepts multiple positional
