@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
@@ -3705,9 +3705,17 @@ function RenameListSheet ({ open, current, onClose, onSave }) {
 }
 
 // Transient toast (e.g. "Alex joined", "Space deleted"). Tap to dismiss.
+// Sits just under the screen's header (Tim, 2026-10-15): at the very top it
+// covered the Spaces drop-down for its 4 seconds. Headers differ in height from
+// screen to screen, so it measures the one on screen rather than guessing.
 function Banner ({ text, onClose }) {
+  const [top, setTop] = useState(null)
+  useLayoutEffect(() => {
+    const h = document.querySelector('header')
+    if (h) setTop(h.getBoundingClientRect().bottom + 8)
+  }, [])
   return (
-    <div onClick={onClose} style={{ position: 'fixed', top: 'calc(var(--pear-safe-top) + 8px)', left: '50%', transform: 'translateX(-50%)', zIndex: 130, maxWidth: 560, width: 'calc(100% - 24px)', background: c.primary, color: c.text.onPrimary, padding: '10px 16px', borderRadius: r.lg, fontSize: 14, fontWeight: 400, textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)', cursor: 'pointer' }}>{text}</div>
+    <div onClick={onClose} style={{ position: 'fixed', top: top ?? 'calc(var(--pear-safe-top) + 64px)', left: '50%', transform: 'translateX(-50%)', zIndex: 130, maxWidth: 560, width: 'calc(100% - 24px)', background: c.primary, color: c.text.onPrimary, padding: '10px 16px', borderRadius: r.lg, fontSize: 14, fontWeight: 400, textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)', cursor: 'pointer' }}>{text}</div>
   )
 }
 
