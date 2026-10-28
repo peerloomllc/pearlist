@@ -1298,7 +1298,10 @@ function CollapsibleRows ({ collapsed, children }) {
   return (
     <div style={{ display: 'grid', gridTemplateRows: collapsed ? '0fr' : '1fr', transition: 'grid-template-rows 340ms cubic-bezier(0.4,0,0.2,1)' }}
       onTransitionEnd={(e) => { if (e.propertyName === 'grid-template-rows' && !collapsed) setClip(false) }}>
-      <div style={{ overflow: clip ? 'hidden' : 'visible', minHeight: 0 }}>{children}</div>
+      {/* minWidth 0: a grid item otherwise widens to its content's longest unbroken
+          line, so a long note pushed the whole row past the screen edge instead of
+          being cut off with an ellipsis (user report 2026-10-28). */}
+      <div style={{ overflow: clip ? 'hidden' : 'visible', minHeight: 0, minWidth: 0 }}>{children}</div>
     </div>
   )
 }
