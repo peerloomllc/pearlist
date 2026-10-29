@@ -25,7 +25,7 @@ Keep looks and a few small things on each note.
    a list's first unticked items with their ticks, item counts) and the
    first photo, tinted by the card's colour. Pinned cards come first, in
    their own group. A button at the top switches between Cards and the
-   current rows; the choice is remembered on the device.
+   current rows (cards by default); the choice is remembered on the device.
 2. **Colour.** `color` on a list row: one of eight names (`default`,
    `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple`), each with
    a light and a dark shade, so both themes stay readable. Shared with the
@@ -80,8 +80,7 @@ days (a separate, small plan once this lands).
 Revert, but keep the sweep change, so note photos already added are still
 cleared when their note is deleted. The fields stay on rows as ignored data.
 
-## Open questions
+## Decided by Tim 2026-10-29
 
-1. Cards or rows by default on the Lists page?
-2. Labels and pins shared with everyone in the space (as written), or
-   personal to each person?
+1. The Lists page shows cards by default; rows are one tap away.
+2. Labels and pins are shared with everyone in the space.
