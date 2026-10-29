@@ -77,8 +77,8 @@ days (a separate, small plan once this lands).
 
 ## Rollback
 
-Revert. The fields stay on rows as ignored data; photos are swept as when a
-note is deleted only if the sweep is kept, so keep the sweep change.
+Revert, but keep the sweep change, so note photos already added are still
+cleared when their note is deleted. The fields stay on rows as ignored data.
 
 ## Open questions
 
