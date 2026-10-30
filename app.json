@@ -101,6 +101,7 @@
       "./plugins/with-android-standalone-debug",
       "./plugins/with-android-release-signing",
       "./plugins/with-strip-aps",
+      "./plugins/with-android-no-firebase",
       "./plugins/with-compressed-debug-libs",
       "expo-secure-store"
     ],
