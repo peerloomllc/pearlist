@@ -63,6 +63,7 @@
 // LIST ROW
 //   name, kind                                     CARRY
 //   notifyOnComplete                               CARRY - the user chose it
+//   color, pinned                                  CARRY - the user chose them
 //   assignee                                       DROP  - as above
 //   id, createdBy, createdAt, pubkey, updatedAt    DROP  - as above
 //   deleted                                        DROP  - not exported
@@ -181,6 +182,8 @@ function takeLists (lists, budget) {
       name: clean(l.name) || 'List',
       kind: clean(l.kind) || null,
       ...(clean(l.notifyOnComplete) ? { notifyOnComplete: clean(l.notifyOnComplete) } : {}),
+      ...(clean(l.color) && clean(l.color) !== 'default' ? { color: clean(l.color) } : {}),
+      ...(l.pinned === true ? { pinned: true } : {}),
       items: entries,
     })
   }

@@ -12,7 +12,8 @@ const sodium = require('sodium-universal')
 
 const { sameIdentityAsOwner, myDeviceKeys, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, reminderTimes, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
-const { planNoteSave } = require('./noteText')
+const { planNoteSave, sortNoteRows } = require('./noteText')
+const { normalizeColor, isPinned } = require('./listStyle')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
 const { collapseMembers, sameIdentityKeys, identityRootOf, evictionTargets, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
@@ -1801,7 +1802,7 @@ const methods = {
           for await (const { value: it } of base.view.createReadStream(itemRange(l.id))) {
             if (it && !it.deleted) items.push(it)
           }
-          lists.push({ name: l.name, kind: l.kind, notifyOnComplete: l.notifyOnComplete, items })
+          lists.push({ name: l.name, kind: l.kind, notifyOnComplete: l.notifyOnComplete, color: l.color, pinned: l.pinned, items })
         }
         spaces.push({ name, customAisles: byGroup[value.groupId], lists })
       } catch { continue }
@@ -1848,6 +1849,8 @@ const methods = {
           // A user's own setting for this list, so it is restored. Normalized
           // here because the file may have been hand-edited.
           ...(normalizeNotifyMode(l.notifyOnComplete) ? { notifyOnComplete: normalizeNotifyMode(l.notifyOnComplete) } : {}),
+          ...(normalizeColor(l.color) !== 'default' ? { color: normalizeColor(l.color) } : {}),
+          ...(isPinned(l) ? { pinned: true } : {}),
         })
         for (const e of l.items) {
           const itemId = newEntityId()
@@ -2124,6 +2127,60 @@ const methods = {
     if (!existing || existing.deleted) throw new Error('list not found')
     await putRow(ctx, groupId, listKey(listId), { ...existing, notifyOnComplete: normalizeNotifyMode(mode) || 'off' })
     return { ok: true }
+  },
+
+  // Card colour and pin (proposals/2026-10-29-keep-style-notes.md), shared with
+  // the space. 'default' and false are written as absent, so a list nobody styled
+  // keeps the row shape older builds wrote.
+  'list:setColor': async ({ groupId, listId, color }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, listKey(listId))
+    if (!existing || existing.deleted) throw new Error('list not found')
+    const { color: _old, ...rest } = existing
+    const c = normalizeColor(color)
+    await putRow(ctx, groupId, listKey(listId), c === 'default' ? rest : { ...rest, color: c })
+    return { ok: true }
+  },
+
+  'list:setPinned': async ({ groupId, listId, pinned }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, listKey(listId))
+    if (!existing || existing.deleted) throw new Error('list not found')
+    const { pinned: _old, ...rest } = existing
+    await putRow(ctx, groupId, listKey(listId), pinned === true ? { ...rest, pinned: true } : rest)
+    return { ok: true }
+  },
+
+  // What each card on the Lists page shows: open and total counts, the first
+  // lines (a note's text in order, a list's open items first) and the first item
+  // with a photo. One read of the item range, appends nothing.
+  'list:previews': async ({ groupId }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    await base.update()
+    const now = Date.now()
+    const byList = new Map()
+    for await (const { value } of base.view.createReadStream({ gt: 'item:', lt: 'item:~' })) {
+      if (!value || value.deleted || !value.listId) continue
+      const it = normalizeRepeat(value.repeat) ? { ...value, checked: effectiveChecked(value, now) } : value
+      if (!byList.has(it.listId)) byList.set(it.listId, [])
+      byList.get(it.listId).push(it)
+    }
+    const out = {}
+    for await (const { value: l } of base.view.createReadStream(LIST_RANGE)) {
+      if (!l || l.deleted) continue
+      const rows = byList.get(l.id) || []
+      const ordered = l.kind === 'note'
+        ? sortNoteRows(rows)
+        : rows.slice().sort((a, b) => (a.checked === b.checked ? (a.createdAt || 0) - (b.createdAt || 0) : a.checked ? 1 : -1))
+      const withPhoto = rows.find((it) => it.photo && it.photo.hash)
+      out[l.id] = {
+        open: rows.filter((it) => !it.checked).length,
+        total: rows.length,
+        lines: ordered.slice(0, 8).map((it) => ({ text: String(it.text || ''), checked: !!it.checked })),
+        photo: withPhoto ? { id: withPhoto.id, listId: withPhoto.listId, photo: withPhoto.photo } : null,
+      }
+    }
+    return out
   },
 
   'list:rename': async ({ groupId, listId, name }, ctx) => {

@@ -11,6 +11,8 @@ import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { shouldClear } from '../clearOnChecked.js'
 import { checkedLast } from '../checkedLast.js'
+import { LIST_COLORS, normalizeColor, isPinned } from '../listStyle.js'
+import { orderCards, moveCard } from '../cardOrder.js'
 import { addCategory } from '../addToGroup.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
@@ -20,7 +22,7 @@ import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { nextOccurrence } from '../repeatTime.js'
 import { groupByReminder } from '../reminderGroups.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -956,6 +958,16 @@ const ALL_DONE_KEY = 'pearlist:alldone'
 function loadAllDone () { try { return localStorage.getItem(ALL_DONE_KEY) !== '0' } catch { return true } }
 function saveAllDone (on) { try { localStorage.setItem(ALL_DONE_KEY, on ? '1' : '0') } catch {} }
 
+// Device-local preference: the Lists page as cards or rows
+// (proposals/2026-10-29-keep-style-notes.md). Cards unless this phone chose rows.
+const LIST_VIEW_KEY = 'pearlist:listview'
+function loadListView () { try { return localStorage.getItem(LIST_VIEW_KEY) === 'rows' ? 'rows' : 'cards' } catch { return 'cards' } }
+function saveListView (v) { try { localStorage.setItem(LIST_VIEW_KEY, v) } catch {} }
+// Card order per space, on this phone (src/cardOrder.js).
+const CARD_ORDER_KEY = 'pearlist:cardorder:'
+function loadCardOrder (gid) { try { const v = JSON.parse(localStorage.getItem(CARD_ORDER_KEY + gid) || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } }
+function saveCardOrder (gid, ids) { try { localStorage.setItem(CARD_ORDER_KEY + gid, JSON.stringify(ids)) } catch {} }
+
 // Device-local preference: ask "How many?" before a grocery item is added (GH #222).
 // On by default and read as on when the key is missing, so an update never takes
 // the step away from anyone who uses it. Off adds the item straight away with a
@@ -1721,6 +1733,9 @@ export default function App () {
   const spacesRef = useRef([])
   const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
+  const [previews, setPreviews] = useState({})
+  const [listView, setListViewState] = useState(loadListView)
+  const setListView = useCallback((v) => { setListViewState(v); saveListView(v) }, [])
   const [openListId, setOpenListId] = useState(null)
   const [items, setItems] = useState([])
   const [itemsListId, setItemsListId] = useState(null) // which list `items` belongs to
@@ -1783,6 +1798,8 @@ export default function App () {
       return []
     })
     setLists(ls)
+    // What the cards show. Its own catch: a card with no preview still opens.
+    call('list:previews', { groupId }).then((p) => setPreviews(p || {})).catch(() => {})
     // Stay on the overview by default; only keep a list open if it still exists.
     setOpenListId((cur) => (cur && ls.some(l => l.id === cur) ? cur : null))
     return ls
@@ -2310,6 +2327,7 @@ export default function App () {
   // Drag: reorder items/groups (device-local) or drop an item into another group
   // to re-file it (recategorize, which syncs via ai:setCategory).
   const listScrollRef = useRef(null)
+  const listsScrollRef = useRef(null)
   const recategorizeItem = useCallback((itemId, aisle) => {
     if (!gid || !openListId) return
     if (isGroceryList) rememberOverride(items.find((i) => i.id === itemId)?.text, aisle) // learn corrections (grocery classifier only)
@@ -2838,6 +2856,17 @@ export default function App () {
     await call('list:setKind', { groupId: gid, listId, kind })
     await loadLists(gid); setSheet(null)
   }
+  async function setListColor (listId, color) {
+    if (!gid || !listId) return
+    await call('list:setColor', { groupId: gid, listId, color })
+    await loadLists(gid)
+  }
+  async function toggleListPin (list) {
+    if (!gid || !list) return
+    haptic('light')
+    await call('list:setPinned', { groupId: gid, listId: list.id, pinned: !isPinned(list) })
+    await loadLists(gid)
+  }
   async function setNotifyMode (listId, mode) {
     if (!gid || !listId) return
     await call('list:setNotifyOnComplete', { groupId: gid, listId, mode })
@@ -3058,7 +3087,7 @@ export default function App () {
           />
           <MembersBar members={members} onOpen={() => setSheet('members')} />
           <SyncBanner status={syncStatus} retried={repairRetried} busy={repairing} onAction={repairSpace} />
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
+          <div ref={listsScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>
                   {/* "Add one below" is an invitation, and the composer under it is
@@ -3071,7 +3100,12 @@ export default function App () {
                     ? `Nothing to show for ${activeSpace?.name || 'this space'} right now.`
                     : `No lists in ${activeSpace?.name || 'this space'} yet. Add one below.`}
                 </div>
-              : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
+              : <>
+                  <ListViewSwitch view={listView} onChange={setListView} />
+                  {listView === 'cards'
+                    ? <ListCards lists={lists} previews={previews} groupId={gid} members={members} onOpen={setOpenListId} scrollRef={listsScrollRef} />
+                    : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
+                </>}
           </div>
           {templates.length && !listDraft.trim() ? (
             <button onClick={() => setSheet('templates')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: `${sp.sm}px 0 0`, background: 'none', border: 'none', cursor: 'pointer', color: c.primary, fontSize: 14, fontWeight: 300 }}>
@@ -3095,6 +3129,8 @@ export default function App () {
         onToggleCollapseAll={() => { toggleCollapseAll(); setSheet(null) }}
         byReminder={byReminder} onToggleByReminder={() => { patchAisleView({ byReminder: !byReminder }); setSheet(null) }}
         onRename={() => setSheet('renameList')}
+        onPin={() => { toggleListPin(openList); setSheet(null) }}
+        onColor={(color) => setListColor(openListId, color)}
         onCategory={() => setSheet('category')}
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
@@ -3430,6 +3466,222 @@ function LinkDeviceSheet ({ open, onClose, onLink }) {
   )
 }
 
+// Card backgrounds, one per name in listStyle.js. Tokens in theme.js, each with a
+// light and a dark shade so text stays readable in both themes.
+const CARD_BG = Object.fromEntries(LIST_COLORS.map((k) => [k, k === 'default' ? c.surface.card : `var(--card-${k})`]))
+
+// The colour row in a list's options sheet. Shared with the space.
+function ColorSwatches ({ value, onChange }) {
+  return (
+    <div role='radiogroup' aria-label='Colour' style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: `${sp.md}px ${sp.xs}px`, borderTop: `1px solid ${c.divider}` }}>
+      {LIST_COLORS.map((k) => (
+        <button key={k} role='radio' aria-checked={value === k} aria-label={k === 'default' ? 'No colour' : k} onClick={() => onChange?.(k)}
+          style={{ width: 32, height: 32, borderRadius: '50%', padding: 0, cursor: 'pointer', background: CARD_BG[k], border: value === k ? `2px solid ${c.primary}` : `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.primary }}>
+          {value === k ? <Check size={14} weight='bold' /> : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Cards or rows, remembered on this phone.
+function ListViewSwitch ({ view, onChange }) {
+  const btn = (v, label, Icon) => (
+    <button onClick={() => onChange(v)} aria-label={label} aria-pressed={view === v}
+      style={{ width: 36, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: r.sm, cursor: 'pointer', background: view === v ? c.surface.elevated : 'none', color: view === v ? c.text.primary : c.text.muted }}>
+      <Icon size={18} weight='regular' />
+    </button>
+  )
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 2, padding: `${sp.xs}px ${sp.base}px ${sp.md}px` }}>
+      {btn('cards', 'Show as cards', SquaresFour)}
+      {btn('rows', 'Show as rows', Rows)}
+    </div>
+  )
+}
+
+// The Lists page as cards in two columns, pinned ones first in their own group.
+// Cards fill left to right, then down. Press and hold a card to drag it; the
+// order is kept per space on this phone (src/cardOrder.js) and a card only moves
+// within its own group.
+function ListCards ({ lists, previews, groupId, members, onOpen, scrollRef }) {
+  const [saved, setSaved] = useState(() => loadCardOrder(groupId))
+  useEffect(() => { setSaved(loadCardOrder(groupId)) }, [groupId])
+  const rank = (l) => CATEGORIES.findIndex((cat) => cat.key === categoryOf(l.kind).key)
+  const ordered = orderCards(lists.slice().sort((a, b) => rank(a) - rank(b)), saved)
+  const pinned = ordered.filter(isPinned)
+  const others = ordered.filter((l) => !isPinned(l))
+  const drag = useCardDrag({ scrollRef, onDrop: (id, targetId) => {
+    const next = moveCard(ordered.map((l) => l.id), id, targetId)
+    setSaved(next); saveCardOrder(groupId, next)
+  } })
+  const card = (l, group) => (
+    <ListCard key={l.id} list={l} group={group} preview={previews?.[l.id]} groupId={groupId} members={members}
+      lifted={drag.lifted === l.id} target={drag.target === l.id}
+      onOpen={() => { if (drag.didDrag()) return; onOpen(l.id) }} dragProps={drag.props(l.id, group)} />
+  )
+  const grid = (ls, group) => (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: sp.sm, padding: `0 ${sp.sm}px` }}>
+      {[0, 1].map((col) => (
+        <div key={col} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: sp.sm }}>
+          {ls.filter((_, i) => i % 2 === col).map((l) => card(l, group))}
+        </div>
+      ))}
+    </div>
+  )
+  const label = (text) => <div style={{ padding: `${sp.md}px ${sp.base}px ${sp.xs}px`, color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6 }}>{text}</div>
+  return (
+    <>
+      {pinned.length ? <>{label('Pinned')}{grid(pinned, 'pinned')}</> : null}
+      {pinned.length && others.length ? label('Others') : null}
+      {others.length ? grid(others, 'others') : null}
+    </>
+  )
+}
+
+// Press-and-hold drag for the cards. No preventDefault while holding, so a swipe
+// that starts on a card still scrolls the page: moving more than CARD_HOLD_TOL
+// before the hold ends lets the gesture go. Once lifted, the card follows the
+// finger, the card under it is the drop target and the page scrolls near the
+// edges. Same shape as useAisleDrag, without the slot animation.
+const CARD_HOLD_MS = 380
+const CARD_HOLD_TOL = 10
+function useCardDrag ({ scrollRef, onDrop }) {
+  const [lifted, setLifted] = useState(null)
+  const [target, setTarget] = useState(null)
+  const S = useRef({})
+  const justDragged = useRef(false)
+  const live = useRef({})
+  live.current = { onDrop }
+
+  const cleanup = () => {
+    const s = S.current
+    window.removeEventListener('touchmove', s.onTouchMove, { passive: false })
+    window.removeEventListener('touchend', s.onEnd)
+    window.removeEventListener('touchcancel', s.onEnd)
+    window.removeEventListener('pointermove', s.onPointerMove)
+    window.removeEventListener('pointerup', s.onEnd)
+    clearTimeout(s.timer)
+    if (s.raf) cancelAnimationFrame(s.raf)
+    if (s.el) { s.el.style.transform = ''; s.el.style.pointerEvents = ''; s.el.style.transition = '' }
+    S.current = {}
+    setLifted(null); setTarget(null)
+  }
+  const scrollDelta = (s) => (scrollRef?.current ? scrollRef.current.scrollTop - s.scroll0 : 0)
+  const position = () => {
+    const s = S.current
+    if (!s.active) return
+    s.el.style.transform = `translate(${s.x - s.startX}px, ${s.y - s.startY + scrollDelta(s)}px) scale(1.04)`
+    const over = document.elementFromPoint(s.x, s.y)?.closest('[data-card-id]')
+    const id = over && over.getAttribute('data-card-group') === s.group ? over.getAttribute('data-card-id') : null
+    s.target = id && id !== s.id ? id : null
+    setTarget((t) => (t === s.target ? t : s.target))
+  }
+  const autoscroll = () => {
+    const s = S.current
+    const el = scrollRef?.current
+    if (s.active && el) {
+      const rc = el.getBoundingClientRect()
+      const d = s.y < rc.top + 70 ? -10 : s.y > rc.bottom - 90 ? 10 : 0
+      if (d) { el.scrollTop += d; position() }
+    }
+    if (s.active) s.raf = requestAnimationFrame(autoscroll)
+  }
+  const activate = () => {
+    const s = S.current
+    if (!s.id) return
+    s.active = true
+    try { haptic('medium') } catch {}
+    s.scroll0 = scrollRef?.current ? scrollRef.current.scrollTop : 0
+    s.el.style.pointerEvents = 'none'
+    s.el.style.transition = 'transform 80ms ease'
+    setLifted(s.id)
+    position()
+    s.raf = requestAnimationFrame(autoscroll)
+  }
+  const onMove = (x, y, preventDefault) => {
+    const s = S.current
+    if (!s.id) return
+    s.x = x; s.y = y
+    if (!s.active) { if (Math.hypot(x - s.startX, y - s.startY) > CARD_HOLD_TOL) cleanup(); return }
+    preventDefault && preventDefault()
+    position()
+  }
+  const begin = (id, group, el, x, y, source) => {
+    cleanup()
+    const s = S.current = { id, group, el, startX: x, startY: y, x, y, active: false }
+    s.onEnd = () => {
+      if (s.active) {
+        if (s.target) live.current.onDrop(s.id, s.target)
+        justDragged.current = true; setTimeout(() => { justDragged.current = false }, 350)
+      }
+      cleanup()
+    }
+    if (source === 'touch') {
+      s.onTouchMove = (ev) => { const t = ev.touches[0]; if (t) onMove(t.clientX, t.clientY, () => { try { ev.preventDefault() } catch {} }) }
+      window.addEventListener('touchmove', s.onTouchMove, { passive: false })
+      window.addEventListener('touchend', s.onEnd)
+      window.addEventListener('touchcancel', s.onEnd)
+    } else {
+      s.onPointerMove = (ev) => onMove(ev.clientX, ev.clientY, null)
+      window.addEventListener('pointermove', s.onPointerMove)
+      window.addEventListener('pointerup', s.onEnd)
+    }
+    s.timer = setTimeout(activate, CARD_HOLD_MS)
+  }
+  useEffect(() => () => cleanup(), [])
+  const props = (id, group) => ({
+    onTouchStart: (e) => { const t = e.touches[0]; if (t) begin(id, group, e.currentTarget, t.clientX, t.clientY, 'touch') },
+    onPointerDown: (e) => { if (e.pointerType === 'touch') return; if (e.button != null && e.button !== 0) return; begin(id, group, e.currentTarget, e.clientX, e.clientY, 'mouse') },
+  })
+  return { props, lifted, target, didDrag: () => justDragged.current }
+}
+
+// One card: the first photo, the name, then a note's first lines or a list's open
+// items with a tick circle each.
+const CARD_LINES = 6
+function ListCard ({ list, group, preview, groupId, members, lifted, target, onOpen, dragProps }) {
+  const cat = categoryOf(list.kind)
+  const Icon = cat.Icon
+  const photo = useItemPhoto(groupId, preview?.photo || null, 'thumb')
+  const isNote = list.kind === 'note'
+  const lines = (preview?.lines || []).filter((x) => isNote ? x.text.trim() : !x.checked).slice(0, CARD_LINES)
+  const open = preview?.open ?? 0
+  const total = preview?.total ?? 0
+  const more = isNote ? 0 : open - lines.length
+  const done = total - open
+  const color = normalizeColor(list.color)
+  return (
+    <button data-card-id={list.id} data-card-group={group} onClick={onOpen} {...dragProps}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{ display: 'block', width: '100%', padding: 0, textAlign: 'left', cursor: 'pointer', borderRadius: r.lg, overflow: 'hidden', background: CARD_BG[color], border: target ? `2px solid ${c.primary}` : `1px solid ${color === 'default' ? c.border : 'transparent'}`, color: c.text.primary, fontFamily: FONT, WebkitTouchCallout: 'none', userSelect: 'none', position: 'relative', zIndex: lifted ? 50 : 'auto', boxShadow: lifted ? '0 12px 28px rgba(0,0,0,0.45)' : 'none' }}>
+      {photo ? <img src={photo} alt='' style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover', pointerEvents: 'none' }} /> : null}
+      <div style={{ padding: `${sp.md}px ${sp.md}px ${sp.sm}px` }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{list.name}</span>
+          {isPinned(list) ? <PushPin size={14} weight='fill' color={c.text.secondary} style={{ flexShrink: 0, marginTop: 2 }} /> : null}
+        </div>
+        {lines.length ? (
+          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {lines.map((x, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 13, fontWeight: 300, lineHeight: 1.35, color: c.text.secondary }}>
+                {isNote ? null : <span style={{ width: 11, height: 11, marginTop: 3, flexShrink: 0, borderRadius: '50%', border: `1.5px solid ${c.text.muted}` }} />}
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.text}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {more > 0 ? <div style={{ marginTop: 4, fontSize: 12, color: c.text.muted }}>+ {more} more</div> : null}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: sp.sm }}>
+          <Icon size={14} color={cat.color} weight='regular' />
+          <span style={{ flex: 1, fontSize: 12, color: c.text.muted }}>{isNote ? '' : done ? `${done} checked` : (total ? '' : 'Empty')}</span>
+          <AssigneeAvatar pubkey={list.assignee} members={members} size={20} />
+        </div>
+      </div>
+    </button>
+  )
+}
+
 // A list row on the space overview. Tapping opens the list's detail.
 function ListRow ({ list, members, onOpen }) {
   const cat = categoryOf(list.kind)
@@ -3653,7 +3905,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 // a note, which is not a list. ListCompleteSheet still says "Delete list" and
 // should: it only ever fires when every item on a list is checked, and a note's
 // lines are never checked, so a note cannot reach it.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, byReminder, onToggleByReminder, onClose, onRename, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, byReminder, onToggleByReminder, onClose, onRename, onPin, onColor, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -3671,6 +3923,8 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedC
   return (
     <BottomSheet open={open} onClose={onClose} title={list.name}>
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename</span></Row>
+      <Row onClick={onPin}><span style={{ flex: 1, textAlign: 'left' }}>{isPinned(list) ? 'Unpin' : 'Pin to the top'}</span><PushPin size={18} color={c.text.secondary} weight={isPinned(list) ? 'fill' : 'regular'} /></Row>
+      <ColorSwatches value={normalizeColor(list.color)} onChange={onColor} />
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
