@@ -19,13 +19,17 @@ ${MARK}
 configurations.matching { it.name.toLowerCase().endsWith('runtimeclasspath') }.all {
     exclude group: 'com.google.firebase'
     exclude group: 'com.google.android.datatransport'
+    // Google Play's install referrer (expo-application), never called.
+    exclude group: 'com.android.installreferrer'
 }
 `
 const FCM_SERVICE = 'expo.modules.notifications.service.ExpoFirebaseMessagingService'
 
 module.exports = function withAndroidNoFirebase (config) {
   config = withAppBuildGradle(config, (cfg) => {
-    if (!cfg.modResults.contents.includes(MARK)) cfg.modResults.contents += GRADLE
+    // Replace an earlier copy of the block, so a prebuild picks up edits to it.
+    const earlier = /\n\/\/ with-android-no-firebase\nconfigurations[\s\S]*?\n}\n/
+    cfg.modResults.contents = cfg.modResults.contents.replace(earlier, '') + GRADLE
     return cfg
   })
   return withAndroidManifest(config, (cfg) => {
