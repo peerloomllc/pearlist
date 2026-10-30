@@ -11,6 +11,7 @@ import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { shouldClear } from '../clearOnChecked.js'
 import { checkedLast } from '../checkedLast.js'
+import { LIST_COLORS, normalizeColor, isPinned } from '../listStyle.js'
 import { addCategory } from '../addToGroup.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
@@ -20,7 +21,7 @@ import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { nextOccurrence } from '../repeatTime.js'
 import { groupByReminder } from '../reminderGroups.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -956,6 +957,12 @@ const ALL_DONE_KEY = 'pearlist:alldone'
 function loadAllDone () { try { return localStorage.getItem(ALL_DONE_KEY) !== '0' } catch { return true } }
 function saveAllDone (on) { try { localStorage.setItem(ALL_DONE_KEY, on ? '1' : '0') } catch {} }
 
+// Device-local preference: the Lists page as cards or rows
+// (proposals/2026-10-29-keep-style-notes.md). Cards unless this phone chose rows.
+const LIST_VIEW_KEY = 'pearlist:listview'
+function loadListView () { try { return localStorage.getItem(LIST_VIEW_KEY) === 'rows' ? 'rows' : 'cards' } catch { return 'cards' } }
+function saveListView (v) { try { localStorage.setItem(LIST_VIEW_KEY, v) } catch {} }
+
 // Device-local preference: ask "How many?" before a grocery item is added (GH #222).
 // On by default and read as on when the key is missing, so an update never takes
 // the step away from anyone who uses it. Off adds the item straight away with a
@@ -1721,6 +1728,9 @@ export default function App () {
   const spacesRef = useRef([])
   const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
+  const [previews, setPreviews] = useState({})
+  const [listView, setListViewState] = useState(loadListView)
+  const setListView = useCallback((v) => { setListViewState(v); saveListView(v) }, [])
   const [openListId, setOpenListId] = useState(null)
   const [items, setItems] = useState([])
   const [itemsListId, setItemsListId] = useState(null) // which list `items` belongs to
@@ -1783,6 +1793,8 @@ export default function App () {
       return []
     })
     setLists(ls)
+    // What the cards show. Its own catch: a card with no preview still opens.
+    call('list:previews', { groupId }).then((p) => setPreviews(p || {})).catch(() => {})
     // Stay on the overview by default; only keep a list open if it still exists.
     setOpenListId((cur) => (cur && ls.some(l => l.id === cur) ? cur : null))
     return ls
@@ -2838,6 +2850,17 @@ export default function App () {
     await call('list:setKind', { groupId: gid, listId, kind })
     await loadLists(gid); setSheet(null)
   }
+  async function setListColor (listId, color) {
+    if (!gid || !listId) return
+    await call('list:setColor', { groupId: gid, listId, color })
+    await loadLists(gid)
+  }
+  async function toggleListPin (list) {
+    if (!gid || !list) return
+    haptic('light')
+    await call('list:setPinned', { groupId: gid, listId: list.id, pinned: !isPinned(list) })
+    await loadLists(gid)
+  }
   async function setNotifyMode (listId, mode) {
     if (!gid || !listId) return
     await call('list:setNotifyOnComplete', { groupId: gid, listId, mode })
@@ -3071,7 +3094,12 @@ export default function App () {
                     ? `Nothing to show for ${activeSpace?.name || 'this space'} right now.`
                     : `No lists in ${activeSpace?.name || 'this space'} yet. Add one below.`}
                 </div>
-              : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
+              : <>
+                  <ListViewSwitch view={listView} onChange={setListView} />
+                  {listView === 'cards'
+                    ? <ListCards lists={lists} previews={previews} groupId={gid} members={members} onOpen={setOpenListId} onPin={toggleListPin} />
+                    : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
+                </>}
           </div>
           {templates.length && !listDraft.trim() ? (
             <button onClick={() => setSheet('templates')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: `${sp.sm}px 0 0`, background: 'none', border: 'none', cursor: 'pointer', color: c.primary, fontSize: 14, fontWeight: 300 }}>
@@ -3095,6 +3123,8 @@ export default function App () {
         onToggleCollapseAll={() => { toggleCollapseAll(); setSheet(null) }}
         byReminder={byReminder} onToggleByReminder={() => { patchAisleView({ byReminder: !byReminder }); setSheet(null) }}
         onRename={() => setSheet('renameList')}
+        onPin={() => { toggleListPin(openList); setSheet(null) }}
+        onColor={(color) => setListColor(openListId, color)}
         onCategory={() => setSheet('category')}
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
@@ -3430,6 +3460,114 @@ function LinkDeviceSheet ({ open, onClose, onLink }) {
   )
 }
 
+// Card backgrounds, one per name in listStyle.js. Tokens in theme.js, each with a
+// light and a dark shade so text stays readable in both themes.
+const CARD_BG = Object.fromEntries(LIST_COLORS.map((k) => [k, k === 'default' ? c.surface.card : `var(--card-${k})`]))
+
+// The colour row in a list's options sheet. Shared with the space.
+function ColorSwatches ({ value, onChange }) {
+  return (
+    <div role='radiogroup' aria-label='Colour' style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: `${sp.md}px ${sp.xs}px`, borderTop: `1px solid ${c.divider}` }}>
+      {LIST_COLORS.map((k) => (
+        <button key={k} role='radio' aria-checked={value === k} aria-label={k === 'default' ? 'No colour' : k} onClick={() => onChange?.(k)}
+          style={{ width: 32, height: 32, borderRadius: '50%', padding: 0, cursor: 'pointer', background: CARD_BG[k], border: value === k ? `2px solid ${c.primary}` : `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.primary }}>
+          {value === k ? <Check size={14} weight='bold' /> : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Cards or rows, remembered on this phone.
+function ListViewSwitch ({ view, onChange }) {
+  const btn = (v, label, Icon) => (
+    <button onClick={() => onChange(v)} aria-label={label} aria-pressed={view === v}
+      style={{ width: 36, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: r.sm, cursor: 'pointer', background: view === v ? c.surface.elevated : 'none', color: view === v ? c.text.primary : c.text.muted }}>
+      <Icon size={18} weight='regular' />
+    </button>
+  )
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 2, padding: `${sp.xs}px ${sp.base}px 0` }}>
+      {btn('cards', 'Show as cards', SquaresFour)}
+      {btn('rows', 'Show as rows', Rows)}
+    </div>
+  )
+}
+
+// The Lists page as cards in two columns, pinned ones first in their own group.
+// Inside each group lists keep the category order the rows use.
+function ListCards ({ lists, previews, groupId, members, onOpen, onPin }) {
+  const rank = (l) => CATEGORIES.findIndex((cat) => cat.key === categoryOf(l.kind).key)
+  const ordered = lists.slice().sort((a, b) => rank(a) - rank(b))
+  const pinned = ordered.filter(isPinned)
+  const others = ordered.filter((l) => !isPinned(l))
+  const grid = (ls) => (
+    <div style={{ columnCount: 2, columnGap: sp.sm, padding: `0 ${sp.sm}px` }}>
+      {ls.map((l) => <ListCard key={l.id} list={l} preview={previews?.[l.id]} groupId={groupId} members={members} onOpen={() => onOpen(l.id)} onPin={() => onPin(l)} />)}
+    </div>
+  )
+  const label = (text) => <div style={{ padding: `${sp.md}px ${sp.base}px ${sp.xs}px`, color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6 }}>{text}</div>
+  return (
+    <>
+      {pinned.length ? <>{label('Pinned')}{grid(pinned)}</> : null}
+      {pinned.length && others.length ? label('Others') : null}
+      {others.length ? grid(others) : null}
+    </>
+  )
+}
+
+// One card: the first photo, the name, then a note's first lines or a list's open
+// items with a tick circle each. A long press pins or unpins it.
+const CARD_LINES = 6
+function ListCard ({ list, preview, groupId, members, onOpen, onPin }) {
+  const cat = categoryOf(list.kind)
+  const Icon = cat.Icon
+  const photo = useItemPhoto(groupId, preview?.photo || null, 'thumb')
+  const press = useRef({ t: null, fired: false })
+  const startPress = () => {
+    press.current.fired = false
+    clearTimeout(press.current.t)
+    press.current.t = setTimeout(() => { press.current.fired = true; onPin?.() }, 550)
+  }
+  const endPress = () => clearTimeout(press.current.t)
+  const isNote = list.kind === 'note'
+  const lines = (preview?.lines || []).filter((x) => isNote ? x.text.trim() : !x.checked).slice(0, CARD_LINES)
+  const open = preview?.open ?? 0
+  const total = preview?.total ?? 0
+  const more = isNote ? 0 : open - lines.length
+  const done = total - open
+  return (
+    <button onClick={() => { if (press.current.fired) return; onOpen?.() }}
+      onPointerDown={startPress} onPointerUp={endPress} onPointerLeave={endPress} onPointerCancel={endPress}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{ display: 'block', width: '100%', breakInside: 'avoid', marginBottom: sp.sm, padding: 0, textAlign: 'left', cursor: 'pointer', borderRadius: r.lg, overflow: 'hidden', background: CARD_BG[normalizeColor(list.color)], border: `1px solid ${normalizeColor(list.color) === 'default' ? c.border : 'transparent'}`, color: c.text.primary, fontFamily: FONT, WebkitTouchCallout: 'none', userSelect: 'none' }}>
+      {photo ? <img src={photo} alt='' style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover' }} /> : null}
+      <div style={{ padding: `${sp.md}px ${sp.md}px ${sp.sm}px` }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{list.name}</span>
+          {isPinned(list) ? <PushPin size={14} weight='fill' color={c.text.secondary} style={{ flexShrink: 0, marginTop: 2 }} /> : null}
+        </div>
+        {lines.length ? (
+          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {lines.map((x, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 13, fontWeight: 300, lineHeight: 1.35, color: c.text.secondary }}>
+                {isNote ? null : <span style={{ width: 11, height: 11, marginTop: 3, flexShrink: 0, borderRadius: '50%', border: `1.5px solid ${c.text.muted}` }} />}
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.text}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {more > 0 ? <div style={{ marginTop: 4, fontSize: 12, color: c.text.muted }}>+ {more} more</div> : null}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: sp.sm }}>
+          <Icon size={14} color={cat.color} weight='regular' />
+          <span style={{ flex: 1, fontSize: 12, color: c.text.muted }}>{isNote ? '' : done ? `${done} checked` : (total ? '' : 'Empty')}</span>
+          <AssigneeAvatar pubkey={list.assignee} members={members} size={20} />
+        </div>
+      </div>
+    </button>
+  )
+}
+
 // A list row on the space overview. Tapping opens the list's detail.
 function ListRow ({ list, members, onOpen }) {
   const cat = categoryOf(list.kind)
@@ -3653,7 +3791,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 // a note, which is not a list. ListCompleteSheet still says "Delete list" and
 // should: it only ever fires when every item on a list is checked, and a note's
 // lines are never checked, so a note cannot reach it.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, byReminder, onToggleByReminder, onClose, onRename, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, byReminder, onToggleByReminder, onClose, onRename, onPin, onColor, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -3671,6 +3809,8 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedC
   return (
     <BottomSheet open={open} onClose={onClose} title={list.name}>
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename</span></Row>
+      <Row onClick={onPin}><span style={{ flex: 1, textAlign: 'left' }}>{isPinned(list) ? 'Unpin' : 'Pin to the top'}</span><PushPin size={18} color={c.text.secondary} weight={isPinned(list) ? 'fill' : 'regular'} /></Row>
+      <ColorSwatches value={normalizeColor(list.color)} onChange={onColor} />
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}

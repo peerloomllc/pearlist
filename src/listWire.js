@@ -3,8 +3,12 @@
 // as its applyOps.
 //
 // Data model (one household group, many lists):
-//   list:{listId}            -> signed { id, name, kind?, assignee?, createdBy,
-//                                        createdAt, updatedAt, pubkey, deleted }
+//   list:{listId}            -> signed { id, name, kind?, assignee?, color?,
+//                                        pinned?, createdBy, createdAt, updatedAt,
+//                                        pubkey, deleted }
+//
+// `color` and `pinned` style the list's card and are shared (see listStyle.js).
+// Additive: stored verbatim, kept by every method that spreads the row.
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
 //                                        assignee?, category?, catBy?, ord?,
 //                                        createdBy, createdAt, updatedAt,
