@@ -980,6 +980,14 @@ export default function Shell () {
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')
           else if (args?.style === 'light') setStatusBarStyle('light-content')
+          // iOS: pin the keyboard and other native UI to the app's theme, or with
+          // null let them follow the phone. While pinned, Appearance reports the
+          // pinned scheme, and clearing it sends the phone's real one as a change.
+          // Not on Android, where it sets the night mode and can recreate the
+          // activity, and the keyboard follows the phone whatever we do.
+          if (Platform.OS === 'ios' && args && 'override' in args) {
+            Appearance.setColorScheme(args.override === 'light' || args.override === 'dark' ? args.override : null)
+          }
           return reply(id, { ok: true })
         }
         default: {

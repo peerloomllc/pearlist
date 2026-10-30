@@ -2927,7 +2927,8 @@ export default function App () {
   useEffect(() => {
     // theme.js has already applied the resolved theme to the page.
     const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
-    call('shell:statusBar:set', { style: t === 'light' ? 'dark' : 'light' }).catch(() => {})
+    // `override` keeps the iOS keyboard on the app's theme. Match phone sends null.
+    call('shell:statusBar:set', { style: t === 'light' ? 'dark' : 'light', override: theme === 'auto' ? null : t }).catch(() => {})
   }, [theme, systemScheme])
   // Bottom-nav tab switch: always leave any open list (the tab bar only shows on
   // top-level screens) and map the tab to the view state.
