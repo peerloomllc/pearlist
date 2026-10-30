@@ -67,13 +67,34 @@ export function injectGlobalStyles () {
 }
 
 const THEME_KEY = 'pearlist:theme'
-export function setTheme (mode) {
+// The saved choice is 'dark', 'light' or 'auto'. 'auto' follows the phone
+// (issue #247): the shell reports its scheme, and until it does the WebView's
+// own prefers-color-scheme is the best guess.
+let systemScheme = (() => {
+  try { return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark' } catch { return 'dark' }
+})()
+let themeMode = 'dark'
+export function resolveTheme (mode, system) {
+  if (mode === 'auto') return system === 'light' ? 'light' : 'dark'
+  return mode === 'light' ? 'light' : 'dark'
+}
+function applyTheme () {
   if (typeof document === 'undefined') return
-  const m = mode === 'light' ? 'light' : 'dark'
-  document.documentElement.setAttribute('data-theme', m)
-  try { localStorage.setItem(THEME_KEY, m) } catch {}
+  const t = resolveTheme(themeMode, systemScheme)
+  document.documentElement.setAttribute('data-theme', t)
+  // So native form controls and the iOS keyboard match the page.
+  document.documentElement.style.colorScheme = t
+}
+export function setTheme (mode) {
+  themeMode = mode === 'light' || mode === 'auto' ? mode : 'dark'
+  applyTheme()
+  try { localStorage.setItem(THEME_KEY, themeMode) } catch {}
+}
+export function setSystemScheme (scheme) {
+  systemScheme = scheme === 'light' ? 'light' : 'dark'
+  applyTheme()
 }
 export function loadTheme () {
-  try { const s = localStorage.getItem(THEME_KEY); if (s === 'light' || s === 'dark') return s } catch {}
+  try { const s = localStorage.getItem(THEME_KEY); if (s === 'light' || s === 'dark' || s === 'auto') return s } catch {}
   return 'dark'
 }
