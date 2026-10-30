@@ -11,7 +11,7 @@ import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { shouldClear } from '../clearOnChecked.js'
 import { checkedLast } from '../checkedLast.js'
-import { LIST_COLORS, normalizeColor, isPinned } from '../listStyle.js'
+import { LIST_COLORS, normalizeColor, isPinned, normalizeLabels, spaceLabels, hasLabels, LABELS_MAX, LABEL_MAX_LEN } from '../listStyle.js'
 import { orderCards, moveCard } from '../cardOrder.js'
 import { addCategory } from '../addToGroup.js'
 import { pairLinkProblem } from '../linkShape.js'
@@ -22,7 +22,7 @@ import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { nextOccurrence } from '../repeatTime.js'
 import { groupByReminder } from '../reminderGroups.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin, Tag } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -1737,6 +1737,8 @@ export default function App () {
   const [activeSpaceId, setActiveSpaceId] = useState(null)
   const [lists, setLists] = useState([])
   const [previews, setPreviews] = useState({})
+  // Label pills picked above the Lists page, for this visit to this space only.
+  const [labelFilter, setLabelFilter] = useState([])
   const [listView, setListViewState] = useState(loadListView)
   const setListView = useCallback((v) => { setListViewState(v); saveListView(v) }, [])
   const [openListId, setOpenListId] = useState(null)
@@ -1923,6 +1925,7 @@ export default function App () {
   const [repairRetried, setRepairRetried] = useState(false)
   const [repairing, setRepairing] = useState(false)
   useEffect(() => { setRepairRetried(false); setRepairing(false) }, [gid])
+  useEffect(() => { setLabelFilter([]) }, [gid])
 
   const repairSpace = useCallback(async (kind) => {
     if (!gid || repairing) return
@@ -2247,6 +2250,10 @@ export default function App () {
   useEffect(() => { setPendingUndo(null) }, [openListId])
 
   const openList = lists.find(l => l.id === openListId) || null
+  const allLabels = spaceLabels(lists)
+  // A picked label that no list carries any more drops out of the filter.
+  const pickedLabels = labelFilter.filter((p) => allLabels.some((l) => l.toLowerCase() === p.toLowerCase()))
+  const shownLists = lists.filter((l) => hasLabels(l, pickedLabels))
   const isNoteList = openList?.kind === 'note'
 
   // Grocery aisle categorization, step 1 (keyword pass): when a grocery list is
@@ -2864,6 +2871,11 @@ export default function App () {
     await call('list:setColor', { groupId: gid, listId, color })
     await loadLists(gid)
   }
+  async function setListLabels (listId, labels) {
+    if (!gid || !listId) return
+    await call('list:setLabels', { groupId: gid, listId, labels })
+    await loadLists(gid)
+  }
   async function toggleListPin (list) {
     if (!gid || !list) return
     haptic('light')
@@ -3107,10 +3119,14 @@ export default function App () {
                     : `No lists in ${activeSpace?.name || 'this space'} yet. Add one below.`}
                 </div>
               : <>
-                  <ListViewSwitch view={listView} onChange={setListView} />
-                  {listView === 'cards'
-                    ? <ListCards lists={lists} previews={previews} groupId={gid} members={members} onOpen={setOpenListId} scrollRef={listsScrollRef} />
-                    : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
+                  <ListViewSwitch view={listView} onChange={setListView}>
+                    <LabelPills labels={allLabels} picked={pickedLabels} onChange={setLabelFilter} />
+                  </ListViewSwitch>
+                  {!shownLists.length
+                    ? <div style={{ padding: `${sp.xl}px ${sp.base}px`, textAlign: 'center', color: c.text.muted, fontSize: 14 }}>No lists have {pickedLabels.length > 1 ? 'all of these labels' : 'this label'}.</div>
+                    : listView === 'cards'
+                      ? <ListCards lists={shownLists} allLists={lists} previews={previews} groupId={gid} members={members} onOpen={setOpenListId} scrollRef={listsScrollRef} />
+                      : <GroupedLists lists={shownLists} members={members} onOpen={setOpenListId} />}
                 </>}
           </div>
           {templates.length && !listDraft.trim() ? (
@@ -3137,6 +3153,7 @@ export default function App () {
         onRename={() => setSheet('renameList')}
         onPin={() => { toggleListPin(openList); setSheet(null) }}
         onColor={(color) => setListColor(openListId, color)}
+        onLabels={() => setSheet('labels')}
         onCategory={() => setSheet('category')}
         onNotify={() => setSheet('notifyMode')}
         onAssign={() => { setSheet(null); setListPicker({ listId: openListId, current: openList?.assignee || null }) }}
@@ -3145,6 +3162,7 @@ export default function App () {
         onSaveTemplate={saveOpenListAsTemplate}
         onDelete={confirmDeleteOpenList} />
       <TemplatesSheet open={sheet === 'templates'} templates={templates} onClose={() => setSheet(null)} onUse={useTemplate} onDelete={deleteTemplate} />
+      <LabelsSheet open={sheet === 'labels'} list={openList} allLabels={allLabels} onClose={() => setSheet('listOptions')} onSave={(labels) => setListLabels(openListId, labels)} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
@@ -3490,8 +3508,72 @@ function ColorSwatches ({ value, onChange }) {
   )
 }
 
+// The labels used in this space as pills above the lists. Tapping one shows only
+// the lists that carry it; with several picked, lists that carry all of them.
+function LabelPills ({ labels, picked, onChange }) {
+  if (!labels.length) return null
+  const on = new Set(picked.map((s) => s.toLowerCase()))
+  return (
+    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', padding: '2px 0' }}>
+      {labels.map((l) => {
+        const active = on.has(l.toLowerCase())
+        return (
+          <button key={l} aria-pressed={active} onClick={() => onChange(active ? picked.filter((p) => p.toLowerCase() !== l.toLowerCase()) : [...picked, l])}
+            style={{ flexShrink: 0, maxWidth: 160, padding: '4px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: active ? c.primary : 'none', color: active ? c.text.onPrimary : c.text.secondary, border: `1px solid ${active ? c.primary : c.border}` }}>{l}</button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Pick a list's labels from the ones used in this space, or type a new one.
+// Every tap saves at once, so there is no Save button.
+function LabelsSheet ({ open, list, allLabels, onClose, onSave }) {
+  const [draft, setDraft] = useState('')
+  useEffect(() => { if (open) setDraft('') }, [open])
+  if (!list) return null
+  const mine = normalizeLabels(list.labels)
+  const has = (l) => mine.some((m) => m.toLowerCase() === l.toLowerCase())
+  const full = mine.length >= LABELS_MAX
+  const choices = [...allLabels]
+  for (const m of mine) if (!choices.some((x) => x.toLowerCase() === m.toLowerCase())) choices.push(m)
+  const toggle = (l) => onSave(has(l) ? mine.filter((m) => m.toLowerCase() !== l.toLowerCase()) : [...mine, l])
+  const add = () => {
+    const t = draft.replace(/\s+/g, ' ').trim().slice(0, LABEL_MAX_LEN)
+    if (!t || full) return
+    setDraft('')
+    if (!has(t)) onSave([...mine, t])
+  }
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Labels'>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: sp.md }}>
+        {choices.length ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {choices.map((l) => {
+              const on = has(l)
+              return (
+                <button key={l} aria-pressed={on} disabled={!on && full} onClick={() => toggle(l)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, maxWidth: '100%', padding: '6px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 14, fontFamily: FONT, background: on ? c.primary : 'none', color: on ? c.text.onPrimary : c.text.secondary, border: `1px solid ${on ? c.primary : c.border}`, opacity: !on && full ? 0.4 : 1 }}>
+                  {on ? <Check size={14} weight='bold' /> : null}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</span>
+                </button>
+              )
+            })}
+          </div>
+        ) : <p style={{ margin: 0, color: c.text.muted, fontSize: 14, textAlign: 'center' }}>Labels sort lists and notes. Everyone in the space sees them.</p>}
+        {full
+          ? <p style={{ margin: 0, color: c.text.muted, fontSize: 13, textAlign: 'center' }}>A list can have up to {LABELS_MAX} labels.</p>
+          : <>
+              <Field value={draft} onChange={(v) => setDraft(v.slice(0, LABEL_MAX_LEN))} placeholder='New label' onEnter={add} />
+              <Button onClick={add}>Add label</Button>
+            </>}
+      </div>
+    </BottomSheet>
+  )
+}
+
 // Cards or rows, remembered on this phone.
-function ListViewSwitch ({ view, onChange }) {
+function ListViewSwitch ({ view, onChange, children }) {
   const btn = (v, label, Icon) => (
     <button onClick={() => onChange(v)} aria-label={label} aria-pressed={view === v}
       style={{ width: 36, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: r.sm, cursor: 'pointer', background: view === v ? c.surface.elevated : 'none', color: view === v ? c.text.primary : c.text.muted }}>
@@ -3499,7 +3581,8 @@ function ListViewSwitch ({ view, onChange }) {
     </button>
   )
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 2, padding: `${sp.xs}px ${sp.base}px ${sp.md}px` }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: `${sp.xs}px ${sp.base}px ${sp.md}px` }}>
+      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
       {btn('cards', 'Show as cards', SquaresFour)}
       {btn('rows', 'Show as rows', Rows)}
     </div>
@@ -3510,15 +3593,19 @@ function ListViewSwitch ({ view, onChange }) {
 // Cards fill left to right, then down. Press and hold a card to drag it; the
 // order is kept per space on this phone (src/cardOrder.js) and a card only moves
 // within its own group.
-function ListCards ({ lists, previews, groupId, members, onOpen, scrollRef }) {
+function ListCards ({ lists, allLists = lists, previews, groupId, members, onOpen, scrollRef }) {
   const [saved, setSaved] = useState(() => loadCardOrder(groupId))
   useEffect(() => { setSaved(loadCardOrder(groupId)) }, [groupId])
   const rank = (l) => CATEGORIES.findIndex((cat) => cat.key === categoryOf(l.kind).key)
-  const ordered = orderCards(lists.slice().sort((a, b) => rank(a) - rank(b)), saved)
+  // The order covers every list, so dragging while a label filter hides some
+  // does not move the hidden ones.
+  const fullOrder = orderCards(allLists.slice().sort((a, b) => rank(a) - rank(b)), saved)
+  const shown = new Set(lists.map((l) => l.id))
+  const ordered = fullOrder.filter((l) => shown.has(l.id))
   const pinned = ordered.filter(isPinned)
   const others = ordered.filter((l) => !isPinned(l))
   const drag = useCardDrag({ scrollRef, onDrop: (id, targetId) => {
-    const next = moveCard(ordered.map((l) => l.id), id, targetId)
+    const next = moveCard(fullOrder.map((l) => l.id), id, targetId)
     setSaved(next); saveCardOrder(groupId, next)
   } })
   const card = (l, group) => (
@@ -3684,6 +3771,7 @@ function ListCard ({ list, group, preview, groupId, members, lifted, target, onO
   const more = isNote ? 0 : open - lines.length
   const done = total - open
   const color = normalizeColor(list.color)
+  const labels = normalizeLabels(list.labels)
   return (
     <button data-card-id={list.id} data-card-group={group} onClick={onOpen} {...dragProps}
       onContextMenu={(e) => e.preventDefault()}
@@ -3705,6 +3793,11 @@ function ListCard ({ list, group, preview, groupId, members, lifted, target, onO
           </div>
         ) : null}
         {more > 0 ? <div style={{ marginTop: 4, fontSize: 12, color: c.text.muted }}>+ {more} more</div> : null}
+        {labels.length ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: sp.sm }}>
+            {labels.map((x) => <span key={x} style={{ maxWidth: '100%', padding: '1px 8px', borderRadius: 999, border: `1px solid ${c.border}`, fontSize: 11, color: c.text.secondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x}</span>)}
+          </div>
+        ) : null}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: sp.sm }}>
           <Icon size={14} color={cat.color} weight='regular' />
           <span style={{ flex: 1, fontSize: 12, color: c.text.muted }}>{isNote ? '' : done ? `${done} checked` : (total ? '' : 'Empty')}</span>
@@ -4032,7 +4125,7 @@ function DetailHeader ({ title, assignee, members, onBack, onOptions }) {
 // a note, which is not a list. ListCompleteSheet still says "Delete list" and
 // should: it only ever fires when every item on a list is checked, and a note's
 // lines are never checked, so a note cannot reach it.
-function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, byReminder, onToggleByReminder, onClose, onRename, onPin, onColor, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
+function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedCount = 0, onDeleteChecked, grouped, allCollapsed, groupNoun = 'aisle', onToggleCollapseAll, byReminder, onToggleByReminder, onClose, onRename, onPin, onColor, onLabels, onCategory, onNotify, onAssign, onReset, onSaveTemplate, onDelete }) {
   if (!list) return null
   const Row = ({ onClick, danger, children }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: danger ? c.error : c.text.primary, fontSize: 16, fontWeight: 300 }}>{children}</button>
@@ -4052,6 +4145,7 @@ function ListOptionsSheet ({ open, list, members, selfPubkey, canReset, checkedC
       <Row onClick={onRename}><span style={{ flex: 1, textAlign: 'left' }}>Rename</span></Row>
       <Row onClick={onPin}><span style={{ flex: 1, textAlign: 'left' }}>{isPinned(list) ? 'Unpin' : 'Pin to the top'}</span><PushPin size={18} color={c.text.secondary} weight={isPinned(list) ? 'fill' : 'regular'} /></Row>
       <ColorSwatches value={normalizeColor(list.color)} onChange={onColor} />
+      <Row onClick={onLabels}><span style={{ flex: 1, textAlign: 'left' }}>Labels</span><span style={{ color: c.text.secondary, fontSize: 14, maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{normalizeLabels(list.labels).join(', ') || 'None'}</span><Tag size={18} color={c.text.secondary} weight='regular' /></Row>
       <Row onClick={onCategory}><span style={{ flex: 1, textAlign: 'left' }}>Category</span><CatIcon size={18} color={cat.color} weight='regular' /><span style={{ color: c.text.secondary, fontSize: 14 }}>{cat.label}</span></Row>
       <Row onClick={onAssign}><span style={{ flex: 1, textAlign: 'left' }}>Assign to…</span><AssigneeAvatar pubkey={list.assignee} members={members} size={22} /></Row>
       {list.kind === 'chore' ? <Row onClick={onNotify}><span style={{ flex: 1, textAlign: 'left' }}>Notify when completed</span><span style={{ color: c.text.secondary, fontSize: 14 }}>{notifyModeOf(effectiveNotifyMode(list)).label}</span></Row> : null}
