@@ -225,7 +225,10 @@ function useItemPhoto (groupId, item, size) {
     if (cached) { setSrc(cached); return }
     setSrc(null)
     let live = true; let tries = 0; let t = null
-    const ask = () => call('item:getPhoto', { groupId, listId: item.listId, itemId: item.id, size })
+    // A note's photo rides its list row, so it is asked for by hash (see NotePhotos).
+    const ask = () => (item.note
+      ? call('note:getPhoto', { groupId, listId: item.listId, hash, size })
+      : call('item:getPhoto', { groupId, listId: item.listId, itemId: item.id, size }))
       .then((u) => { if (!live) return; if (u) { cachePhotoUrl(hash, size, u); setSrc(u) } else if (++tries < 20) t = setTimeout(ask, 3000) })
       .catch(() => {})
     ask()
@@ -2990,7 +2993,10 @@ export default function App () {
           {isNoteList ? (
             // A note is free text, not a checklist: the whole body is one editor,
             // so there is no item list, no add-item composer and no aisle UI.
-            <NoteEditor rows={items} onSave={saveNote} />
+            <>
+              <NotePhotos groupId={gid} list={openList} onView={setViewPhoto} onChanged={() => loadLists(gid)} />
+              <NoteEditor rows={items} onSave={saveNote} />
+            </>
           ) : (
           <>
           <div ref={listScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
@@ -3494,6 +3500,100 @@ function SectionHeader ({ cat, count }) {
 // Saves are debounced on idle and flushed on blur and on unmount, so leaving the
 // note by any route (back, tab, space switch) commits it.
 const NOTE_SAVE_DEBOUNCE_MS = 800
+// Photos on a note, in a strip above its text (proposals/2026-10-29-keep-style-notes.md).
+// They ride the note's list row, so everyone in the space sees them. Like an item
+// photo, a change applies at once.
+const NOTE_PHOTOS_MAX = 10
+const notePhotoRef = (listId, p) => ({ id: p.hash, listId, photo: p, note: true })
+function NotePhotoThumb ({ groupId, listId, photo, onClick }) {
+  const src = useItemPhoto(groupId, notePhotoRef(listId, photo), 'thumb')
+  return (
+    <button onClick={onClick} aria-label='Photo options'
+      style={{ width: 76, height: 76, flexShrink: 0, padding: 0, border: `1px solid ${c.border}`, borderRadius: r.md, background: c.surface.elevated, overflow: 'hidden', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted }}>
+      {src ? <img src={src} alt='' style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <ImageIcon size={22} weight='regular' />}
+    </button>
+  )
+}
+function NotePhotos ({ groupId, list, onView, onChanged }) {
+  const camRef = useRef(null)
+  const libRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [hint, setHint] = useState(null)
+  const [menu, setMenu] = useState(null) // 'add' | a photo
+  if (!list) return null
+  const photos = (Array.isArray(list.photos) ? list.photos : []).filter((p) => p && p.hash)
+  const full = photos.length >= NOTE_PHOTOS_MAX
+
+  async function takePhoto () {
+    // Same two steps as ItemPhotoField: the camera permission first, then one more
+    // tap if the prompt used up the gesture.
+    let res = { camera: true }
+    try { res = await call('shell:osScreen', { camera: true }) } catch {}
+    if (res && res.camera === false) { alert('PearList needs permission to use the camera. You can allow it in your phone\'s settings, or choose a photo you already have.'); return }
+    if (res && res.prompted) { setHint('Camera allowed. Tap Take photo again.'); return }
+    setHint(null); setMenu(null)
+    camRef.current?.click()
+  }
+  function choosePhoto () { setHint(null); setMenu(null); openFilePicker(libRef) }
+  async function onFile (e) {
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file) return
+    setBusy(true)
+    try {
+      const prepared = await prepareItemPhoto(file)
+      const res = await call('note:addPhoto', { groupId, listId: list.id, ...prepared })
+      cachePhotoUrl(res.photo.hash, 'full', prepared.photo)
+      cachePhotoUrl(res.photo.hash, 'thumb', prepared.thumb)
+      onChanged?.()
+    } catch (err) { alert(problem('Could not add that photo', err)) }
+    setBusy(false)
+  }
+  async function remove (p) {
+    setMenu(null)
+    const ok = await askConfirm({ title: 'Remove photo?', message: 'Everyone in this space will stop seeing it.', confirmLabel: 'Remove', danger: true })
+    if (!ok) return
+    setBusy(true)
+    try { await call('note:removePhoto', { groupId, listId: list.id, hash: p.hash }); onChanged?.() }
+    catch (err) { alert(problem('Could not remove the photo', err)) }
+    setBusy(false)
+  }
+
+  const opt = { display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: '14px 4px', background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, color: c.text.primary, fontSize: 16, fontWeight: 300, fontFamily: FONT, cursor: 'pointer', textAlign: 'left' }
+  const addTile = photos.length
+    ? <button onClick={() => { if (!busy) { setHint(null); setMenu('add') } }} disabled={busy} aria-label='Add photo'
+        style={{ width: 76, height: 76, flexShrink: 0, padding: 0, border: `1px dashed ${c.border}`, borderRadius: r.md, background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text.muted }}>
+        {busy ? <Spinner size={20} /> : <Camera size={22} weight='regular' />}
+      </button>
+    : <button onClick={() => { if (!busy) { setHint(null); setMenu('add') } }} disabled={busy}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', border: `1px solid ${c.border}`, borderRadius: 999, background: 'none', cursor: 'pointer', color: c.text.secondary, fontSize: 13, fontFamily: FONT }}>
+        {busy ? <Spinner size={14} /> : <Camera size={16} weight='regular' />}Add photo
+      </button>
+  return (
+    <>
+      <div style={{ display: 'flex', gap: sp.sm, overflowX: 'auto', padding: `${sp.sm}px ${sp.base}px`, flexShrink: 0 }}>
+        {photos.map((p) => <NotePhotoThumb key={p.hash} groupId={groupId} listId={list.id} photo={p} onClick={() => setMenu(p)} />)}
+        {full ? null : addTile}
+      </div>
+      <input ref={camRef} type='file' accept='image/*' capture='environment' style={{ display: 'none' }} onChange={onFile} />
+      <input ref={libRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onFile} />
+      <BottomSheet open={!!menu} onClose={() => setMenu(null)} title={menu === 'add' ? 'Add a photo' : 'Photo'}>
+        {menu === 'add' ? (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <button onClick={takePhoto} style={{ ...opt, borderTop: 'none' }}><Camera size={20} weight='regular' />Take photo</button>
+            {hint ? <span style={{ color: c.text.secondary, fontSize: 13, padding: '0 4px 10px 36px' }}>{hint}</span> : null}
+            <button onClick={choosePhoto} style={opt}><ImageIcon size={20} weight='regular' />Choose photo</button>
+          </div>
+        ) : menu ? (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <button onClick={() => { const p = menu; setMenu(null); onView?.(notePhotoRef(list.id, p)) }} style={{ ...opt, borderTop: 'none' }}><ImageIcon size={20} weight='regular' />View full screen</button>
+            <button onClick={() => remove(menu)} style={{ ...opt, color: c.error }}><Trash size={20} weight='regular' />Remove photo</button>
+          </div>
+        ) : null}
+      </BottomSheet>
+    </>
+  )
+}
+
 function NoteEditor ({ rows, onSave }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)

@@ -7,6 +7,12 @@
 // full-size image at { key, id }, 192 px thumbnail at { key: tkey, id: tid }, both
 // in the author's blob core. Additive like `category`: old peers store it verbatim.
 //
+// A NOTE carries its photos on its list row instead, since a note's lines are not
+// items anyone opens (proposals/2026-10-29-keep-style-notes.md):
+//   photos?: [{ key, id, tkey, tid, hash, type, w, h }]   up to NOTE_PHOTOS_MAX
+// Same bytes, same store, same sweep. Their itemRef is groupId/listId/NOTE_REF, so a
+// deleted note makes them final the way a tombstoned item does.
+//
 // What this device HOLDS is tracked in localDb under `photoref:{hash}`:
 //   { key, id, tkey, tid, size, tsize, groups: [groupId], items: [itemRef], deadSince? }
 // `items` are the rows this device has seen use the photo, as groupId/listId/itemId.
@@ -72,6 +78,9 @@ const toDataUrl = (type, bytes) => `data:${type || 'image/jpeg'};base64,${b4a.to
 
 const itemRef = (groupId, listId, itemId) => `${groupId}/${listId}/${itemId}`
 const ITEMS_CAP = 50
+const NOTE_REF = '_note'
+const NOTE_PHOTOS_MAX = 10
+const notePhotos = (list) => (list && Array.isArray(list.photos) ? list.photos.filter(isPhoto) : [])
 
 async function readRef (ctx, hash) {
   try { return (await ctx.localDb.get(PREFIX + hash))?.value || null } catch { return null }
@@ -121,6 +130,14 @@ function liveSet (spaces) {
     if (!s.mounted) { unknownGroups.add(s.groupId); continue }
     const deletedLists = new Set()
     for (const l of s.lists) if (l && l.deleted && l.id) deletedLists.add(l.id)
+    for (const l of s.lists) {
+      if (!l || !l.id) continue
+      if (l.deleted) deadItems.add(itemRef(s.groupId, l.id, NOTE_REF))
+      for (const p of notePhotos(l)) {
+        if (l.deleted) { final.add(p.hash); continue }
+        if (!live.has(p.hash)) live.set(p.hash, { photo: p, groupId: s.groupId, listId: l.id, itemId: NOTE_REF })
+      }
+    }
     for (const it of s.items) {
       if (!it) continue
       const dead = it.deleted === true || deletedLists.has(it.listId)
@@ -278,6 +295,48 @@ function prefetchRows (ctx, groupId, rows) {
     .catch(() => {}).finally(() => prefetching.delete(groupId))
 }
 
+// Store a photo's bytes (or reuse a copy this device already holds) and return the
+// reference a row carries. `photo` and `thumb` are data URLs the UI compressed.
+async function storePhoto (ctx, groupId, at, { photo, thumb, w, h }) {
+  const full = parseImage(photo, PHOTO_MAX_BYTES, 'photo')
+  const small = parseImage(thumb, THUMB_MAX_BYTES, 'thumbnail')
+  const hash = hashOf(full.bytes)
+  // Same bytes already held (on another item, or fetched from a housemate):
+  // point at the copy we have rather than appending them again.
+  // Only when BOTH are held: a thumbnail-only copy would record the full image as
+  // held, and the download pass would never fetch it.
+  let ref = await readRef(ctx, hash)
+  if (!ref || !ref.size || !ref.tsize) {
+    const a = await ctx.blobs.put(full.bytes)
+    const b = await ctx.blobs.put(small.bytes)
+    ref = { key: a.key, id: a.id, tkey: b.key, tid: b.id }
+  }
+  const value = {
+    key: ref.key, id: ref.id, tkey: ref.tkey, tid: ref.tid, hash, type: full.type,
+    w: Number.isFinite(w) ? Math.round(w) : undefined, h: Number.isFinite(h) ? Math.round(h) : undefined,
+  }
+  await recordRef(ctx, value, groupId, { size: full.bytes.length, tsize: small.bytes.length }, at)
+  fullCache.set(hash + ':full', String(photo))
+  thumbCache.set(hash + ':thumb', String(thumb))
+  return value
+}
+
+// A data URL, or null when the bytes are not on this device yet. A null kicks a
+// background download, so the UI shows a placeholder and asks again.
+async function readPhoto (ctx, groupId, p, sz, at) {
+  const k = p.hash + ':' + sz
+  const hit = cacheFor(sz).get(k)
+  if (hit) return hit
+  const held = await readRef(ctx, p.hash)
+  if (held && (sz === 'full' ? held.size : held.tsize)) {
+    const refp = sz === 'full' ? { key: p.key, id: p.id } : { key: p.tkey, id: p.tid }
+    const bytes = await ctx.blobs.get(refp, { timeout: LOCAL_READ_TIMEOUT_MS })
+    if (bytes) { const url = toDataUrl(p.type, bytes); cacheFor(sz).set(k, url); return url }
+  }
+  fetchInBackground(ctx, p, groupId, sz, at)
+  return null
+}
+
 function photoMethods ({ viewFor, readRow, putRow }) {
   return {
     // Set, replace or remove (photo: null) the photo on an item. `photo` and
@@ -295,26 +354,7 @@ function photoMethods ({ viewFor, readRow, putRow }) {
         await putRow(ctx, groupId, itemKey(listId, itemId), rest)
         return { ok: true, photo: null }
       }
-      const full = parseImage(photo, PHOTO_MAX_BYTES, 'photo')
-      const small = parseImage(thumb, THUMB_MAX_BYTES, 'thumbnail')
-      const hash = hashOf(full.bytes)
-      // Same bytes already held (on another item, or fetched from a housemate):
-      // point at the copy we have rather than appending them again.
-      // Only when BOTH are held: a thumbnail-only copy would record the full image as
-      // held, and the download pass would never fetch it.
-      let ref = await readRef(ctx, hash)
-      if (!ref || !ref.size || !ref.tsize) {
-        const a = await ctx.blobs.put(full.bytes)
-        const b = await ctx.blobs.put(small.bytes)
-        ref = { key: a.key, id: a.id, tkey: b.key, tid: b.id }
-      }
-      const value = {
-        key: ref.key, id: ref.id, tkey: ref.tkey, tid: ref.tid, hash, type: full.type,
-        w: Number.isFinite(w) ? Math.round(w) : undefined, h: Number.isFinite(h) ? Math.round(h) : undefined,
-      }
-      await recordRef(ctx, value, groupId, { size: full.bytes.length, tsize: small.bytes.length }, itemRef(groupId, listId, itemId))
-      fullCache.set(hash + ':full', String(photo))
-      thumbCache.set(hash + ':thumb', String(thumb))
+      const value = await storePhoto(ctx, groupId, itemRef(groupId, listId, itemId), { photo, thumb, w, h })
       await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, photo: value })
       return { ok: true, photo: value }
     },
@@ -326,18 +366,44 @@ function photoMethods ({ viewFor, readRow, putRow }) {
       const sz = size === 'full' ? 'full' : 'thumb'
       const row = await readRow(viewFor(ctx, groupId), itemKey(listId, itemId))
       if (!row || row.deleted || !isPhoto(row.photo)) return null
-      const p = row.photo
-      const k = p.hash + ':' + sz
-      const hit = cacheFor(sz).get(k)
-      if (hit) return hit
-      const held = await readRef(ctx, p.hash)
-      if (held && (sz === 'full' ? held.size : held.tsize)) {
-        const refp = sz === 'full' ? { key: p.key, id: p.id } : { key: p.tkey, id: p.tid }
-        const bytes = await ctx.blobs.get(refp, { timeout: LOCAL_READ_TIMEOUT_MS })
-        if (bytes) { const url = toDataUrl(p.type, bytes); cacheFor(sz).set(k, url); return url }
-      }
-      fetchInBackground(ctx, p, groupId, sz, itemRef(groupId, listId, itemId))
-      return null
+      return readPhoto(ctx, groupId, row.photo, sz, itemRef(groupId, listId, itemId))
+    },
+
+    // Photos on a note (kind 'note'), kept on its list row. Add appends one, up to
+    // NOTE_PHOTOS_MAX; remove takes one out by hash. The removed bytes wait out the
+    // same grace period as a replaced item photo before the sweep clears them.
+    'note:addPhoto': async ({ groupId, listId, photo, thumb, w, h }, ctx) => {
+      ensureMaintainTimer(ctx)
+      const base = viewFor(ctx, groupId)
+      const list = await readRow(base, listKey(listId))
+      if (!list || list.deleted) throw new Error('note not found')
+      if (list.kind !== 'note') throw new Error('only notes take photos this way')
+      const have = notePhotos(list)
+      if (have.length >= NOTE_PHOTOS_MAX) throw new Error(`a note holds up to ${NOTE_PHOTOS_MAX} photos`)
+      const value = await storePhoto(ctx, groupId, itemRef(groupId, listId, NOTE_REF), { photo, thumb, w, h })
+      const photos = have.some((p) => p.hash === value.hash) ? have : have.concat([value])
+      await putRow(ctx, groupId, listKey(listId), { ...list, photos })
+      return { ok: true, photo: value }
+    },
+
+    'note:removePhoto': async ({ groupId, listId, hash }, ctx) => {
+      const base = viewFor(ctx, groupId)
+      const list = await readRow(base, listKey(listId))
+      if (!list || list.deleted) throw new Error('note not found')
+      const { photos: _old, ...rest } = list // eslint-disable-line no-unused-vars
+      const photos = notePhotos(list).filter((p) => p.hash !== hash)
+      await putRow(ctx, groupId, listKey(listId), photos.length ? { ...rest, photos } : rest)
+      return { ok: true }
+    },
+
+    'note:getPhoto': async ({ groupId, listId, hash, size = 'thumb' }, ctx) => {
+      ensureMaintainTimer(ctx)
+      const sz = size === 'full' ? 'full' : 'thumb'
+      const list = await readRow(viewFor(ctx, groupId), listKey(listId))
+      if (!list || list.deleted) return null
+      const p = notePhotos(list).find((x) => x.hash === hash)
+      if (!p) return null
+      return readPhoto(ctx, groupId, p, sz, itemRef(groupId, listId, NOTE_REF))
     },
 
     // Run the download pass and the cleanup sweep now. The timer calls the same
@@ -360,7 +426,7 @@ function photoMethods ({ viewFor, readRow, putRow }) {
 }
 
 module.exports = {
-  photoMethods, prefetchRows, liveSet, sweepDecision, parseImage, isPhoto,
+  photoMethods, prefetchRows, liveSet, sweepDecision, parseImage, isPhoto, notePhotos, NOTE_PHOTOS_MAX, NOTE_REF,
   PHOTO_MAX_BYTES, THUMB_MAX_BYTES, REPLACED_GRACE_MS,
   _resetCaches () { thumbCache.clear(); fullCache.clear() },
 }

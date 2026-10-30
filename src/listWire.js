@@ -3,8 +3,12 @@
 // as its applyOps.
 //
 // Data model (one household group, many lists):
-//   list:{listId}            -> signed { id, name, kind?, assignee?, createdBy,
-//                                        createdAt, updatedAt, pubkey, deleted }
+//   list:{listId}            -> signed { id, name, kind?, assignee?, photos?,
+//                                        createdBy, createdAt, updatedAt, pubkey,
+//                                        deleted }
+//
+// `photos` is on notes only: references to images in the blob store, the same
+// shape an item's `photo` has (see photos.js). Additive: stored verbatim.
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
 //                                        assignee?, category?, catBy?, ord?,
 //                                        createdBy, createdAt, updatedAt,
