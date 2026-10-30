@@ -31,3 +31,26 @@ test('the UI asks for a share at start and on each new one', () => {
   assert.match(ui, /on\('shell:shared', take\)/)
   assert.match(ui, /<ShareInSheet open=\{sheet === 'shareIn'\}/)
 })
+
+test('iOS: the Share Extension is set up and uses the App Group the app reads', () => {
+  const app = JSON.parse(read('app.json')).expo
+  assert.ok(app.plugins.includes('./plugins/with-ios-share-extension'))
+  const plugin = read('plugins/with-ios-share-extension.js')
+  assert.match(plugin, /`group\.\$\{config\.ios\.bundleIdentifier\}`/)
+  assert.match(plugin, /`\$\{c\.ios\.bundleIdentifier\}\.share`/)
+  // The extension finds the group from its own id minus ".share"; the app from its own id.
+  const ext = read('plugins/ios-share-extension/ShareViewController.swift')
+  assert.match(ext, /"group\." \+ me\.split\(separator: "\."\)\.dropLast\(\)/)
+  assert.match(ext, /pear:\/\/pearlist\/share/)
+  const mod = read('modules/share-intent/ios/ShareIntentModule.swift')
+  assert.match(mod, /"group\." \+ \(Bundle\.main\.bundleIdentifier/)
+  const plist = read('plugins/ios-share-extension/Info.plist')
+  assert.match(plist, /com\.apple\.share-services/)
+  assert.match(plist, /NSExtensionActivationSupportsImageWithMaxCount<\/key>\s*<integer>10</)
+})
+
+test('iOS: the App Store export signs the extension with its own profile', () => {
+  const conf = read('scripts/app.conf')
+  assert.match(conf, /^IOS_SHARE_PROVISIONING_PROFILE=/m)
+  assert.match(read('scripts/ios-appstore.sh'), /<key>\$\{BUNDLE_ID\}\.share<\/key>\s*<string>\$\{IOS_SHARE_PROVISIONING_PROFILE\}/)
+})

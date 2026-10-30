@@ -4,5 +4,6 @@
   "description": "Android: receive text, links and pictures shared to PearList from other apps",
   "main": "index.ts",
   "license": "MIT",
-  "author": "PeerLoom"
+  "author": "PeerLoom",
+  "homepage": "https://peerloomllc.com"
 }

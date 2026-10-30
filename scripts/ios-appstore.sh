@@ -69,6 +69,13 @@ if $USE_ASC; then
     --private-key "$ASC_KEY_FILE"
 fi
 
+# The Share Extension ships inside the app and is signed with its own profile.
+if [ -z "${IOS_SHARE_PROVISIONING_PROFILE:-}" ]; then
+  echo "Error: IOS_SHARE_PROVISIONING_PROFILE is not set (scripts/app.conf)."
+  echo "  The Share Extension (${BUNDLE_ID}.share) needs its own distribution profile."
+  exit 1
+fi
+
 # ── Write ExportOptions.plist ───────────────────────────────────────────────
 cat > "$EXPORT_OPTIONS" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -83,6 +90,8 @@ cat > "$EXPORT_OPTIONS" << EOF
   <dict>
     <key>${BUNDLE_ID}</key>
     <string>${IOS_PROVISIONING_PROFILE}</string>
+    <key>${BUNDLE_ID}.share</key>
+    <string>${IOS_SHARE_PROVISIONING_PROFILE}</string>
   </dict>
   <key>signingCertificate</key>
   <string>Apple Distribution</string>
