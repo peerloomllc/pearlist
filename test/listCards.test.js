@@ -111,8 +111,8 @@ test('list:previews counts items and puts open ones first, notes in their own or
   assert.equal(p[listId].total, 3)
   assert.deepEqual(p[listId].lines.map((x) => x.text), ['eggs', 'bread', 'milk'])
   assert.equal(p[listId].lines[2].checked, true)
-  assert.equal(p[listId].photo, null)
-  assert.deepEqual(p[empty], { open: 0, total: 0, lines: [], photo: null })
+  assert.deepEqual(p[listId].photos, [])
+  assert.deepEqual(p[empty], { open: 0, total: 0, lines: [], photos: [] })
   await engine.close()
 })
 

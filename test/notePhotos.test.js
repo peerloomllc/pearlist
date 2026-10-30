@@ -134,6 +134,21 @@ test('a note photo added on one phone can be read on the other', async () => {
   h.cut(); await h.A.engine.close(); await h.B.engine.close()
 })
 
+test('a card shows the photos of a note and none from a shopping list', async () => {
+  const h = await household('np6')
+  const listId = await note(h.A, h.groupId)
+  const a = await h.A.call('note:addPhoto', { groupId: h.groupId, listId, ...photoPair() })
+  const b = await h.A.call('note:addPhoto', { groupId: h.groupId, listId, ...photoPair() })
+  const { listId: shop } = await h.A.call('list:create', { groupId: h.groupId, name: 'Groceries' })
+  const { itemId } = await h.A.call('item:add', { groupId: h.groupId, listId: shop, text: 'milk' })
+  await h.A.call('item:setPhoto', { groupId: h.groupId, listId: shop, itemId, ...photoPair() })
+  const p = await h.A.call('list:previews', { groupId: h.groupId })
+  assert.deepEqual(p[listId].photos.map((x) => x.id), [a.photo.hash, b.photo.hash])
+  assert.equal(p[listId].photos[0].note, true)
+  assert.deepEqual(p[shop].photos, [])
+  h.cut(); await h.A.engine.close(); await h.B.engine.close()
+})
+
 test('renaming a note keeps its photos, and the same photo twice is stored once', async () => {
   const h = await household('np2')
   const listId = await note(h.A, h.groupId)

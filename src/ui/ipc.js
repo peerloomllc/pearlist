@@ -133,7 +133,7 @@ const mockMethods = {
       if (l.deleted) continue
       const rows = [...g.items.values()].filter(i => i.listId === l.id && !i.deleted)
       const ordered = rows.slice().sort((a, b) => (a.checked === b.checked ? 0 : a.checked ? 1 : -1))
-      out[l.id] = { open: rows.filter(i => !i.checked).length, total: rows.length, lines: ordered.slice(0, 8).map(i => ({ text: String(i.text || ''), checked: !!i.checked })), photo: null }
+      out[l.id] = { open: rows.filter(i => !i.checked).length, total: rows.length, lines: ordered.slice(0, 8).map(i => ({ text: String(i.text || ''), checked: !!i.checked })), photos: [] }
     }
     return out
   },
