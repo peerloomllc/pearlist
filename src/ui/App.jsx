@@ -12,6 +12,7 @@ import { nextCollapseState } from '../autoCollapse.js'
 import { shouldClear } from '../clearOnChecked.js'
 import { checkedLast } from '../checkedLast.js'
 import { LIST_COLORS, normalizeColor, isPinned } from '../listStyle.js'
+import { orderCards, moveCard } from '../cardOrder.js'
 import { addCategory } from '../addToGroup.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
@@ -962,6 +963,10 @@ function saveAllDone (on) { try { localStorage.setItem(ALL_DONE_KEY, on ? '1' : 
 const LIST_VIEW_KEY = 'pearlist:listview'
 function loadListView () { try { return localStorage.getItem(LIST_VIEW_KEY) === 'rows' ? 'rows' : 'cards' } catch { return 'cards' } }
 function saveListView (v) { try { localStorage.setItem(LIST_VIEW_KEY, v) } catch {} }
+// Card order per space, on this phone (src/cardOrder.js).
+const CARD_ORDER_KEY = 'pearlist:cardorder:'
+function loadCardOrder (gid) { try { const v = JSON.parse(localStorage.getItem(CARD_ORDER_KEY + gid) || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } }
+function saveCardOrder (gid, ids) { try { localStorage.setItem(CARD_ORDER_KEY + gid, JSON.stringify(ids)) } catch {} }
 
 // Device-local preference: ask "How many?" before a grocery item is added (GH #222).
 // On by default and read as on when the key is missing, so an update never takes
@@ -2322,6 +2327,7 @@ export default function App () {
   // Drag: reorder items/groups (device-local) or drop an item into another group
   // to re-file it (recategorize, which syncs via ai:setCategory).
   const listScrollRef = useRef(null)
+  const listsScrollRef = useRef(null)
   const recategorizeItem = useCallback((itemId, aisle) => {
     if (!gid || !openListId) return
     if (isGroceryList) rememberOverride(items.find((i) => i.id === itemId)?.text, aisle) // learn corrections (grocery classifier only)
@@ -3081,7 +3087,7 @@ export default function App () {
           />
           <MembersBar members={members} onOpen={() => setSheet('members')} />
           <SyncBanner status={syncStatus} retried={repairRetried} busy={repairing} onAction={repairSpace} />
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
+          <div ref={listsScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 80 }}>
             {lists.length === 0
               ? <div style={{ textAlign: 'center', color: c.text.muted, fontSize: 15, padding: `${sp.xxxl}px ${sp.xl}px` }}>
                   {/* "Add one below" is an invitation, and the composer under it is
@@ -3097,7 +3103,7 @@ export default function App () {
               : <>
                   <ListViewSwitch view={listView} onChange={setListView} />
                   {listView === 'cards'
-                    ? <ListCards lists={lists} previews={previews} groupId={gid} members={members} onOpen={setOpenListId} onPin={toggleListPin} />
+                    ? <ListCards lists={lists} previews={previews} groupId={gid} members={members} onOpen={setOpenListId} scrollRef={listsScrollRef} />
                     : <GroupedLists lists={lists} members={members} onOpen={setOpenListId} />}
                 </>}
           </div>
@@ -3487,7 +3493,7 @@ function ListViewSwitch ({ view, onChange }) {
     </button>
   )
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 2, padding: `${sp.xs}px ${sp.base}px 0` }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 2, padding: `${sp.xs}px ${sp.base}px ${sp.md}px` }}>
       {btn('cards', 'Show as cards', SquaresFour)}
       {btn('rows', 'Show as rows', Rows)}
     </div>
@@ -3495,53 +3501,161 @@ function ListViewSwitch ({ view, onChange }) {
 }
 
 // The Lists page as cards in two columns, pinned ones first in their own group.
-// Inside each group lists keep the category order the rows use.
-function ListCards ({ lists, previews, groupId, members, onOpen, onPin }) {
+// Cards fill left to right, then down. Press and hold a card to drag it; the
+// order is kept per space on this phone (src/cardOrder.js) and a card only moves
+// within its own group.
+function ListCards ({ lists, previews, groupId, members, onOpen, scrollRef }) {
+  const [saved, setSaved] = useState(() => loadCardOrder(groupId))
+  useEffect(() => { setSaved(loadCardOrder(groupId)) }, [groupId])
   const rank = (l) => CATEGORIES.findIndex((cat) => cat.key === categoryOf(l.kind).key)
-  const ordered = lists.slice().sort((a, b) => rank(a) - rank(b))
+  const ordered = orderCards(lists.slice().sort((a, b) => rank(a) - rank(b)), saved)
   const pinned = ordered.filter(isPinned)
   const others = ordered.filter((l) => !isPinned(l))
-  const grid = (ls) => (
-    <div style={{ columnCount: 2, columnGap: sp.sm, padding: `0 ${sp.sm}px` }}>
-      {ls.map((l) => <ListCard key={l.id} list={l} preview={previews?.[l.id]} groupId={groupId} members={members} onOpen={() => onOpen(l.id)} onPin={() => onPin(l)} />)}
+  const drag = useCardDrag({ scrollRef, onDrop: (id, targetId) => {
+    const next = moveCard(ordered.map((l) => l.id), id, targetId)
+    setSaved(next); saveCardOrder(groupId, next)
+  } })
+  const card = (l, group) => (
+    <ListCard key={l.id} list={l} group={group} preview={previews?.[l.id]} groupId={groupId} members={members}
+      lifted={drag.lifted === l.id} target={drag.target === l.id}
+      onOpen={() => { if (drag.didDrag()) return; onOpen(l.id) }} dragProps={drag.props(l.id, group)} />
+  )
+  const grid = (ls, group) => (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: sp.sm, padding: `0 ${sp.sm}px` }}>
+      {[0, 1].map((col) => (
+        <div key={col} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: sp.sm }}>
+          {ls.filter((_, i) => i % 2 === col).map((l) => card(l, group))}
+        </div>
+      ))}
     </div>
   )
   const label = (text) => <div style={{ padding: `${sp.md}px ${sp.base}px ${sp.xs}px`, color: c.text.secondary, fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6 }}>{text}</div>
   return (
     <>
-      {pinned.length ? <>{label('Pinned')}{grid(pinned)}</> : null}
+      {pinned.length ? <>{label('Pinned')}{grid(pinned, 'pinned')}</> : null}
       {pinned.length && others.length ? label('Others') : null}
-      {others.length ? grid(others) : null}
+      {others.length ? grid(others, 'others') : null}
     </>
   )
 }
 
+// Press-and-hold drag for the cards. No preventDefault while holding, so a swipe
+// that starts on a card still scrolls the page: moving more than CARD_HOLD_TOL
+// before the hold ends lets the gesture go. Once lifted, the card follows the
+// finger, the card under it is the drop target and the page scrolls near the
+// edges. Same shape as useAisleDrag, without the slot animation.
+const CARD_HOLD_MS = 380
+const CARD_HOLD_TOL = 10
+function useCardDrag ({ scrollRef, onDrop }) {
+  const [lifted, setLifted] = useState(null)
+  const [target, setTarget] = useState(null)
+  const S = useRef({})
+  const justDragged = useRef(false)
+  const live = useRef({})
+  live.current = { onDrop }
+
+  const cleanup = () => {
+    const s = S.current
+    window.removeEventListener('touchmove', s.onTouchMove, { passive: false })
+    window.removeEventListener('touchend', s.onEnd)
+    window.removeEventListener('touchcancel', s.onEnd)
+    window.removeEventListener('pointermove', s.onPointerMove)
+    window.removeEventListener('pointerup', s.onEnd)
+    clearTimeout(s.timer)
+    if (s.raf) cancelAnimationFrame(s.raf)
+    if (s.el) { s.el.style.transform = ''; s.el.style.pointerEvents = ''; s.el.style.transition = '' }
+    S.current = {}
+    setLifted(null); setTarget(null)
+  }
+  const scrollDelta = (s) => (scrollRef?.current ? scrollRef.current.scrollTop - s.scroll0 : 0)
+  const position = () => {
+    const s = S.current
+    if (!s.active) return
+    s.el.style.transform = `translate(${s.x - s.startX}px, ${s.y - s.startY + scrollDelta(s)}px) scale(1.04)`
+    const over = document.elementFromPoint(s.x, s.y)?.closest('[data-card-id]')
+    const id = over && over.getAttribute('data-card-group') === s.group ? over.getAttribute('data-card-id') : null
+    s.target = id && id !== s.id ? id : null
+    setTarget((t) => (t === s.target ? t : s.target))
+  }
+  const autoscroll = () => {
+    const s = S.current
+    const el = scrollRef?.current
+    if (s.active && el) {
+      const rc = el.getBoundingClientRect()
+      const d = s.y < rc.top + 70 ? -10 : s.y > rc.bottom - 90 ? 10 : 0
+      if (d) { el.scrollTop += d; position() }
+    }
+    if (s.active) s.raf = requestAnimationFrame(autoscroll)
+  }
+  const activate = () => {
+    const s = S.current
+    if (!s.id) return
+    s.active = true
+    try { haptic('medium') } catch {}
+    s.scroll0 = scrollRef?.current ? scrollRef.current.scrollTop : 0
+    s.el.style.pointerEvents = 'none'
+    s.el.style.transition = 'transform 80ms ease'
+    setLifted(s.id)
+    position()
+    s.raf = requestAnimationFrame(autoscroll)
+  }
+  const onMove = (x, y, preventDefault) => {
+    const s = S.current
+    if (!s.id) return
+    s.x = x; s.y = y
+    if (!s.active) { if (Math.hypot(x - s.startX, y - s.startY) > CARD_HOLD_TOL) cleanup(); return }
+    preventDefault && preventDefault()
+    position()
+  }
+  const begin = (id, group, el, x, y, source) => {
+    cleanup()
+    const s = S.current = { id, group, el, startX: x, startY: y, x, y, active: false }
+    s.onEnd = () => {
+      if (s.active) {
+        if (s.target) live.current.onDrop(s.id, s.target)
+        justDragged.current = true; setTimeout(() => { justDragged.current = false }, 350)
+      }
+      cleanup()
+    }
+    if (source === 'touch') {
+      s.onTouchMove = (ev) => { const t = ev.touches[0]; if (t) onMove(t.clientX, t.clientY, () => { try { ev.preventDefault() } catch {} }) }
+      window.addEventListener('touchmove', s.onTouchMove, { passive: false })
+      window.addEventListener('touchend', s.onEnd)
+      window.addEventListener('touchcancel', s.onEnd)
+    } else {
+      s.onPointerMove = (ev) => onMove(ev.clientX, ev.clientY, null)
+      window.addEventListener('pointermove', s.onPointerMove)
+      window.addEventListener('pointerup', s.onEnd)
+    }
+    s.timer = setTimeout(activate, CARD_HOLD_MS)
+  }
+  useEffect(() => () => cleanup(), [])
+  const props = (id, group) => ({
+    onTouchStart: (e) => { const t = e.touches[0]; if (t) begin(id, group, e.currentTarget, t.clientX, t.clientY, 'touch') },
+    onPointerDown: (e) => { if (e.pointerType === 'touch') return; if (e.button != null && e.button !== 0) return; begin(id, group, e.currentTarget, e.clientX, e.clientY, 'mouse') },
+  })
+  return { props, lifted, target, didDrag: () => justDragged.current }
+}
+
 // One card: the first photo, the name, then a note's first lines or a list's open
-// items with a tick circle each. A long press pins or unpins it.
+// items with a tick circle each.
 const CARD_LINES = 6
-function ListCard ({ list, preview, groupId, members, onOpen, onPin }) {
+function ListCard ({ list, group, preview, groupId, members, lifted, target, onOpen, dragProps }) {
   const cat = categoryOf(list.kind)
   const Icon = cat.Icon
   const photo = useItemPhoto(groupId, preview?.photo || null, 'thumb')
-  const press = useRef({ t: null, fired: false })
-  const startPress = () => {
-    press.current.fired = false
-    clearTimeout(press.current.t)
-    press.current.t = setTimeout(() => { press.current.fired = true; onPin?.() }, 550)
-  }
-  const endPress = () => clearTimeout(press.current.t)
   const isNote = list.kind === 'note'
   const lines = (preview?.lines || []).filter((x) => isNote ? x.text.trim() : !x.checked).slice(0, CARD_LINES)
   const open = preview?.open ?? 0
   const total = preview?.total ?? 0
   const more = isNote ? 0 : open - lines.length
   const done = total - open
+  const color = normalizeColor(list.color)
   return (
-    <button onClick={() => { if (press.current.fired) return; onOpen?.() }}
-      onPointerDown={startPress} onPointerUp={endPress} onPointerLeave={endPress} onPointerCancel={endPress}
+    <button data-card-id={list.id} data-card-group={group} onClick={onOpen} {...dragProps}
       onContextMenu={(e) => e.preventDefault()}
-      style={{ display: 'block', width: '100%', breakInside: 'avoid', marginBottom: sp.sm, padding: 0, textAlign: 'left', cursor: 'pointer', borderRadius: r.lg, overflow: 'hidden', background: CARD_BG[normalizeColor(list.color)], border: `1px solid ${normalizeColor(list.color) === 'default' ? c.border : 'transparent'}`, color: c.text.primary, fontFamily: FONT, WebkitTouchCallout: 'none', userSelect: 'none' }}>
-      {photo ? <img src={photo} alt='' style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover' }} /> : null}
+      style={{ display: 'block', width: '100%', padding: 0, textAlign: 'left', cursor: 'pointer', borderRadius: r.lg, overflow: 'hidden', background: CARD_BG[color], border: target ? `2px solid ${c.primary}` : `1px solid ${color === 'default' ? c.border : 'transparent'}`, color: c.text.primary, fontFamily: FONT, WebkitTouchCallout: 'none', userSelect: 'none', position: 'relative', zIndex: lifted ? 50 : 'auto', boxShadow: lifted ? '0 12px 28px rgba(0,0,0,0.45)' : 'none' }}>
+      {photo ? <img src={photo} alt='' style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover', pointerEvents: 'none' }} /> : null}
       <div style={{ padding: `${sp.md}px ${sp.md}px ${sp.sm}px` }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
           <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{list.name}</span>

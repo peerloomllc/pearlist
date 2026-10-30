@@ -10,7 +10,8 @@ only".
 Choice: `color` (one of eight names) and `pinned: true` ride the existing `list:` row,
 set by list:setColor and list:setPinned, read through src/listStyle.js. Default and
 unpinned are written as absent. The Lists page shows cards by default, with rows one
-tap away, remembered per device. list:previews feeds the cards in one read.
+tap away, remembered per device. Cards are dragged into order with press and hold,
+kept per space on this phone like aisle order. list:previews feeds the cards.
 Alternatives: device-local pins and colours (Tim chose shared); a new namespace (old
 peers drop it and the view forks, listWire.js top).
 Consequences: additive. Older builds keep both fields when they change a list and do
