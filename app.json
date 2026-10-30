@@ -36,7 +36,9 @@
       "permissions": [
         "CAMERA",
         "POST_NOTIFICATIONS",
-        "USE_EXACT_ALARM"
+        "USE_EXACT_ALARM",
+        "ACCESS_NETWORK_STATE",
+        "WAKE_LOCK"
       ],
       "intentFilters": [
         {
