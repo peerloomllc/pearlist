@@ -948,6 +948,14 @@ const CHECKED_LAST_KEY = 'pearlist:checkedlast'
 function loadCheckedLast () { try { return localStorage.getItem(CHECKED_LAST_KEY) !== '0' } catch { return true } }
 function saveCheckedLast (on) { try { localStorage.setItem(CHECKED_LAST_KEY, on ? '1' : '0') } catch {} }
 
+// Device-local preference: offer the "All done" sheet when the last item is
+// checked (GH #248). On by default and read as on when the key is missing, so an
+// update changes nothing until someone turns it off. Off, the list just stays as
+// it is, and "Delete checked items" is still in the list's menu.
+const ALL_DONE_KEY = 'pearlist:alldone'
+function loadAllDone () { try { return localStorage.getItem(ALL_DONE_KEY) !== '0' } catch { return true } }
+function saveAllDone (on) { try { localStorage.setItem(ALL_DONE_KEY, on ? '1' : '0') } catch {} }
+
 // Device-local preference: ask "How many?" before a grocery item is added (GH #222).
 // On by default and read as on when the key is missing, so an update never takes
 // the step away from anyone who uses it. Off adds the item straight away with a
@@ -2256,6 +2264,8 @@ export default function App () {
   const [clearOnChecked, setClearOnCheckedState] = useState(loadClearOnChecked)
   const setClearOnChecked = useCallback((on) => { setClearOnCheckedState(!!on); saveClearOnChecked(on) }, [])
   const [askQty, setAskQtyState] = useState(loadAskQty)
+  const [allDonePrompt, setAllDonePromptState] = useState(loadAllDone)
+  const setAllDonePrompt = useCallback((on) => { setAllDonePromptState(!!on); saveAllDone(on) }, [])
   const [sinkChecked, setSinkCheckedState] = useState(loadCheckedLast)
   const setSinkChecked = useCallback((on) => { setSinkCheckedState(!!on); saveCheckedLast(on) }, [])
   const setAskQty = useCallback((on) => { setAskQtyState(!!on); saveAskQty(on) }, [])
@@ -2752,7 +2762,7 @@ export default function App () {
     // Still right with "Clear when checked" on, where the last tick leaves the list
     // EMPTY rather than fully checked: either way the shop is done and the offer to
     // put the list away is the same one.
-    if (nowChecked && openList?.kind !== 'chore' && items.length > 0 && items.every(i => i.id === item.id || i.checked)) setSheet('listComplete')
+    if (allDonePrompt && nowChecked && openList?.kind !== 'chore' && items.length > 0 && items.every(i => i.id === item.id || i.checked)) setSheet('listComplete')
   }
   // Swipe-delete: remove the item, then offer a 3s undo. Undo re-creates it with
   // its fields (a new row, since the delete is a no-resurrection tombstone).
@@ -3010,7 +3020,7 @@ export default function App () {
           )}
         </>
       ) : view === 'profile' ? (
-        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} sinkChecked={sinkChecked} onSinkChecked={setSinkChecked} clearOnChecked={clearOnChecked} onClearOnChecked={setClearOnChecked} askQty={askQty} onAskQty={setAskQty} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} sinkChecked={sinkChecked} onSinkChecked={setSinkChecked} clearOnChecked={clearOnChecked} onClearOnChecked={setClearOnChecked} allDonePrompt={allDonePrompt} onAllDonePrompt={setAllDonePrompt} askQty={askQty} onAskQty={setAskQty} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
           spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces}
           onLinkDevice={linkThisDevice} />
       ) : view === 'about' ? (
@@ -3095,7 +3105,7 @@ export default function App () {
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
       <CategorySheet open={sheet === 'category'} current={openList?.kind} onClose={() => setSheet(null)} onSave={(kind) => setListKind(openListId, kind)} />
       <NotifySheet open={sheet === 'notifyMode'} current={effectiveNotifyMode(openList)} onClose={() => setSheet(null)} onSave={(mode) => setNotifyMode(openListId, mode)} />
-      <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDeleteChecked={() => deleteCheckedItems({ confirmed: true })} onDelete={deleteOpenList} onKeep={() => setSheet(null)} />
+      <ListCompleteSheet open={sheet === 'listComplete'} listName={openList?.name} onClose={() => setSheet(null)} onDeleteChecked={() => deleteCheckedItems({ confirmed: true })} onDelete={deleteOpenList} onKeep={() => setSheet(null)} onStopShowing={() => { setAllDonePrompt(false); setSheet(null) }} />
       <CategorySheet open={sheet === 'newListCategory'} title={`Category for "${listDraft.trim()}"`} current='list' onClose={() => setSheet(null)} onSave={createListWithKind} />
       <MembersSheet open={sheet === 'members'} onClose={() => setSheet(null)} members={members} selfPubkey={selfPubkey} spaceName={activeSpace?.name} isOwner={!!activeSpace?.owner} onRemove={removeMember} removed={removedMembers} onRestore={restoreMember} revoke={revoke} />
       <DeleteSpaceSheet open={sheet === 'deleteSpace'} onClose={() => { setSheet(null); setDeleteTarget(null) }} spaceName={deleteTarget?.name} onConfirm={() => deleteSpace(deleteTarget?.groupId)} />
@@ -3866,13 +3876,14 @@ function DeleteSpaceSheet ({ open, onClose, spaceName, onConfirm }) {
 // the common case (feedback 2026-10-26: "I never delete lists but I always want to
 // delete all checked items"). Both deletes are shared and this sheet is their
 // confirmation, so neither asks again.
-function ListCompleteSheet ({ open, listName, onDeleteChecked, onDelete, onKeep, onClose }) {
+function ListCompleteSheet ({ open, listName, onDeleteChecked, onDelete, onKeep, onStopShowing, onClose }) {
   return (
     <BottomSheet open={open} onClose={onClose} title='All done 🎉'>
       <p style={{ color: c.text.secondary, fontSize: 14, fontWeight: 300, textAlign: 'center', lineHeight: 1.5, margin: `0 0 ${sp.lg}px` }}>Every item on {listName ? `"${listName}"` : 'this list'} is checked off. Either delete removes it for everyone in the space.</p>
       <Button variant='danger' onClick={onDeleteChecked}>Delete checked items</Button>
       <Button variant='dangerOutline' style={{ marginTop: sp.sm }} onClick={onDelete}>Delete list</Button>
       <Button variant='secondary' style={{ marginTop: sp.sm }} onClick={onKeep}>Cancel</Button>
+      <button onClick={onStopShowing} style={{ display: 'block', margin: `${sp.md}px auto 0`, padding: '8px 12px', background: 'none', border: 'none', color: c.text.muted, fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>Don't show this again</button>
     </BottomSheet>
   )
 }
@@ -4059,7 +4070,7 @@ function SeederBackup ({ onAbout, about }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, sinkChecked, onSinkChecked, clearOnChecked, onClearOnChecked, askQty, onAskQty, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, sinkChecked, onSinkChecked, clearOnChecked, onClearOnChecked, allDonePrompt, onAllDonePrompt, askQty, onAskQty, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
   // build shows nothing new.
@@ -4284,6 +4295,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
     'Seeder backup': "Run PeerLoom Seeder on a computer that stays on, such as an Umbrel or a spare PC, and pair this phone with it. Every member of your spaces then backs up to it. A new phone still needs a member's phone online to join a space.",
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
+    'All done pop-up': "When you tick off the last item on a list, PearList offers to delete the checked items or the whole list. Turn this off and the list just stays as it is. You can still delete checked items from the list's menu. This only changes this phone.",
     'Ask how many': "When you add something to a grocery list, PearList asks how many you need before it goes on the list. Turn this off to skip that step: the item goes straight on as one, and you can still tap it later to change the number. This only changes this phone.",
     'Checked items last': "Ticked items move to the bottom of the list, so what is still to get stays together at the top. On a list with aisles or sections they go to the bottom of their own aisle. On a plain list they sit under a Checked divider you can tap to fold away. This only changes how the list looks on this phone.",
     'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
@@ -4423,6 +4435,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
           control={<Toggle on={sinkChecked !== false} onChange={(v) => onSinkChecked(v)} />} />
         <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
           control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
+        <Setting onAbout={setInfo} title='All done pop-up' about={ABOUT['All done pop-up']}
+          control={<Toggle on={allDonePrompt !== false} onChange={(v) => onAllDonePrompt(v)} />} />
         <Setting onAbout={setInfo} title='Ask how many' about={ABOUT['Ask how many']}
           control={<Toggle on={askQty !== false} onChange={(v) => onAskQty(v)} />} />
       <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
