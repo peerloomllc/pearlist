@@ -19,7 +19,7 @@ const relay = require('./relay')
 const { collapseMembers, sameIdentityKeys, identityRootOf, evictionTargets, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
 const { getDeviceLink, DEVICE_LINK_ENABLED, parsePairLink, buildPairLink, provisionMnemonic, attestSelf, setProfileMirror, putProfileRecord, setSpaceMirror, putSpaceRecord, delSpaceRecord, _trace: _dlTrace } = require('./deviceLink')
 const { decideProfileMirror, shouldFetchAvatar } = require('./profileSync')
-const { photoMethods, prefetchRows } = require('./photos')
+const { photoMethods, prefetchRows, notePhotos } = require('./photos')
 const seeders = require('./seeders')
 
 // Offline keyword aisle classifier for the worklet-side ai:categorize methods.
@@ -2172,12 +2172,14 @@ const methods = {
       const ordered = l.kind === 'note'
         ? sortNoteRows(rows)
         : rows.slice().sort((a, b) => (a.checked === b.checked ? (a.createdAt || 0) - (b.createdAt || 0) : a.checked ? 1 : -1))
-      const withPhoto = rows.find((it) => it.photo && it.photo.hash)
+      // Only a note shows photos on its card. A shopping list's item photos stay
+      // inside the list.
+      const photos = l.kind === 'note' ? notePhotos(l).map((p) => ({ id: p.hash, listId: l.id, photo: p, note: true })) : []
       out[l.id] = {
         open: rows.filter((it) => !it.checked).length,
         total: rows.length,
         lines: ordered.slice(0, 8).map((it) => ({ text: String(it.text || ''), checked: !!it.checked })),
-        photo: withPhoto ? { id: withPhoto.id, listId: withPhoto.listId, photo: withPhoto.photo } : null,
+        photos,
       }
     }
     return out

@@ -3643,13 +3643,40 @@ function useCardDrag ({ scrollRef, onDrop }) {
   return { props, lifted, target, didDrag: () => justDragged.current }
 }
 
-// One card: the first photo, the name, then a note's first lines or a list's open
+// One card: a note's photos, the name, then a note's first lines or a list's open
 // items with a tick circle each.
 const CARD_LINES = 6
+const CARD_PHOTOS = 3
+
+// One photo across the top of a card, or a row of up to three small ones with
+// "+N" on the last when a note has more.
+function CardPhotos ({ groupId, photos }) {
+  if (!photos.length) return null
+  if (photos.length === 1) return <CardPhoto groupId={groupId} item={photos[0]} style={{ width: '100%', maxHeight: 160 }} />
+  const shown = photos.slice(0, CARD_PHOTOS)
+  const extra = photos.length - shown.length
+  return (
+    <div style={{ display: 'flex', gap: 2 }}>
+      {shown.map((p, i) => (
+        <div key={p.id} style={{ flex: 1, minWidth: 0, aspectRatio: '1', position: 'relative', background: c.border }}>
+          <CardPhoto groupId={groupId} item={p} style={{ width: '100%', height: '100%' }} />
+          {extra > 0 && i === shown.length - 1 ? (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 15, fontWeight: 500 }}>+{extra}</div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CardPhoto ({ groupId, item, style }) {
+  const src = useItemPhoto(groupId, item, 'thumb')
+  return src ? <img src={src} alt='' style={{ display: 'block', objectFit: 'cover', pointerEvents: 'none', ...style }} /> : null
+}
+
 function ListCard ({ list, group, preview, groupId, members, lifted, target, onOpen, dragProps }) {
   const cat = categoryOf(list.kind)
   const Icon = cat.Icon
-  const photo = useItemPhoto(groupId, preview?.photo || null, 'thumb')
   const isNote = list.kind === 'note'
   const lines = (preview?.lines || []).filter((x) => isNote ? x.text.trim() : !x.checked).slice(0, CARD_LINES)
   const open = preview?.open ?? 0
@@ -3661,7 +3688,7 @@ function ListCard ({ list, group, preview, groupId, members, lifted, target, onO
     <button data-card-id={list.id} data-card-group={group} onClick={onOpen} {...dragProps}
       onContextMenu={(e) => e.preventDefault()}
       style={{ display: 'block', width: '100%', padding: 0, textAlign: 'left', cursor: 'pointer', borderRadius: r.lg, overflow: 'hidden', background: CARD_BG[color], border: target ? `2px solid ${c.primary}` : `1px solid ${color === 'default' ? c.border : 'transparent'}`, color: c.text.primary, fontFamily: FONT, WebkitTouchCallout: 'none', userSelect: 'none', position: 'relative', zIndex: lifted ? 50 : 'auto', boxShadow: lifted ? '0 12px 28px rgba(0,0,0,0.45)' : 'none' }}>
-      {photo ? <img src={photo} alt='' style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover', pointerEvents: 'none' }} /> : null}
+      <CardPhotos groupId={groupId} photos={isNote ? (preview?.photos || []) : []} />
       <div style={{ padding: `${sp.md}px ${sp.md}px ${sp.sm}px` }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
           <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{list.name}</span>
