@@ -27,6 +27,8 @@ const THEME_VARS = `
   --color-text-primary:#f0f0f0; --color-text-secondary:#b0b0b0; --color-text-muted:#808080; --color-text-on-primary:#0a1f23;
   --color-surface-base:#0d0d0d; --color-surface-card:#1a1a1a; --color-surface-elevated:#252525; --color-surface-input:#1c1c1c;
   --color-border:#3a3a3a; --color-divider:#333333; --color-track:#4a4a4a;
+  --card-red:#5a2a2a; --card-orange:#5c3b1c; --card-yellow:#575020; --card-green:#2f4a2a;
+  --card-teal:#1f4a47; --card-blue:#23405a; --card-purple:#3e2d55;
 }
 :root[data-theme="light"]{
   --color-primary:#5BAF3A; --color-primary-dark:#3F8A26; --color-accent:#3a8a99;
@@ -34,6 +36,8 @@ const THEME_VARS = `
   --color-text-primary:#1a1916; --color-text-secondary:#4a4a4a; --color-text-muted:#7a7568; --color-text-on-primary:#ffffff;
   --color-surface-base:#f7f5f0; --color-surface-card:#ffffff; --color-surface-elevated:#efece4; --color-surface-input:#f0ede8;
   --color-border:#cbc6b8; --color-divider:#dcd8cc; --color-track:#c2bdaf;
+  --card-red:#f6c9c4; --card-orange:#f7d9b5; --card-yellow:#f6eba8; --card-green:#d6eccb;
+  --card-teal:#c5e6df; --card-blue:#cddff0; --card-purple:#e0d3ef;
 }`
 
 const RESET = `

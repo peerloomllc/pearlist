@@ -124,6 +124,19 @@ const mockMethods = {
   'list:delete': async ({ groupId, listId }) => { mockGroup(groupId).lists.get(listId).deleted = true; return { ok: true } },
   'list:assign': async ({ groupId, listId, assignee }) => { mockGroup(groupId).lists.get(listId).assignee = assignee || null; return { ok: true } },
   'list:getAll': async ({ groupId }) => [...mockGroup(groupId).lists.values()].filter(l => !l.deleted),
+  'list:setColor': async ({ groupId, listId, color }) => { const l = mockGroup(groupId).lists.get(listId); if (color && color !== 'default') l.color = color; else delete l.color; return { ok: true } },
+  'list:setPinned': async ({ groupId, listId, pinned }) => { const l = mockGroup(groupId).lists.get(listId); if (pinned === true) l.pinned = true; else delete l.pinned; return { ok: true } },
+  'list:previews': async ({ groupId }) => {
+    const g = mockGroup(groupId)
+    const out = {}
+    for (const l of g.lists.values()) {
+      if (l.deleted) continue
+      const rows = [...g.items.values()].filter(i => i.listId === l.id && !i.deleted)
+      const ordered = rows.slice().sort((a, b) => (a.checked === b.checked ? 0 : a.checked ? 1 : -1))
+      out[l.id] = { open: rows.filter(i => !i.checked).length, total: rows.length, lines: ordered.slice(0, 8).map(i => ({ text: String(i.text || ''), checked: !!i.checked })), photo: null }
+    }
+    return out
+  },
   'item:add': async ({ groupId, listId, text, qty }) => {
     const id = rid()
     mockGroup(groupId).items.set(id, { id, listId, text: text || '', qty: qty || 1, checked: false, assignee: null, deleted: false })

@@ -3,12 +3,14 @@
 // as its applyOps.
 //
 // Data model (one household group, many lists):
-//   list:{listId}            -> signed { id, name, kind?, assignee?, photos?,
-//                                        createdBy, createdAt, updatedAt, pubkey,
-//                                        deleted }
+//   list:{listId}            -> signed { id, name, kind?, assignee?, color?,
+//                                        pinned?, photos?, createdBy, createdAt,
+//                                        updatedAt, pubkey, deleted }
 //
+// `color` and `pinned` style the list's card and are shared (see listStyle.js).
 // `photos` is on notes only: references to images in the blob store, the same
-// shape an item's `photo` has (see photos.js). Additive: stored verbatim.
+// shape an item's `photo` has (see photos.js). All additive: stored verbatim,
+// kept by every method that spreads the row.
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
 //                                        assignee?, category?, catBy?, ord?,
 //                                        createdBy, createdAt, updatedAt,

@@ -2,6 +2,22 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-10-30 - Keep-style cards: colour and pin are shared fields on the list row
+Tier: T2. Proposal: proposals/2026-10-29-keep-style-notes.md (PR #246), approved by
+Tim 2026-10-30 with cards built first.
+Context: a PearOffice tester wants a Google Keep replacement and found PearList "text
+only".
+Choice: `color` (one of eight names) and `pinned: true` ride the existing `list:` row,
+set by list:setColor and list:setPinned, read through src/listStyle.js. Default and
+unpinned are written as absent. The Lists page shows cards by default, with rows one
+tap away, remembered per device. Cards are dragged into order with press and hold,
+kept per space on this phone like aisle order. list:previews feeds the cards.
+Alternatives: device-local pins and colours (Tim chose shared); a new namespace (old
+peers drop it and the view forks, listWire.js top).
+Consequences: additive. Older builds keep both fields when they change a list and do
+not show them. Saved copies carry them. Labels, note photos and Android share follow
+in later PRs.
+
 ## 2026-10-12 - Spaces can back up to a blind seeder, listed on member rows
 Tier: T2
 Context: suite proposals/2026-10-12-generic-seeder.md, phase 2. An all-iPhone
