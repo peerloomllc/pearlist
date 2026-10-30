@@ -13,7 +13,7 @@ const sodium = require('sodium-universal')
 const { sameIdentityAsOwner, myDeviceKeys, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, reminderTimes, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave, sortNoteRows } = require('./noteText')
-const { normalizeColor, isPinned } = require('./listStyle')
+const { normalizeColor, isPinned, normalizeLabels } = require('./listStyle')
 const { buildBackup, parseBackup, backupFilename } = require('./spaceBackup')
 const relay = require('./relay')
 const { collapseMembers, sameIdentityKeys, identityRootOf, evictionTargets, setTrace: setMemberIdentityTrace } = require('./memberIdentity')
@@ -1802,7 +1802,7 @@ const methods = {
           for await (const { value: it } of base.view.createReadStream(itemRange(l.id))) {
             if (it && !it.deleted) items.push(it)
           }
-          lists.push({ name: l.name, kind: l.kind, notifyOnComplete: l.notifyOnComplete, color: l.color, pinned: l.pinned, items })
+          lists.push({ name: l.name, kind: l.kind, notifyOnComplete: l.notifyOnComplete, color: l.color, pinned: l.pinned, labels: l.labels, items })
         }
         spaces.push({ name, customAisles: byGroup[value.groupId], lists })
       } catch { continue }
@@ -1851,6 +1851,7 @@ const methods = {
           ...(normalizeNotifyMode(l.notifyOnComplete) ? { notifyOnComplete: normalizeNotifyMode(l.notifyOnComplete) } : {}),
           ...(normalizeColor(l.color) !== 'default' ? { color: normalizeColor(l.color) } : {}),
           ...(isPinned(l) ? { pinned: true } : {}),
+          ...(normalizeLabels(l.labels).length ? { labels: normalizeLabels(l.labels) } : {}),
         })
         for (const e of l.items) {
           const itemId = newEntityId()
@@ -2140,6 +2141,17 @@ const methods = {
     const c = normalizeColor(color)
     await putRow(ctx, groupId, listKey(listId), c === 'default' ? rest : { ...rest, color: c })
     return { ok: true }
+  },
+
+  // Replaces the list's labels. None left drops the field, like the default colour.
+  'list:setLabels': async ({ groupId, listId, labels }, ctx) => {
+    const base = viewFor(ctx, groupId)
+    const existing = await readRow(base, listKey(listId))
+    if (!existing || existing.deleted) throw new Error('list not found')
+    const { labels: _old, ...rest } = existing
+    const next = normalizeLabels(labels)
+    await putRow(ctx, groupId, listKey(listId), next.length ? { ...rest, labels: next } : rest)
+    return { ok: true, labels: next }
   },
 
   'list:setPinned': async ({ groupId, listId, pinned }, ctx) => {

@@ -97,6 +97,23 @@ test('rename, assign and a kind change keep the colour and pin', async () => {
   await engine.close()
 })
 
+test('labels are stored cleaned, kept through a rename and cleared to no field', async () => {
+  const { engine, call } = driver()
+  const groupId = await space(call)
+  const { listId } = await call('list:create', { groupId, name: 'Groceries' })
+  const r = await call('list:setLabels', { groupId, listId, labels: [' Weekly ', 'weekly', 'Costco'] })
+  assert.deepEqual(r.labels, ['Weekly', 'Costco'])
+  await call('list:setColor', { groupId, listId, color: 'blue' })
+  await call('list:rename', { groupId, listId, name: 'Shop' })
+  let l = await listOf(call, groupId, listId)
+  assert.deepEqual(l.labels, ['Weekly', 'Costco'])
+  assert.equal(l.color, 'blue')
+  await call('list:setLabels', { groupId, listId, labels: [] })
+  l = await listOf(call, groupId, listId)
+  assert.equal('labels' in l, false)
+  await engine.close()
+})
+
 test('list:previews counts items and puts open ones first, notes in their own order', async () => {
   const { engine, call } = driver()
   const groupId = await space(call)

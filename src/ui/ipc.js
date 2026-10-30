@@ -125,6 +125,7 @@ const mockMethods = {
   'list:assign': async ({ groupId, listId, assignee }) => { mockGroup(groupId).lists.get(listId).assignee = assignee || null; return { ok: true } },
   'list:getAll': async ({ groupId }) => [...mockGroup(groupId).lists.values()].filter(l => !l.deleted),
   'list:setColor': async ({ groupId, listId, color }) => { const l = mockGroup(groupId).lists.get(listId); if (color && color !== 'default') l.color = color; else delete l.color; return { ok: true } },
+  'list:setLabels': async ({ groupId, listId, labels }) => { const l = mockGroup(groupId).lists.get(listId); const next = [...new Set((labels || []).map(s => String(s).trim()).filter(Boolean))].slice(0, 10); if (next.length) l.labels = next; else delete l.labels; return { ok: true, labels: next } },
   'list:setPinned': async ({ groupId, listId, pinned }) => { const l = mockGroup(groupId).lists.get(listId); if (pinned === true) l.pinned = true; else delete l.pinned; return { ok: true } },
   'list:previews': async ({ groupId }) => {
     const g = mockGroup(groupId)
