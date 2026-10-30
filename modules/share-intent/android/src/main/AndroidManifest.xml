@@ -1,0 +1,3 @@
+<!-- No permissions: a share hands the receiving activity a read grant on exactly
+     the pictures shared. The SEND intent filters live in app.json. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

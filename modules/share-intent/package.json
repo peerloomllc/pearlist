@@ -1,0 +1,8 @@
+{
+  "name": "share-intent",
+  "version": "1.0.0",
+  "description": "Android: receive text, links and pictures shared to PearList from other apps",
+  "main": "index.ts",
+  "license": "MIT",
+  "author": "PeerLoom"
+}

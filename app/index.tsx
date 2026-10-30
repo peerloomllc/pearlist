@@ -24,6 +24,7 @@ import { requestLocalNetworkPermission } from '../modules/local-network'
 import { startBackgroundSync, stopBackgroundSync, bgSyncSupported } from '../modules/bg-sync'
 import { terminateWebViewRenderer } from '../modules/webview-recovery'
 import { saveTextFile, saveFileSupported } from '../modules/save-file'
+import { takeShared, onShared } from '../modules/share-intent'
 
 // --- local notifications (assignment + join + completion; ON by default) ----
 // Policy: assignment + join + chore-completion, LOCAL (no server/push), ON by
@@ -974,6 +975,12 @@ export default function Shell () {
         // in Other, where the keyword pass leaves them. Nothing here imports @qvac.
         // The phone's light or dark setting, for the UI's 'Match phone' theme.
         // Changes arrive as the 'shell:colorScheme' event (see the effect below).
+        // Something shared into PearList from another app (Android). The UI asks
+        // once it is ready and again on each 'shell:shared'; the module hands a
+        // share over once, so a second ask gets null.
+        case 'shell:share:take': {
+          return reply(id, takeShared())
+        }
         case 'shell:colorScheme:get': {
           return reply(id, { scheme: Appearance.getColorScheme() === 'light' ? 'light' : 'dark' })
         }
@@ -1098,6 +1105,8 @@ export default function Shell () {
       pendingNotifNav.current = null
     }
   }
+
+  useEffect(() => onShared(() => emitEvent('shell:shared')), [])
 
   useEffect(() => {
     const sub = Appearance.addChangeListener(({ colorScheme }) => {
