@@ -10,6 +10,7 @@ import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { shouldClear } from '../clearOnChecked.js'
+import { checkedLast } from '../checkedLast.js'
 import { addCategory } from '../addToGroup.js'
 import { pairLinkProblem } from '../linkShape.js'
 import { problem, terminated } from '../userText.js'
@@ -940,6 +941,13 @@ const CLEAR_ON_CHECKED_KEY = 'pearlist:clearonchecked'
 function loadClearOnChecked () { try { return localStorage.getItem(CLEAR_ON_CHECKED_KEY) === '1' } catch { return false } }
 function saveClearOnChecked (on) { try { localStorage.setItem(CLEAR_ON_CHECKED_KEY, on ? '1' : '0') } catch {} }
 
+// Device-local preference: ticked items sit after the open ones (GH #249), in each
+// aisle or section on a grouped list. On by default, asked for 2026-10-30, and read
+// as on when the key is missing. The rule is in src/checkedLast.js.
+const CHECKED_LAST_KEY = 'pearlist:checkedlast'
+function loadCheckedLast () { try { return localStorage.getItem(CHECKED_LAST_KEY) !== '0' } catch { return true } }
+function saveCheckedLast (on) { try { localStorage.setItem(CHECKED_LAST_KEY, on ? '1' : '0') } catch {} }
+
 // Device-local preference: ask "How many?" before a grocery item is added (GH #222).
 // On by default and read as on when the key is missing, so an update never takes
 // the step away from anyone who uses it. Off adds the item straight away with a
@@ -1072,7 +1080,7 @@ const HOLD_TOL = 10 // px of finger movement allowed during the hold; within thi
 // scroll/swipe and released. Elevation (lift look) is driven by React via the
 // `lifted` state; the hook only ever sets `transform`/`pointerEvents` imperatively
 // (never React-managed props like background), so it can't wipe a header's colour.
-function useAisleDrag ({ items, aisleView, scrollRef, builtins, onReorderItems, onReorderAisles, onRecategorize }) {
+function useAisleDrag ({ items, aisleView, scrollRef, builtins, sinkChecked, onReorderItems, onReorderAisles, onRecategorize }) {
   const [dragOver, setDragOver] = useState(null) // { kind, aisle } - cross-aisle / header target highlight
   const [lifted, setLifted] = useState(null)     // { kind, id } - the elevated element (React renders the lift)
   // dragProps is useCallback([]) (stable handlers), which freezes begin/commit -
@@ -1081,7 +1089,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, builtins, onReorderItems, 
   // this per-render ref so the frozen commit always calls the CURRENT handlers.
   // Without this, cross-aisle recategorize silently no-ops (stale gid/openListId).
   const data = useRef({})
-  data.current = { items, aisleView, builtins, onReorderItems, onReorderAisles, onRecategorize }
+  data.current = { items, aisleView, builtins, sinkChecked, onReorderItems, onReorderAisles, onRecategorize }
   const S = useRef({})
   const justDragged = useRef(false)
 
@@ -1204,7 +1212,7 @@ function useAisleDrag ({ items, aisleView, scrollRef, builtins, onReorderItems, 
   }
 
   const commit = (s) => {
-    const { items: its, aisleView: av, builtins: bi, onReorderItems, onReorderAisles, onRecategorize } = data.current
+    const { items: its, aisleView: av, builtins: bi, sinkChecked: sink, onReorderItems, onReorderAisles, onRecategorize } = data.current
     if (s.kind === 'aisle') {
       const present = [...new Set(its.map((it) => aisles.bucketOf(it.category)))]
       const ord = orderAisles(present, av.aisleOrder, bi).filter((a) => a !== s.id)
@@ -1216,9 +1224,11 @@ function useAisleDrag ({ items, aisleView, scrollRef, builtins, onReorderItems, 
     if (s.targetAisle && s.targetAisle !== s.aisle) { onRecategorize(s.id, s.targetAisle); return }
     const buckets = new Map()
     for (const it of its) { const k = aisles.bucketOf(it.category); if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(it) }
-    const aisleIds = orderRows(buckets.get(s.aisle) || [], av.itemOrder).map((it) => it.id).filter((id) => id !== s.id)
+    // The same order as on screen, since newIndex is a position in what is shown.
+    const shown = (rows) => sink ? checkedLast(orderRows(rows, av.itemOrder)) : orderRows(rows, av.itemOrder)
+    const aisleIds = shown(buckets.get(s.aisle) || []).map((it) => it.id).filter((id) => id !== s.id)
     aisleIds.splice(Math.max(0, Math.min(s.newIndex ?? aisleIds.length, aisleIds.length)), 0, s.id)
-    const flat = orderAisles([...buckets.keys()], av.aisleOrder, bi).flatMap((a) => a === s.aisle ? aisleIds : orderRows(buckets.get(a), av.itemOrder).map((it) => it.id))
+    const flat = orderAisles([...buckets.keys()], av.aisleOrder, bi).flatMap((a) => a === s.aisle ? aisleIds : shown(buckets.get(a)).map((it) => it.id))
     onReorderItems(flat)
   }
 
@@ -1306,7 +1316,7 @@ function CollapsibleRows ({ collapsed, children }) {
   )
 }
 
-function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, onAddTo, aisleOrder, itemOrder, dragProps, dragOver, lifted, didDrag, flashId, builtins = aisles.AISLES, fallbackLabel = aisles.FALLBACK }) {
+function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, onAddTo, aisleOrder, itemOrder, sinkChecked, dragProps, dragOver, lifted, didDrag, flashId, builtins = aisles.AISLES, fallbackLabel = aisles.FALLBACK }) {
   const buckets = new Map()
   for (const it of items) {
     // Keyword classification is synchronous, so an item's aisle is known the
@@ -1316,7 +1326,10 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, onAddTo, ai
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(it)
   }
-  const sections = orderAisles([...buckets.keys()], aisleOrder, builtins).map((a) => ({ aisle: a, items: orderRows(buckets.get(a), itemOrder) }))
+  const sections = orderAisles([...buckets.keys()], aisleOrder, builtins).map((a) => {
+    const rows = orderRows(buckets.get(a), itemOrder)
+    return { aisle: a, items: sinkChecked ? checkedLast(rows) : rows }
+  })
   return (
     <>
       {sections.map(({ aisle, items: rows }) => {
@@ -1360,16 +1373,48 @@ function AisleGroupedItems ({ items, renderRow, collapsed, onToggle, onAddTo, ai
   )
 }
 
+// A list without sections. With "Checked items last" on (GH #249) the ticked
+// items follow a "Checked" divider that folds them away. Its fold state is kept
+// with the list's other collapse state under the `chk:` key, which no aisle or
+// section name can take.
+const CHECKED_KEY = 'chk:'
+function FlatItems ({ items, renderRow, sinkChecked, collapsed, onToggle, flashId }) {
+  const row = (it) => (
+    <div key={it.id} data-item-id={it.id} style={{ position: 'relative' }}>
+      {renderRow(it)}
+      <ItemFlash on={flashId === it.id} />
+    </div>
+  )
+  if (!sinkChecked) return items.map(row)
+  const open = items.filter((it) => !it.checked)
+  const done = items.filter((it) => it.checked)
+  if (!done.length) return open.map(row)
+  const isCollapsed = !!collapsed?.has(CHECKED_KEY)
+  return (
+    <>
+      {open.map(row)}
+      <button onClick={() => onToggle?.(CHECKED_KEY)} aria-label={isCollapsed ? 'Show checked items' : 'Hide checked items'}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: sp.sm, background: c.surface.elevated, border: 'none', borderTop: `1px solid ${c.divider}`, borderBottom: `1px solid ${c.divider}`, padding: `${sp.sm}px ${sp.base}px`, cursor: 'pointer' }}>
+        <CaretRight size={12} weight='bold' color={c.text.muted} style={{ flexShrink: 0, transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 180ms ease' }} />
+        <span style={{ flex: 1, textAlign: 'left', fontSize: 12, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase', color: c.text.secondary }}>Checked</span>
+        <span style={{ fontFamily: MONO, fontSize: 11, color: c.text.secondary, background: c.surface.input, borderRadius: r.sm, padding: '1px 7px', flexShrink: 0 }}>{done.length}</span>
+      </button>
+      <CollapsibleRows collapsed={isCollapsed}>{done.map(row)}</CollapsibleRows>
+    </>
+  )
+}
+
 // The "Group by reminder" view (asked for 2026-10-26): Today, This week, This
 // month, Later, No reminder, with the bucketing in src/reminderGroups.js. A view
 // only, so there is no drag and no "+" per group: moving an item between these
 // groups would mean changing its reminder, which the item sheet already does.
 // Collapse state shares the list's aisle prefs under a `rem:` prefix, so a user
 // section called "Today" never collapses with the reminder group of that name.
-function ReminderGroupedItems ({ items, renderRow, collapsed, onToggle, flashId }) {
+function ReminderGroupedItems ({ items, renderRow, collapsed, onToggle, sinkChecked, flashId }) {
   return (
     <>
-      {groupByReminder(items, Date.now()).map(({ group, items: rows }) => {
+      {groupByReminder(items, Date.now()).map(({ group, items: groupRows }) => {
+        const rows = sinkChecked ? checkedLast(groupRows) : groupRows
         const key = `rem:${group}`
         const isCollapsed = !!collapsed?.has(key)
         const open = rows.filter((it) => !it.checked).length
@@ -2211,6 +2256,8 @@ export default function App () {
   const [clearOnChecked, setClearOnCheckedState] = useState(loadClearOnChecked)
   const setClearOnChecked = useCallback((on) => { setClearOnCheckedState(!!on); saveClearOnChecked(on) }, [])
   const [askQty, setAskQtyState] = useState(loadAskQty)
+  const [sinkChecked, setSinkCheckedState] = useState(loadCheckedLast)
+  const setSinkChecked = useCallback((on) => { setSinkCheckedState(!!on); saveCheckedLast(on) }, [])
   const setAskQty = useCallback((on) => { setAskQtyState(!!on); saveAskQty(on) }, [])
   // The group the header "+" aimed the composer at, or null for the ordinary
   // add bar. Device-local and momentary: it survives only until the next add or
@@ -2259,7 +2306,7 @@ export default function App () {
     call('ai:setCategory', { groupId: gid, listId: openListId, itemId, category: aisle, by: 'user' }).then(() => loadItems(gid, openListId)).catch(() => {})
   }, [gid, openListId, loadItems, items, isGroceryList])
   const { dragProps, dragOver, lifted, didDrag } = useAisleDrag({
-    items, aisleView, scrollRef: listScrollRef, builtins: groupBuiltins,
+    items, aisleView, scrollRef: listScrollRef, builtins: groupBuiltins, sinkChecked,
     onReorderItems: (order) => patchAisleView({ itemOrder: order }),
     onReorderAisles: (order) => patchAisleView({ aisleOrder: order }),
     onRecategorize: recategorizeItem,
@@ -2944,15 +2991,10 @@ export default function App () {
                     <ItemRow item={it} groupId={gid} members={members} onToggle={toggleItem} onOpen={(item) => setSheet({ type: 'item', item })} onPhoto={(item) => setViewPhoto(item)} dragHandle={handleProps} />
                   </SwipeRow>
                 )
-                if (byReminder) return <ReminderGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} flashId={flashId} />
+                if (byReminder) return <ReminderGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} sinkChecked={sinkChecked} flashId={flashId} />
                 return grouped
-                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} onAddTo={startAddTo} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
-                  : items.map((it) => (
-                    <div key={it.id} data-item-id={it.id} style={{ position: 'relative' }}>
-                      {renderRow(it)}
-                      <ItemFlash on={flashId === it.id} />
-                    </div>
-                  ))
+                  ? <AisleGroupedItems items={items} renderRow={renderRow} collapsed={collapsedSet} onToggle={toggleAisle} onAddTo={startAddTo} aisleOrder={aisleView.aisleOrder} itemOrder={aisleView.itemOrder} sinkChecked={sinkChecked} dragProps={dragProps} dragOver={dragOver} lifted={lifted} didDrag={didDrag} flashId={flashId} builtins={groupBuiltins} fallbackLabel={fallbackLabel} />
+                  : <FlatItems items={items} renderRow={renderRow} sinkChecked={sinkChecked} collapsed={collapsedSet} onToggle={toggleAisle} flashId={flashId} />
               })()}
           </div>
           {pendingUndo ? <UndoToast onUndo={undoDelete} /> : null}
@@ -2968,7 +3010,7 @@ export default function App () {
           )}
         </>
       ) : view === 'profile' ? (
-        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} clearOnChecked={clearOnChecked} onClearOnChecked={setClearOnChecked} askQty={askQty} onAskQty={setAskQty} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
+        <ProfileView profile={profile} theme={theme} onTheme={applyTheme} autoCollapse={autoCollapse} onAutoCollapse={setAutoCollapse} sinkChecked={sinkChecked} onSinkChecked={setSinkChecked} clearOnChecked={clearOnChecked} onClearOnChecked={setClearOnChecked} askQty={askQty} onAskQty={setAskQty} onReplayTour={replayTour} onSaved={() => call('profile:get', {}).then(setProfile).catch(() => {})}
           spaceCount={spaces.length} onExport={exportBackup} onImport={importBackup} onSpacesChanged={loadSpaces}
           onLinkDevice={linkThisDevice} />
       ) : view === 'about' ? (
@@ -4017,7 +4059,7 @@ function SeederBackup ({ onAbout, about }) {
   )
 }
 
-function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, clearOnChecked, onClearOnChecked, askQty, onAskQty, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
+function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, sinkChecked, onSinkChecked, clearOnChecked, onClearOnChecked, askQty, onAskQty, onReplayTour, onSaved, spaceCount, onExport, onImport, onSpacesChanged, onLinkDevice }) {
   // Linked devices (slice 2 of proposals/2026-07-28-device-linking.md). The whole
   // group is hidden unless the worklet says device-link is enabled, so an ordinary
   // build shows nothing new.
@@ -4243,6 +4285,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
     'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
     'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
     'Ask how many': "When you add something to a grocery list, PearList asks how many you need before it goes on the list. Turn this off to skip that step: the item goes straight on as one, and you can still tap it later to change the number. This only changes this phone.",
+    'Checked items last': "Ticked items move to the bottom of the list, so what is still to get stays together at the top. On a list with aisles or sections they go to the bottom of their own aisle. On a plain list they sit under a Checked divider you can tap to fold away. This only changes how the list looks on this phone.",
     'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
     'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
     'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
@@ -4376,6 +4419,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
       <Collapsible title='Lists &amp; aisles' icon={ListChecks} {...sect('listsAisles')} maxHeight={900}>
         <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
           control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
+        <Setting onAbout={setInfo} title='Checked items last' about={ABOUT['Checked items last']}
+          control={<Toggle on={sinkChecked !== false} onChange={(v) => onSinkChecked(v)} />} />
         <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
           control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
         <Setting onAbout={setInfo} title='Ask how many' about={ABOUT['Ask how many']}
