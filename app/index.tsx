@@ -4,7 +4,7 @@
 // WebView camera permission for the in-WebView QR scanner.
 
 import { useEffect, useRef, useState } from 'react'
-import { View, Platform, Share, StatusBar, BackHandler, AppState, PermissionsAndroid } from 'react-native'
+import { View, Platform, Share, StatusBar, BackHandler, AppState, PermissionsAndroid, Appearance } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Worklet } from 'react-native-bare-kit'
@@ -972,6 +972,11 @@ export default function Shell () {
         // calls it placed 37% of the items that reached it correctly, at 4-6.5s each,
         // for a 0.8 GB download and 2 GB resident - so unknown items now simply rest
         // in Other, where the keyword pass leaves them. Nothing here imports @qvac.
+        // The phone's light or dark setting, for the UI's 'Match phone' theme.
+        // Changes arrive as the 'shell:colorScheme' event (see the effect below).
+        case 'shell:colorScheme:get': {
+          return reply(id, { scheme: Appearance.getColorScheme() === 'light' ? 'light' : 'dark' })
+        }
         case 'shell:statusBar:set': {
           if (args?.style === 'dark') setStatusBarStyle('dark-content')
           else if (args?.style === 'light') setStatusBarStyle('light-content')
@@ -1085,6 +1090,13 @@ export default function Shell () {
       pendingNotifNav.current = null
     }
   }
+
+  useEffect(() => {
+    const sub = Appearance.addChangeListener(({ colorScheme }) => {
+      emitEvent('shell:colorScheme', { scheme: colorScheme === 'light' ? 'light' : 'dark' })
+    })
+    return () => sub.remove()
+  }, [])
 
   if (!html) return <View style={{ flex: 1, backgroundColor: '#0d0d0d' }} />
   return (

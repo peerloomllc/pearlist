@@ -4,7 +4,7 @@ import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 import { call, on, isMock, haptic } from './ipc.js'
 import { SCREENSHOT_SCENE, SCREENSHOT_ROUTE } from './screenshot-fixtures.js'
-import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme } from './theme.js'
+import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadTheme, setSystemScheme } from './theme.js'
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
@@ -1678,6 +1678,7 @@ export default function App () {
   // there. Caught before it shipped, 2026-09-10.
   const [pendingItem, setPendingItem] = useState(null) // { groupId, listId, itemId } from a reminder tap
   const [theme, setThemeMode] = useState('dark')
+  const [systemScheme, setSystemSchemeState] = useState(null)
   const [sheet, setSheet] = useState(null) // 'start'|'join'|'invite'|'wallet'|'spaces'|'listOptions'|'renameList'|{type:'item',item}
   const [viewPhoto, setViewPhoto] = useState(null) // the item whose photo is open full screen
   const [view, setView] = useState(null) // full-screen: 'profile' | 'about'
@@ -2855,6 +2856,22 @@ export default function App () {
     await loadItems(gid, openListId)
   }
   async function applyTheme (mode) { setTheme(mode); setThemeMode(mode) }
+
+  // The phone's light or dark setting, for the 'auto' theme. The shell answers
+  // once and then sends an event whenever the phone switches.
+  useEffect(() => {
+    const take = (r) => { const s = r?.scheme === 'light' ? 'light' : r?.scheme === 'dark' ? 'dark' : null; if (s) { setSystemScheme(s); setSystemSchemeState(s) } }
+    const off = on('shell:colorScheme', take)
+    call('shell:colorScheme:get', {}).then(take).catch(() => {})
+    return off
+  }, [])
+
+  // Dark status bar icons on the light theme, light ones on the dark (#247).
+  useEffect(() => {
+    // theme.js has already applied the resolved theme to the page.
+    const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+    call('shell:statusBar:set', { style: t === 'light' ? 'dark' : 'light' }).catch(() => {})
+  }, [theme, systemScheme])
   // Bottom-nav tab switch: always leave any open list (the tab bar only shows on
   // top-level screens) and map the tab to the view state.
   const goTab = useCallback((key) => { setOpenListId(null); setView(key === 'settings' ? 'profile' : key === 'about' ? 'about' : null) }, [])
@@ -4389,7 +4406,8 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, c
         <SeederBackup onAbout={setInfo} about={ABOUT['Seeder backup']} />
       </Collapsible>
       <Collapsible title='Appearance' icon={Palette} {...sect('appearance')}>
-        <Setting first title='Dark mode' control={<Toggle on={theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
+        <Setting first title='Match phone' control={<Toggle on={theme === 'auto'} onChange={(v) => onTheme(v ? 'auto' : (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'))} />} />
+        <Setting title='Dark mode' control={<Toggle disabled={theme === 'auto'} on={theme === 'auto' ? document.documentElement.getAttribute('data-theme') !== 'light' : theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
       </Collapsible>
       <Collapsible title='Help' icon={Question} {...sect('help')}>
         <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}

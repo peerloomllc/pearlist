@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "scheme": "pear",
     "icon": "./assets/images/icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.pearlist",
       "buildNumber": "9",
