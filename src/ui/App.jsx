@@ -1767,6 +1767,7 @@ export default function App () {
   const [revoke, setRevoke] = useState(null)               // hard-revocation status for the active space
   const [selfPubkey, setSelfPubkey] = useState(null)
   const [banner, setBanner] = useState(null)     // transient toast (e.g. "Alex joined")
+  const [shared, setShared] = useState(null)     // text or pictures shared in from another app
   const [navRequest, setNavRequest] = useState(null) // { groupId, listId } from a notification tap
   const [showTour, setShowTour] = useState(false)     // brief once-only guided tour on first home
   const prevMembersRef = useRef({})              // groupId -> Set(pubkey) for join detection
@@ -2134,6 +2135,21 @@ export default function App () {
       if (sp.length === 0) setPhase(hasFinishedFirstRun() ? 'home' : 'onboarding')
     })()
   }), [loadSpaces])
+
+  // Shared into PearList from another app (Android). Asked for once the UI is up,
+  // then again whenever the shell says a new share arrived. The sheet waits until
+  // there is a space to put it in.
+  useEffect(() => {
+    const take = () => call('shell:share:take', {}).then((r) => {
+      if (r && (String(r.text || '').trim() || (r.images || []).length)) setShared(r)
+    }).catch(() => {})
+    take()
+    return on('shell:shared', take)
+  }, [])
+  useEffect(() => {
+    if (shared && phase === 'home' && spaces.length && sheet !== 'shareIn') setSheet('shareIn')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shared, phase, spaces.length])
 
   // Notification tap -> open the related space (and list, if any). Requested by
   // the shell (notify:open); applied once we are home and that space has loaded
@@ -2871,6 +2887,57 @@ export default function App () {
     await call('list:setColor', { groupId: gid, listId, color })
     await loadLists(gid)
   }
+  // Puts a share where the sheet said: a new note, the end of a note, or a new item
+  // on a list (a link goes in the item's link field). Pictures become note photos or
+  // item photos, prepared exactly as a picked file is.
+  async function saveShared ({ groupId, target, kind }) {
+    const s = shared
+    setShared(null); setSheet(null)
+    if (!s || !groupId) return
+    try {
+      const text = String(s.text || '').trim()
+      const subject = String(s.subject || '').trim()
+      const photos = []
+      for (const u of (s.images || []).slice(0, 10)) {
+        try { photos.push(await prepareItemPhoto(await (await fetch(u)).blob())) } catch {}
+      }
+      let listId = target
+      if (target === 'new' || kind === 'note') {
+        if (target === 'new') {
+          const first = text.split('\n').map((l) => l.trim()).find(Boolean) || ''
+          const name = (subject || first || 'Shared photo').slice(0, 60)
+          listId = (await call('list:create', { groupId, name, kind: 'note' })).listId
+        }
+        if (text) {
+          const rows = sortNoteRows(await call('item:getAll', { groupId, listId }).catch(() => []))
+          const baseline = rows.map((r) => ({ id: r.id, text: String(r.text || '') }))
+          const before = baseline.map((r) => r.text)
+          const gap = before.length && before[before.length - 1].trim() ? [''] : []
+          await call('note:save', { groupId, listId, baseline, lines: [...before, ...gap, ...splitLines(text)] })
+        }
+        for (const p of photos) await call('note:addPhoto', { groupId, listId, ...p }).catch(() => {})
+      } else {
+        const link = (text.match(/https?:\/\/\S+/) || [])[0] || ''
+        const rest = text.replace(link, '').replace(/\s+/g, ' ').trim()
+        const label = (subject || rest || (link ? link.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] : '') || 'Photo').slice(0, 200)
+        const queue = photos.slice()
+        if (text || queue.length) {
+          const { itemId } = await call('item:add', { groupId, listId, text: label })
+          if (link) await call('item:edit', { groupId, listId, itemId, url: link })
+          if (queue.length) await call('item:setPhoto', { groupId, listId, itemId, ...queue.shift() }).catch(() => {})
+        }
+        for (const p of queue) {
+          const { itemId } = await call('item:add', { groupId, listId, text: subject || 'Photo' })
+          await call('item:setPhoto', { groupId, listId, itemId, ...p }).catch(() => {})
+        }
+      }
+      try { localStorage.setItem('pearlist:sharelast', JSON.stringify({ groupId, listId: target === 'new' ? 'new' : listId })) } catch {}
+      if (groupId === gid) await loadLists(gid)
+      setNavRequest({ groupId, listId })
+    } catch (e) {
+      setBanner(problem('Could not save what was shared', e))
+    }
+  }
   async function setListLabels (listId, labels) {
     if (!gid || !listId) return
     await call('list:setLabels', { groupId: gid, listId, labels })
@@ -3161,6 +3228,8 @@ export default function App () {
         onDeleteChecked={() => deleteCheckedItems()}
         onSaveTemplate={saveOpenListAsTemplate}
         onDelete={confirmDeleteOpenList} />
+      <ShareInSheet open={sheet === 'shareIn'} shared={shared} spaces={spaces} activeId={activeSpaceId}
+        onClose={() => { setShared(null); setSheet(null) }} onSave={saveShared} />
       <TemplatesSheet open={sheet === 'templates'} templates={templates} onClose={() => setSheet(null)} onUse={useTemplate} onDelete={deleteTemplate} />
       <LabelsSheet open={sheet === 'labels'} list={openList} allLabels={allLabels} onClose={() => setSheet('listOptions')} onSave={(labels) => setListLabels(openListId, labels)} />
       <RenameListSheet open={sheet === 'renameList'} current={openList?.name} onClose={() => setSheet(null)} onSave={renameList} />
@@ -3523,6 +3592,71 @@ function LabelPills ({ labels, picked, onChange }) {
         )
       })}
     </div>
+  )
+}
+
+// Where a share from another app goes: a space (when there is more than one), then
+// a new note or an existing note or list. The last choice is picked to start with.
+function lastShareTarget () {
+  try { return JSON.parse(localStorage.getItem('pearlist:sharelast') || 'null') } catch { return null }
+}
+function ShareInSheet ({ open, shared, spaces, activeId, onClose, onSave }) {
+  const [groupId, setGroupId] = useState(null)
+  const [lists, setLists] = useState([])
+  const [target, setTarget] = useState('new')
+  useEffect(() => {
+    if (!open) return
+    const last = lastShareTarget()
+    setGroupId(last && spaces.some((s) => s.groupId === last.groupId) ? last.groupId : (activeId || spaces[0]?.groupId || null))
+  }, [open])
+  useEffect(() => {
+    if (!open || !groupId) return
+    let live = true
+    call('list:getAll', { groupId }).catch(() => []).then((ls) => {
+      if (!live) return
+      const rank = (l) => CATEGORIES.findIndex((cat) => cat.key === categoryOf(l.kind).key)
+      const sorted = (ls || []).filter((l) => !l.deleted).sort((a, b) => rank(a) - rank(b) || String(a.name).localeCompare(String(b.name)))
+      setLists(sorted)
+      const last = lastShareTarget()
+      setTarget(last && last.groupId === groupId && sorted.some((l) => l.id === last.listId) ? last.listId : 'new')
+    })
+    return () => { live = false }
+  }, [open, groupId])
+  if (!shared) return null
+  const text = String(shared.text || '').trim()
+  const images = shared.images || []
+  const row = (id, label, Icon, color) => (
+    <button key={id} onClick={() => setTarget(id)} aria-pressed={target === id}
+      style={{ display: 'flex', alignItems: 'center', gap: sp.md, width: '100%', padding: `${sp.md}px ${sp.xs}px`, background: 'none', border: 'none', borderTop: `1px solid ${c.divider}`, cursor: 'pointer', color: c.text.primary, fontSize: 16, fontWeight: 300, textAlign: 'left' }}>
+      <Icon size={18} color={color} weight='regular' />
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      {target === id ? <Check size={18} color={c.primary} weight='bold' /> : null}
+    </button>
+  )
+  const picked = lists.find((l) => l.id === target)
+  return (
+    <BottomSheet open={open} onClose={onClose} title='Save to PearList'>
+      {images.length ? (
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: sp.sm }}>
+          {images.map((u, i) => <img key={i} src={u} alt='' style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: r.sm, flexShrink: 0 }} />)}
+        </div>
+      ) : null}
+      {text ? <div style={{ color: c.text.secondary, fontSize: 14, lineHeight: 1.4, marginBottom: sp.sm, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>{text}</div> : null}
+      {spaces.length > 1 ? (
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: `${sp.xs}px 0 ${sp.sm}px` }}>
+          {spaces.map((s) => {
+            const on = s.groupId === groupId
+            return <button key={s.groupId} onClick={() => setGroupId(s.groupId)} aria-pressed={on}
+              style={{ flexShrink: 0, padding: '4px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontFamily: FONT, background: on ? c.primary : 'none', color: on ? c.text.onPrimary : c.text.secondary, border: `1px solid ${on ? c.primary : c.border}` }}>{s.name}</button>
+          })}
+        </div>
+      ) : null}
+      <div style={{ maxHeight: '38vh', overflowY: 'auto', marginBottom: sp.md }}>
+        {row('new', 'New note', Plus, c.primary)}
+        {lists.map((l) => { const cat = categoryOf(l.kind); return row(l.id, l.name || 'List', cat.Icon, cat.color) })}
+      </div>
+      <Button onClick={() => onSave({ groupId, target, kind: picked ? picked.kind : 'note' })}>Save</Button>
+    </BottomSheet>
   )
 }
 
