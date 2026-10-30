@@ -1,6 +1,6 @@
 # Keep-style notes and cards
 
-**Status:** draft, for Tim.
+**Status:** approved by Tim 2026-10-30, cards first. Cards, colours and pins: PR #254.
 **Tier:** T2. Four additive fields on the existing `list:` rows and one
 Android share target. No new namespace, op, merge rule, pairing or crypto
 change.
