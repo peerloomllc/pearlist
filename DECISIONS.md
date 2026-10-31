@@ -2,6 +2,25 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-10-30 - iOS share-in goes through a Share Extension and an App Group
+Tier: T2. Proposal: proposals/2026-10-29-keep-style-notes.md part 6, which left iOS to
+follow Android (PR #259).
+Context: iOS only lists an app in the share menu through an app extension, a separate
+program that runs without the app or its worklet.
+Choice: a minimal native extension (plugins/ios-share-extension, added to the
+generated Xcode project by plugins/with-ios-share-extension.js) saves the share to the
+App Group `group.<bundle id>` and opens pear://pearlist/share. modules/share-intent's
+iOS half reads and deletes it and returns the Android shape, so the shell and the
+"Save to PearList" sheet are shared. Opening the app goes through the Objective-C
+runtime, since Xcode refuses UIApplication.open in an extension; if iOS ever refuses
+it, the share waits and the app picks it up when it next comes to the front.
+Alternatives: expo-share-intent (a dependency duplicating PR #259's Android module);
+a React Native UI inside the extension (heavy, and the extension's memory cap is low);
+filing the share inside the extension (it has no access to the sync engine).
+Consequences: a second app ID, `<bundle id>.share`, with the App Group on both IDs and
+its own distribution profile (IOS_SHARE_PROVISIONING_PROFILE). The App Group has to be
+created on the Apple developer site; the API cannot.
+
 ## 2026-10-30 - Keep-style cards: colour and pin are shared fields on the list row
 Tier: T2. Proposal: proposals/2026-10-29-keep-style-notes.md (PR #246), approved by
 Tim 2026-10-30 with cards built first.

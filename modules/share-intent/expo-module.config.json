@@ -1,6 +1,9 @@
 {
-  "platforms": ["android"],
+  "platforms": ["android", "apple"],
   "android": {
     "modules": ["expo.modules.shareintent.ShareIntentModule"]
+  },
+  "apple": {
+    "modules": ["ShareIntentModule"]
   }
 }

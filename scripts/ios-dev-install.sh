@@ -176,15 +176,17 @@ ssh "$MAC_MINI" "bash -lc 'cd $MAC_REPO_PATH/ios && LANG=en_US.UTF-8 LC_ALL=en_U
 # in this session. Empty password ("") matches the buildkey keychain
 # the suite already uses on this host.
 #
-# Why CODE_SIGN_STYLE=Automatic without Apple ID logged in: Xcode's
-# cached wildcard team profile ("iOS Team Provisioning Profile: *")
-# covers com.pearlist as long as the entitlements file requests no
-# capabilities the wildcard profile lacks. PearList.entitlements is
-# intentionally empty (no aps-environment, no associated domains).
-step "archive (Release, generic/platform=iOS, automatic signing)"
+# Why manual signing with named profiles: the app and its share extension
+# both ask for the App Group group.com.pearlist, which Xcode's cached wildcard
+# team profile cannot carry, and automatic signing without an Apple ID signed in
+# finds nothing better. scripts/ios-signing.rb gives each target its own
+# development profile ("PearList Development", "PearList Share Development",
+# both listing the iPhone SE). Remake them with asc if a device is added.
+step "archive (Release, generic/platform=iOS, development profiles)"
 ssh "$MAC_MINI" "bash -lc '
   set -euo pipefail
   cd $MAC_REPO_PATH/ios
+  ruby ../scripts/ios-signing.rb PearList.xcodeproj \"Apple Development\" \"PearList Development\" \"PearList Share Development\"
   security unlock-keychain -p \"\" $KEYCHAIN_PATH
   security list-keychains -s $KEYCHAIN_PATH ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k \"\" $KEYCHAIN_PATH >/dev/null 2>&1 || true
@@ -197,8 +199,6 @@ ssh "$MAC_MINI" "bash -lc '
     -destination generic/platform=iOS \
     -archivePath $ARCHIVE_PATH \
     DEVELOPMENT_TEAM=$TEAM_ID \
-    CODE_SIGN_STYLE=Automatic \
-    -allowProvisioningUpdates \
     archive 2>&1 | grep -E \"^error:|error: |ARCHIVE FAILED|ARCHIVE SUCCEEDED\" || true
 '"
 
@@ -214,7 +214,12 @@ ssh "$MAC_MINI" "bash -lc '
 <dict>
   <key>method</key><string>development</string>
   <key>teamID</key><string>$TEAM_ID</string>
-  <key>signingStyle</key><string>automatic</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>com.pearlist</key><string>PearList Development</string>
+    <key>com.pearlist.share</key><string>PearList Share Development</string>
+  </dict>
   <key>compileBitcode</key><false/>
   <key>stripSwiftSymbols</key><false/>
 </dict>
