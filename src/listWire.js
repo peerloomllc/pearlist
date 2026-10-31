@@ -13,8 +13,13 @@
 // kept by every method that spreads the row.
 //   item:{listId}:{itemId}   -> signed { id, listId, text, qty, checked,
 //                                        assignee?, category?, catBy?, ord?,
+//                                        repeat?, repeatEvery?, repeatDays?,
+//                                        repeatFrom?, repeatFor?, lastDoneAt?,
 //                                        createdBy, createdAt, updatedAt,
 //                                        pubkey, deleted }
+//
+// `repeat` and its refinements: see repeatTime.js scheduleOf and
+// proposals/2026-10-31-more-repeat-schedules.md. Additive, read-time only.
 //
 // `ord` is an optional fractional index used only by note lists (kind 'note'),
 // where a line's position must be the SAME on every device - unlike itemOrder,
@@ -62,7 +67,7 @@ function memberKey (pubkey) { return 'member:' + pubkey }
 const LIST_RANGE = { gt: 'list:', lt: 'list:~' }
 const MEMBER_RANGE = { gt: 'member:', lt: 'member:~' }
 const { sameIdentityKeys, identityRootOf } = require('./memberIdentity')
-const { occurrencesAfter } = require('./repeatTime')
+const { occurrencesAfter, scheduleOf, periodStartOf, nextPeriodStart } = require('./repeatTime')
 
 // Does `candidate` prove the same identity root as `ownerPubkey`? The gate on the
 // same-identity ownership transfer in the `space` branch, and - since 2026-07-31 -
@@ -635,26 +640,14 @@ const REPEAT_KINDS = ['daily', 'weekly', 'monthly']
 function normalizeRepeat (v) { return REPEAT_KINDS.includes(v) ? v : null }
 function repeatOf (item) { return item ? normalizeRepeat(item.repeat) : null }
 
-// Sunday, matching the calendar convention where this is used. One constant, so
-// switching to an ISO Monday week is a one-line change if it is ever wanted.
-const WEEK_STARTS_ON = 0
-
 // Start of the current period, in LOCAL time. Deliberately local and not UTC:
-// "this week" means the user's week. It is the one place recurrence is not an
-// absolute instant, unlike remindAt, which is.
-//
-// Built from date parts rather than by subtracting milliseconds, so a DST change
-// cannot shift a boundary by an hour and make a chore reopen or stay closed early.
+// "this week" means the user's week. The arithmetic, including every-N blocks and
+// chosen weekdays, lives in repeatTime.js so the UI and the worklet share it.
+// Takes a kind string (the original three) or an item.
 function periodStart (repeat, now) {
-  const d = new Date(now)
+  if (repeat && typeof repeat === 'object') return periodStartOf(scheduleOf(repeat), now)
   const kind = normalizeRepeat(repeat)
-  if (!kind) return null
-  if (kind === 'monthly') return new Date(d.getFullYear(), d.getMonth(), 1).getTime()
-  if (kind === 'weekly') {
-    const back = (d.getDay() - WEEK_STARTS_ON + 7) % 7
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime()
-  }
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  return kind ? periodStartOf(kind, now) : null
 }
 
 // The whole feature: a recurring item is OPEN unless it was completed inside the
@@ -665,7 +658,7 @@ function isRecurringOpen (item, now) {
   if (!kind) return false // not recurring; the caller uses plain `checked`
   const done = item.lastDoneAt
   if (typeof done !== 'number' || !Number.isFinite(done)) return true // never done
-  return done < periodStart(kind, now)
+  return done < periodStartOf(scheduleOf(item), now)
 }
 
 // THE SEAM. Every read surface asks this instead of reading `item.checked`, so
@@ -681,13 +674,8 @@ function effectiveChecked (item, now) {
 
 // When it comes back, for the UI's "due again" line. Null when not recurring.
 function nextDueAt (item, now) {
-  const kind = repeatOf(item)
-  if (!kind) return null
-  const start = periodStart(kind, now)
-  const d = new Date(start)
-  if (kind === 'monthly') return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime()
-  if (kind === 'weekly') return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7).getTime()
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
+  if (!repeatOf(item)) return null
+  return nextPeriodStart(scheduleOf(item), now)
 }
 
 // --- per-item reminders ----------------------------------------------------
@@ -778,7 +766,7 @@ function reminderTimes (item, now, max) {
   if (typeof at !== 'number' || !Number.isFinite(at)) return []
   const kind = repeatOf(item)
   if (!kind) return at > now && !effectiveChecked(item, now) ? [at] : []
-  return occurrencesAfter(at, kind, now, max ?? REMINDER_LOOKAHEAD[kind], (t) => !effectiveChecked(item, t))
+  return occurrencesAfter(at, scheduleOf(item), now, max ?? REMINDER_LOOKAHEAD[kind], (t) => !effectiveChecked(item, t))
 }
 
 // iOS keeps at most 64 pending local notifications per app and SILENTLY drops the

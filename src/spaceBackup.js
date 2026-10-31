@@ -46,6 +46,8 @@
 //   text, qty, checked, category, ord, note, url   CARRY - the item itself
 //   catBy                                          CARRY - pins a hand-chosen aisle
 //   repeat, lastDoneAt                             CARRY - the chore and its cycle
+//   repeatEvery, repeatDays, repeatFrom            CARRY - the finer schedule
+//   repeatFor                                      DROP  - re-derived on import
 //   assignee                                       DROP  - a pubkey with no meaning
 //                                                          in a space that has one
 //                                                          member: the importer
@@ -144,6 +146,14 @@ function exportItem (row) {
   // caught it. Left permissive here on purpose: the import side already runs
   // normalizeRepeat, so an unknown value is rejected in exactly one place.
   if (clean(row.repeat)) out.repeat = clean(row.repeat)
+  // The finer schedule (proposals/2026-10-31-more-repeat-schedules.md). Only when
+  // it belongs to this `repeat`; import validates it again and re-derives repeatFor.
+  // The file itself has no repeatFor, and parsing a file runs through here too.
+  if (clean(row.repeat) && (row.repeatFor === undefined || row.repeatFor === row.repeat)) {
+    if (Number.isInteger(row.repeatEvery)) out.repeatEvery = row.repeatEvery
+    if (Array.isArray(row.repeatDays)) out.repeatDays = row.repeatDays.slice()
+    if (Number.isFinite(row.repeatFrom)) out.repeatFrom = row.repeatFrom
+  }
   // The done-state of a RECURRING item, and the one field that decides it. For a
   // repeating item `checked` is ignored entirely - effectiveChecked derives it
   // from lastDoneAt against the current period - so carrying `checked` without

@@ -21,7 +21,7 @@ import { isMyRow, isMine } from '../selfKeys.js'
 import { deviceRemovalMessage } from '../removalText.js'
 import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
-import { nextOccurrence } from '../repeatTime.js'
+import { nextOccurrence, scheduleOf } from '../repeatTime.js'
 import { groupByReminder } from '../reminderGroups.js'
 import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin, Tag } from '@phosphor-icons/react'
 
@@ -3287,8 +3287,8 @@ export default function App () {
           await call('item:assign', { groupId: gid, listId: openListId, itemId: sheet.item.id, assignee: patch.assignee })
           // Repeat first: item:setReminder accepts a past time only on an item that
           // already repeats, so turning both on in one save needs this order.
-          if ((patch.repeat || '') !== (sheet.item.repeat || '')) {
-            await call('item:setRepeat', { groupId: gid, listId: openListId, itemId: sheet.item.id, repeat: patch.repeat || null }).catch(() => {})
+          if (patch.repeatChanged) {
+            await call('item:setRepeat', { groupId: gid, listId: openListId, itemId: sheet.item.id, repeat: patch.repeat || null, every: patch.every, days: patch.days }).catch(() => {})
           }
           // Only write when it actually changed: item:setReminder rejects a past
           // time, and re-sending an untouched old reminder would fail the save for
@@ -5411,6 +5411,9 @@ function QtySheet ({ open, onCommit }) {
 // "Repeats" - different lengths - still line their input boxes up on the same
 // left edge.
 const FIELD_LABEL_W = 74
+const WEEKDAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const REPEAT_STEP = { width: 34, height: 34, flexShrink: 0, borderRadius: '50%', border: `1px solid ${c.border}`, background: c.surface.input, color: c.text.primary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }
 
 // The row stores an absolute epoch, and the picker deals in the same, so a
 // reminder set by someone in another timezone fires at the same INSTANT
@@ -5511,13 +5514,31 @@ function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, no
   const [picking, setPicking] = useState(false)
   const [pickingAisle, setPickingAisle] = useState(false)
   const [remindAt, setRemindAt] = useState(null)
-  const [repeat, setRepeat] = useState('')
+  // Repeats: `mode` is what the picker shows. 'every' and 'days' are the finer
+  // schedules (proposals/2026-10-31-more-repeat-schedules.md); each is stored as a
+  // plain repeat plus a refinement, see repeatPatch below.
+  const [mode, setMode] = useState('')
+  const [every, setEvery] = useState(2)
+  const [unit, setUnit] = useState('weekly')
+  const [days, setDays] = useState([1, 2, 3, 4, 5])
   const [pickWhen, setPickWhen] = useState(false)
-  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null); setRepeat(item.repeat || '') } }, [open, item])
+  useEffect(() => { if (open && item) { setText(item.text || ''); setQty(item.qty || 1); setAssignee(item.assignee || null); setNote(item.note || ''); setUrl(item.url || ''); setCategory(item.category || null); setCatTouched(false); setPicking(false); setPickingAisle(false); setRemindAt(typeof item.remindAt === 'number' ? item.remindAt : null); loadRepeat(item) } }, [open, item])
+  function loadRepeat (it) {
+    const sched = scheduleOf(it)
+    if (sched && sched.every > 1) { setMode('every'); setEvery(sched.every); setUnit(sched.kind) } else if (sched && sched.days) { setMode('days'); setDays(sched.days) } else setMode(sched ? sched.kind : '')
+  }
   if (!item) return null
+  const repeatPatch = mode === 'every' ? { repeat: unit, every }
+    : mode === 'days' ? (days.length && days.length < 7 ? { repeat: 'daily', days } : { repeat: 'daily' })
+      : { repeat: mode || null }
+  const repeat = repeatPatch.repeat || ''
+  const draftSched = repeat ? { kind: repeat, every: repeatPatch.every || 1, days: repeatPatch.days || null, from: 0 } : null
+  const savedSched = scheduleOf(item)
+  const sameSchedule = !!draftSched && !!savedSched && draftSched.kind === savedSched.kind &&
+    draftSched.every === savedSched.every && String(draftSched.days) === String(savedSched.days)
   // A repeating reminder's stored time is its FIRST ring, which may be long past.
   // Show the next one instead (src/repeatTime.js).
-  const shownAt = remindAt && repeat ? (nextOccurrence(remindAt, repeat, Date.now()) ?? remindAt) : remindAt
+  const shownAt = remindAt && draftSched ? (nextOccurrence(remindAt, draftSched, Date.now()) ?? remindAt) : remindAt
   const isGrocery = kind === 'grocery'
   const nounLabel = noun.charAt(0).toUpperCase() + noun.slice(1) // "Aisle" / "Section"
   return (
@@ -5572,16 +5593,44 @@ function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, no
               read time (proposals/2026-07-27-recurring-chores.md). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm }}>
             <span style={{ color: c.text.secondary, fontSize: 14, width: FIELD_LABEL_W, flexShrink: 0 }}>Repeats</span>
-            <select value={repeat} onChange={(e) => setRepeat(e.target.value)} aria-label='Repeats'
+            <select value={mode} onChange={(e) => setMode(e.target.value)} aria-label='Repeats'
               style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: c.surface.input, color: repeat ? c.text.primary : c.text.muted, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }}>
               <option value=''>Never</option>
               <option value='daily'>Every day</option>
               <option value='weekly'>Every week</option>
               <option value='monthly'>Every month</option>
+              <option value='every'>Every few days, weeks or months</option>
+              <option value='days'>On certain days</option>
             </select>
           </div>
+          {mode === 'every' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: sp.sm, marginTop: -6, paddingLeft: FIELD_LABEL_W + sp.sm }}>
+              <span style={{ color: c.text.secondary, fontSize: 14 }}>Every</span>
+              <button onClick={() => setEvery((n) => Math.max(2, n - 1))} aria-label='Fewer' style={REPEAT_STEP}><Minus size={16} weight='bold' /></button>
+              <span style={{ minWidth: 22, textAlign: 'center', color: c.text.primary, fontSize: 15 }}>{every}</span>
+              <button onClick={() => setEvery((n) => Math.min(99, n + 1))} aria-label='More' style={REPEAT_STEP}><Plus size={16} weight='bold' /></button>
+              <select value={unit} onChange={(e) => setUnit(e.target.value)} aria-label='Repeat unit'
+                style={{ flex: 1, minWidth: 0, padding: '8px 10px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontFamily: FONT }}>
+                <option value='daily'>days</option>
+                <option value='weekly'>weeks</option>
+                <option value='monthly'>months</option>
+              </select>
+            </div>
+          ) : null}
+          {mode === 'days' ? (
+            <div role='group' aria-label='Repeat on' style={{ display: 'flex', justifyContent: 'space-between', gap: 4, marginTop: -6, paddingLeft: FIELD_LABEL_W + sp.sm }}>
+              {WEEKDAY_LETTERS.map((letter, d) => {
+                const on = days.includes(d)
+                return (
+                  <button key={d} aria-pressed={on} aria-label={WEEKDAY_NAMES[d]}
+                    onClick={() => setDays((cur) => on ? cur.filter((x) => x !== d) : [...cur, d].sort((x, y) => x - y))}
+                    style={{ width: 34, height: 34, flexShrink: 0, borderRadius: '50%', border: `1px solid ${on ? c.primary : c.border}`, background: on ? c.primary : c.surface.input, color: on ? c.text.onPrimary : c.text.secondary, fontSize: 13, fontFamily: FONT, cursor: 'pointer', padding: 0 }}>{letter}</button>
+                )
+              })}
+            </div>
+          ) : null}
           {/* Only worth saying when it is closed: an open chore is due NOW. */}
-          {repeat && repeat === item.repeat && item.checked && item.nextDueAt
+          {sameSchedule && item.checked && item.nextDueAt
             ? <span style={{ color: c.text.muted, fontSize: 12, marginTop: -6 }}>Done for now. Back on {new Date(item.nextDueAt).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}.</span>
             : null}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder='Notes (optional)' rows={2} maxLength={2000}
@@ -5591,7 +5640,7 @@ function ItemSheet ({ open, item, groupId, onViewPhoto, onPhotoChanged, kind, no
               style={{ flex: 1, minWidth: 0, padding: '12px 14px', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.md, fontSize: 15, fontWeight: 300, fontFamily: FONT, outline: 'none' }} />
             {url.trim() ? <button onClick={() => openUrl(url.trim().match(/^https?:\/\//i) ? url.trim() : 'https://' + url.trim())} aria-label='Open link' style={{ width: 46, flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.border}`, background: c.surface.input, color: c.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
           </div>
-          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched, remindAt, repeat })}>Save</Button>
+          <Button onClick={() => onSave({ text: text.trim(), qty, assignee, note: note.trim(), url: url.trim(), category, catTouched, remindAt, repeat, every: repeatPatch.every, days: repeatPatch.days, repeatChanged: !(sameSchedule || (!draftSched && !savedSched)) })}>Save</Button>
           <Button variant='danger' onClick={onDelete}>Delete item</Button>
         </div>
       </BottomSheet>
