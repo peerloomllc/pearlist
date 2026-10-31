@@ -11,6 +11,7 @@ const b4a = require('b4a')
 const sodium = require('sodium-universal')
 
 const { sameIdentityAsOwner, myDeviceKeys, listKey, itemKey, memberKey, LIST_RANGE, MEMBER_RANGE, itemRange, normalizeKind, normalizeNotifyMode, isMemberVisible, REVOKE_CAP, REVOKE_SELF_CAP, PROMOTE_CAP, allMembersSupportRevoke, allMembersSupportSelfRevoke, allMembersSupportPromote, isDigestCountable, sortDigestLists, digestText, isReminderPending, reminderTimes, MAX_SCHEDULED_REMINDERS, normalizeRepeat, effectiveChecked, nextDueAt, reminderTargetOf } = require('./listWire')
+const { scheduleOf, repeatRefinement } = require('./repeatTime')
 const { classifyAisle, normalizeAisle, sanitizeCustomAisle } = require('./aisles')
 const { planNoteSave, sortNoteRows } = require('./noteText')
 const { normalizeColor, isPinned, normalizeLabels } = require('./listStyle')
@@ -1869,6 +1870,7 @@ const methods = {
             // it: effectiveChecked derives a recurring item's done-state from it,
             // ignoring `checked` entirely.
             ...(repeat ? { repeat } : {}),
+            ...(repeat ? repeatRefinement(repeat, e.repeatEvery, e.repeatDays, e.repeatFrom) : {}),
             ...(repeat && Number.isFinite(e.lastDoneAt) ? { lastDoneAt: e.lastDoneAt } : {}),
           })
         }
@@ -2364,13 +2366,21 @@ const methods = {
   // item:assign. Setting a repeat leaves lastDoneAt alone: an item checked off
   // BEFORE it was ever recurring has no stamp, so it reads as open immediately,
   // which is the right default when you are declaring it a chore going forward.
-  'item:setRepeat': async ({ groupId, listId, itemId, repeat }, ctx) => {
+  // `every` (2-99) and `days` (weekdays, daily only) are the refinements from
+  // proposals/2026-10-31-more-repeat-schedules.md. Any change to the schedule
+  // rewrites all of them, so a stale refinement never outlives the schedule it
+  // belonged to, and resets repeatFrom so every-N blocks count from today.
+  'item:setRepeat': async ({ groupId, listId, itemId, repeat, every, days }, ctx) => {
     const base = viewFor(ctx, groupId)
     const existing = await readRow(base, itemKey(listId, itemId))
     if (!existing || existing.deleted) throw new Error('item not found')
     const next = normalizeRepeat(repeat)
-    await putRow(ctx, groupId, itemKey(listId, itemId), { ...existing, repeat: next })
-    return { repeat: next }
+    const { repeatEvery, repeatDays, repeatFrom, repeatFor, ...rest } = existing
+    const row = { ...rest, repeat: next }
+    Object.assign(row, repeatRefinement(next, every, days, Date.now()))
+    await putRow(ctx, groupId, itemKey(listId, itemId), row)
+    const sched = scheduleOf(row)
+    return { repeat: next, ...(sched && sched.every > 1 ? { every: sched.every } : {}), ...(sched && sched.days ? { days: sched.days } : {}) }
   },
 
   'item:edit': async ({ groupId, listId, itemId, text, qty, note, url }, ctx) => {
