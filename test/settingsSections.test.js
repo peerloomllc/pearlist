@@ -68,15 +68,18 @@ test('the open sections are remembered across launches', () => {
   assert.match(body, /saveSettingsOpen\(next\)/, 'and persists every toggle')
 })
 
-test('sections open independently, unlike the About accordion', () => {
-  const body = settingsBody(app())
-  // About keeps exactly one section open (`section === 'how'`), which suits a document
-  // read top to bottom. Settings is a workbench: closing Notifications because you
-  // opened Backup is the kind of small rudeness that makes a page feel like it is
-  // fighting you. So the state is a MAP of open flags, not a single current section.
-  assert.match(body, /\[openSections, setOpenSections\]/, 'state is a set of sections')
-  assert.match(body, /\{ \.\.\.cur, \[key\]: !cur\[key\] \}/,
-    'a toggle flips one key and leaves the others alone')
+test('one section open at a time, like the About accordion', () => {
+  const src = app()
+  const body = settingsBody(src)
+  // Multi-open until 2026-10-31, when Tim asked for the About page's behaviour:
+  // opening a section closes the one before it. The state stays a map so the stored
+  // shape is unchanged, but a toggle replaces it rather than adding to it.
+  assert.match(body, /\[openSections, setOpenSections\]/, 'state is still a map of open flags')
+  assert.match(body, /cur\[key\] \? \{\} : \{ \[key\]: true \}/,
+    'opening a section closes every other one, and tapping it again closes it')
+  // Older builds stored several open keys. An upgrade must not open them all.
+  const load = componentBody(src, 'loadSettingsOpen')
+  assert.match(load, /\.find\(/, 'loading keeps only one open section')
 })
 
 test('sections whose content grows pass their own maxHeight', () => {

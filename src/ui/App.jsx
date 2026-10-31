@@ -23,7 +23,7 @@ import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { nextOccurrence } from '../repeatTime.js'
 import { groupByReminder } from '../reminderGroups.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin, Tag } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin, Tag } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -551,6 +551,19 @@ function Toggle ({ on: isOn, onChange, disabled }) {
   )
 }
 
+// Phone / Light / Dark as one segmented control. 'auto' follows the phone.
+const THEME_CHOICES = [['auto', 'Phone'], ['light', 'Light'], ['dark', 'Dark']]
+function ThemePicker ({ value, onChange }) {
+  return (
+    <div role='radiogroup' aria-label='Theme' style={{ display: 'flex', padding: 2, borderRadius: r.md, background: c.surface.input, border: `1px solid ${c.border}`, flexShrink: 0 }}>
+      {THEME_CHOICES.map(([key, label]) => (
+        <button key={key} role='radio' aria-checked={value === key} onClick={() => onChange(key)}
+          style={{ padding: '6px 12px', borderRadius: r.sm, border: 'none', background: value === key ? c.primary : 'none', color: value === key ? c.text.onPrimary : c.text.secondary, fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{label}</button>
+      ))}
+    </div>
+  )
+}
+
 // Assignee initial chip with a stable color from the suite avatar palette.
 const AVATAR_COLORS = ['#6C9BF5', '#7FB77E', '#E8A87C', '#C38D9E', '#85CDCA', '#E27D60', '#B388EB', '#F0C987']
 function AssigneeChip ({ name }) {
@@ -985,17 +998,24 @@ function saveAskQty (on) { try { localStorage.setItem(ASK_QTY_KEY, on ? '1' : '0
 // Which Settings sections are expanded. Device-local and purely presentational,
 // like the aisle view state above.
 //
-// MULTI-OPEN, unlike the About page's accordion, which keeps exactly one section
-// open. About is a document you read top to bottom; Settings is a workbench, and
-// closing Notifications because you opened Backup is the kind of small rudeness
-// that makes a page feel like it is fighting you.
+// ONE OPEN AT A TIME, like the About page's accordion. It was multi-open until
+// 2026-10-31, when Tim asked for the About behaviour: opening a section closes the
+// one before it, so the page never grows past a screen of headings plus one group.
 //
 // ALL CLOSED BY DEFAULT, which is the point of the change. Eight groups holding
 // eleven rows did not fit on the TCL, so "Your devices" - pairing, the roster,
 // removal - sat below the fold. Collapsed, the whole page is a short list of
 // headings that fits without scrolling, and nothing is buried by position alone.
 const SETTINGS_OPEN_KEY = 'pearlist:settingsOpen'
-function loadSettingsOpen () { try { return JSON.parse(localStorage.getItem(SETTINGS_OPEN_KEY) || '{}') || {} } catch { return {} } }
+// Older builds stored several open keys. Keep only the first so an upgrade opens
+// at most one section.
+function loadSettingsOpen () {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_OPEN_KEY) || '{}') || {}
+    const open = Object.keys(stored).find((k) => stored[k])
+    return open ? { [open]: true } : {}
+  } catch { return {} }
+}
 function saveSettingsOpen (next) { try { localStorage.setItem(SETTINGS_OPEN_KEY, JSON.stringify(next)) } catch {} }
 
 // User-made aisle names remembered per space (device-local), so a custom aisle
@@ -4563,11 +4583,11 @@ function ListCompleteSheet ({ open, listName, onDeleteChecked, onDelete, onKeep,
 // climb on the phone that ACCEPTED a relayed connection, so "none so far" on one
 // device is not proof that neither device relayed. See relay:stats.
 function relaySummary (s, on) {
-  if (!on) return 'Off. Your phones will sync only when they can reach each other directly.'
+  if (!on) return 'Off. Your phones sync only when they can connect directly.'
   const { successes = 0, attempts = 0 } = s.relaying || {}
   if (successes > 0) return `Used for ${successes} connection${successes > 1 ? 's' : ''} since PearList started.`
-  if (attempts > 0) return `Tried ${attempts} time${attempts > 1 ? 's' : ''} since PearList started, without completing.`
-  return 'On. Not needed so far, every connection has been direct.'
+  if (attempts > 0) return `Tried ${attempts} time${attempts > 1 ? 's' : ''} since PearList started, but never connected.`
+  return 'On. Not needed yet, every connection has been direct.'
 }
 
 // MODULE SCOPE ON PURPOSE. These were defined inside ProfileView, which gave them
@@ -4696,7 +4716,7 @@ function SeederBackup ({ onAbout, about }) {
     <Setting onAbout={onAbout} title='Seeder' about={about} alignTop
       extra={
         <span style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
-          <span style={small}>A seeder is an always-on computer that keeps your lists in sync while phones sleep. It stores them scrambled and cannot read them.</span>
+          <span style={small}>An always-on computer that syncs your lists while your phones sleep. It stores them scrambled and cannot read them.</span>
           <Button onClick={() => setScanning(true)} disabled={busy} style={{ marginTop: sp.xs }}>Scan seeder QR</Button>
           {pasting && (
             <span style={{ display: 'flex', gap: sp.sm }}>
@@ -4750,7 +4770,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
   const [openSections, setOpenSections] = useState(loadSettingsOpen)
   const toggleSection = useCallback((key) => {
     setOpenSections((cur) => {
-      const next = { ...cur, [key]: !cur[key] }
+      const next = cur[key] ? {} : { [key]: true }
       saveSettingsOpen(next)
       return next
     })
@@ -4958,23 +4978,23 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
   // the row so the settings list stays scannable).
   const [info, setInfo] = useState(null)
   const ABOUT = {
-    Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
-    'Background Sync': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
-    'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
-    'Seeder backup': "Run PeerLoom Seeder on a computer that stays on, such as an Umbrel or a spare PC, and pair this phone with it. Every member of your spaces then backs up to it. A new phone still needs a member's phone online to join a space.",
-    'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
-    'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
-    'All done pop-up': "When you tick off the last item on a list, PearList offers to delete the checked items or the whole list. Turn this off and the list just stays as it is. You can still delete checked items from the list's menu. This only changes this phone.",
-    'Ask how many': "When you add something to a grocery list, PearList asks how many you need before it goes on the list. Turn this off to skip that step: the item goes straight on as one, and you can still tap it later to change the number. This only changes this phone.",
-    'Checked items last': "Ticked items move to the bottom of the list, so what is still to get stays together at the top. On a list with aisles or sections they go to the bottom of their own aisle. On a plain list they sit under a Checked divider you can tap to fold away. This only changes how the list looks on this phone.",
-    'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
-    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
-    'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
-    'Photos on this phone': 'Photos added to items in your spaces. Each phone keeps its own copy so the photo is there when you are in the shop, even if the phone that took it is off. When an item or list is deleted, or you leave a space, its photos are removed from this phone within the hour. A photo that was replaced or removed from an item is kept for 7 days first, in case someone else\'s edit brings it back. Photos are not included in "Save a copy".',
-    'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file. You choose where it goes: your phone offers Downloads first, and Documents or a cloud folder are a tap away. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
-    'Open a saved copy': 'Reads a file saved by "Save a copy" and puts everything in it back as NEW spaces that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new spaces the usual way once they are there.',
-    'Your devices': "Phones and tablets signed in as you. Pair one and it shares your identity and every space you are in, so your lists are the same on both. Pairing hands over your identity, so only ever do it with a device you own and keep - anyone holding that link becomes you.",
-    'Link this phone': 'Use this on the NEW phone: start pairing on a phone you already use, then paste the link it shows here.',
+    Notifications: "Alerts you when someone assigns you an item or list, when someone joins one of your spaces and when items on a list you made are checked off. Alerts come from your phone itself, with no push server. With this off you still see banners while PearList is open.",
+    'Background Sync': "PearList normally syncs only while it is open. With this on, changes from others arrive even when the app is closed. Android shows an ongoing notification while it runs, and it uses a little more battery.",
+    'Learned Aisles': "When you move an item to another aisle, PearList remembers it and puts that item there next time you add it. This stays on this phone. Clear it to forget every remembered aisle and let items sort themselves again.",
+    'Seeder backup': "Run PeerLoom Seeder on a computer that stays on, like an Umbrel or a spare PC, and pair this phone with it. Everyone in your spaces then backs up to it. A new phone still needs a member's phone online to join a space.",
+    'Connect Anywhere': "Your phones normally connect straight to each other. Some mobile networks block that, and then nothing syncs. With this on, PearList sends the scrambled data through a PeerLoom relay instead. The relay cannot read your lists and keeps nothing. It only sees that two devices are talking and how much data passed. With this off your phones only ever connect directly, so on those networks nothing syncs until they can.",
+    'Tidy finished aisles': "When you check off the last item in an aisle or section, it folds away so only what is left stays on screen. Uncheck something and it comes back. Aisles you fold yourself are left alone. Only changes this phone.",
+    'All done pop-up': "When you check off the last item on a list, PearList offers to delete the checked items or the whole list. With this off nothing pops up, and you can still delete checked items from the list's menu. Only changes this phone.",
+    'Ask how many': "When you add something to a grocery list, PearList asks how many you need. With this off it goes on as one, and you can tap it later to change the number. Only changes this phone.",
+    'Checked items last': "Checked items move to the bottom, so what is left stays together at the top. With aisles or sections they go to the bottom of their own aisle. On a plain list they go under a Checked divider you can fold away. Only changes this phone.",
+    'Clear when checked': "Checked items leave the list straight away instead of staying with a line through them. This deletes the item for everyone in your space, with a few seconds to undo. Chore lists are left alone, since they are meant to be reset and done again.",
+    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things left to do. Shopping lists and notes are not counted. It stays quiet on days when everything is done. It arrives even when PearList is closed, and only on this phone.",
+    'Replay the tour': "Shows the walkthrough from your first run again.",
+    'Photos on this phone': "Photos added to items in your spaces. Each phone keeps its own copy, so a photo shows even when the phone that took it is off. Photos of deleted items or lists, or from a space you left, are removed within the hour. A photo that was replaced or removed is kept for 7 days in case someone's edit brings it back. \"Save a copy\" does not include photos.",
+    'Save a copy': "Saves every space you are in, with all their lists, to one file in a place you pick. Your lists only live on your household's phones, so this file is your copy if one is lost or wiped. It holds the lists only, with no names, members or invites, so it cannot let anyone into your spaces.",
+    'Open a saved copy': "Opens a file from \"Save a copy\" and adds everything in it as new spaces you own. It never changes a space you are already in. Invite your household to the new spaces afterwards.",
+    'Your devices': "Pairing signs another phone or tablet in as you, with every space you are in. Only pair a device you own: anyone with the pairing link becomes you.",
+    'Link this phone': "Use this on the new phone. Start pairing on a phone you already use, then paste the link it shows here.",
   }
   async function commitAvatar (value) {
     setBusy(true)
@@ -5041,14 +5061,62 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
         <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
       </div>
 
-      {/* ORDER IS DELIBERATE, and it is the whole point of this section.
-          Before: Appearance (one dark-mode toggle) first, Linked devices SIXTH and
-          below the fold on the TCL - pairing, the roster and removal, i.e. the most
-          consequential things in the app. Now: identity and devices first, directly
-          under the profile block they are conceptually part of; then the settings
-          people actually adjust; then the ones you set once and forget.
-          Two single-row groups merged: "Tidy finished aisles" and "Learned Aisles"
-          are both grocery-aisle behaviour and were four unrelated groups apart. */}
+      {/* ORDER: most used first, set-once last (Tim, 2026-10-31). Notifications and
+          the list rows are the ones people come back to change; theme and the tour
+          now and then; backup, phone linking and the connection rarely. Lists and
+          Aisles were one seven-row group and are split so each reads as one topic.
+          Photo storage is a readout about this phone's disk, so it sits with Backup. */}
+      <Collapsible title='Notifications' icon={BellRinging} {...sect('notifications')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
+          extra={reminder.enabled
+            // No "Every day at" label: the title already says daily, so the time
+            // on its own is unambiguous (Tim's call).
+            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
+            : null}
+          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
+        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+      </Collapsible>
+      <Collapsible title='Lists' icon={ListChecks} {...sect('lists')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Checked items last' about={ABOUT['Checked items last']}
+          control={<Toggle on={sinkChecked !== false} onChange={(v) => onSinkChecked(v)} />} />
+        <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
+          control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
+        <Setting onAbout={setInfo} title='Ask how many' about={ABOUT['Ask how many']}
+          control={<Toggle on={askQty !== false} onChange={(v) => onAskQty(v)} />} />
+        <Setting onAbout={setInfo} title='All done pop-up' about={ABOUT['All done pop-up']}
+          control={<Toggle on={allDonePrompt !== false} onChange={(v) => onAllDonePrompt(v)} />} />
+      </Collapsible>
+      <Collapsible title='Aisles' icon={ShoppingCart} {...sect('aisles')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
+          control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
+        <Setting onAbout={setInfo} title='Learned aisles' about={ABOUT['Learned Aisles']}
+          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
+          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
+      </Collapsible>
+      <Collapsible title='Appearance &amp; help' icon={Palette} {...sect('appearance')}>
+        {/* One three-way choice. It used to be two switches, Match phone and Dark
+            mode, where the second was greyed out whenever the first was on. */}
+        <Setting first title='Theme' control={<ThemePicker value={theme} onChange={onTheme} />} />
+        <Setting onAbout={setInfo} title='Replay the tour' about={ABOUT['Replay the tour']}
+          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
+      </Collapsible>
+      {/* Everything here lives only on the household's phones, so a file is the
+          only copy that survives all of them. Also the one way out of a space a
+          device cannot sync (see SyncBanner). */}
+      <Collapsible title='Backup &amp; storage' icon={Archive} {...sect('backup')}>
+        <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
+            ? `Saves ${spaceCount === 1 ? 'all your lists' : `your ${spaceCount} spaces`} to one file.`
+            : 'Nothing to save yet.'}</span>}
+          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
+        <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Adds it back as new spaces you own.</span>}
+          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
+        <Setting onAbout={setInfo} title='Photos on this phone' about={ABOUT['Photos on this phone']}
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{photoStatsText(photoStats)}</span>} />
+      </Collapsible>
       {/* THE ROSTER IS THE SECTION, rather than a count and a Manage button opening a
           sheet. Tim: "what if we have the devices listed in rows underneath the header,
           and then we have icons for edit/remove instead of under a separate Manage
@@ -5081,65 +5149,15 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Shows a link for the other phone to open.</span>}
             control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
           <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
-            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
+            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Paste the link from your other phone.</span>}
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
         </Collapsible>
       ) : null}
-      <Collapsible title='Notifications' icon={BellRinging} {...sect('notifications')} maxHeight={900}>
-        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
-        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
-          extra={reminder.enabled
-            // No "Every day at" label: the title already says daily, so the time
-            // on its own is unambiguous (Tim's call).
-            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
-                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
-            : null}
-          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
-        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
-      </Collapsible>
-      <Collapsible title='Lists &amp; aisles' icon={ListChecks} {...sect('listsAisles')} maxHeight={900}>
-        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
-          control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
-        <Setting onAbout={setInfo} title='Checked items last' about={ABOUT['Checked items last']}
-          control={<Toggle on={sinkChecked !== false} onChange={(v) => onSinkChecked(v)} />} />
-        <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
-          control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
-        <Setting onAbout={setInfo} title='All done pop-up' about={ABOUT['All done pop-up']}
-          control={<Toggle on={allDonePrompt !== false} onChange={(v) => onAllDonePrompt(v)} />} />
-        <Setting onAbout={setInfo} title='Ask how many' about={ABOUT['Ask how many']}
-          control={<Toggle on={askQty !== false} onChange={(v) => onAskQty(v)} />} />
-      <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
-          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
-          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
-        <Setting onAbout={setInfo} title='Photos on this phone' about={ABOUT['Photos on this phone']}
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{photoStatsText(photoStats)}</span>} />
-      </Collapsible>
-      {/* Everything here lives only on the household's phones, so a file is the
-          only copy that survives all of them. Also the one way out of a space a
-          device cannot sync (see SyncBanner). */}
-      <Collapsible title='Backup' icon={Archive} {...sect('backup')}>
-        <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
-            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
-            : 'Nothing to save yet.'}</span>}
-          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
-        <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
-          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
-      </Collapsible>
       <Collapsible title='Connection' icon={Broadcast} {...sect('connection')}>
         <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
           extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
           control={<Toggle on={relayOn} onChange={toggleRelay} />} />
         <SeederBackup onAbout={setInfo} about={ABOUT['Seeder backup']} />
-      </Collapsible>
-      <Collapsible title='Appearance' icon={Palette} {...sect('appearance')}>
-        <Setting first title='Match phone' control={<Toggle on={theme === 'auto'} onChange={(v) => onTheme(v ? 'auto' : (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'))} />} />
-        <Setting title='Dark mode' control={<Toggle disabled={theme === 'auto'} on={theme === 'auto' ? document.documentElement.getAttribute('data-theme') !== 'light' : theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
-      </Collapsible>
-      <Collapsible title='Help' icon={Question} {...sect('help')}>
-        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
-          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
       </Collapsible>
       {/* CLOSING THIS DOES NOT CANCEL THE PAIRING, and that is deliberate.
           It used to call device:cancelPairing here, which made "Copy link"
