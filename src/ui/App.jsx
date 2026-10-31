@@ -4583,11 +4583,11 @@ function ListCompleteSheet ({ open, listName, onDeleteChecked, onDelete, onKeep,
 // climb on the phone that ACCEPTED a relayed connection, so "none so far" on one
 // device is not proof that neither device relayed. See relay:stats.
 function relaySummary (s, on) {
-  if (!on) return 'Off. Your phones will sync only when they can reach each other directly.'
+  if (!on) return 'Off. Your phones sync only when they can connect directly.'
   const { successes = 0, attempts = 0 } = s.relaying || {}
   if (successes > 0) return `Used for ${successes} connection${successes > 1 ? 's' : ''} since PearList started.`
-  if (attempts > 0) return `Tried ${attempts} time${attempts > 1 ? 's' : ''} since PearList started, without completing.`
-  return 'On. Not needed so far, every connection has been direct.'
+  if (attempts > 0) return `Tried ${attempts} time${attempts > 1 ? 's' : ''} since PearList started, but never connected.`
+  return 'On. Not needed yet, every connection has been direct.'
 }
 
 // MODULE SCOPE ON PURPOSE. These were defined inside ProfileView, which gave them
@@ -4716,7 +4716,7 @@ function SeederBackup ({ onAbout, about }) {
     <Setting onAbout={onAbout} title='Seeder' about={about} alignTop
       extra={
         <span style={{ display: 'flex', flexDirection: 'column', gap: sp.sm }}>
-          <span style={small}>A seeder is an always-on computer that keeps your lists in sync while phones sleep. It stores them scrambled and cannot read them.</span>
+          <span style={small}>An always-on computer that syncs your lists while your phones sleep. It stores them scrambled and cannot read them.</span>
           <Button onClick={() => setScanning(true)} disabled={busy} style={{ marginTop: sp.xs }}>Scan seeder QR</Button>
           {pasting && (
             <span style={{ display: 'flex', gap: sp.sm }}>
@@ -4978,23 +4978,23 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
   // the row so the settings list stays scannable).
   const [info, setInfo] = useState(null)
   const ABOUT = {
-    Notifications: "PearList notifies you when someone assigns you an item or a list, when someone joins a space you're in, and - for lists you created - when items get completed. All alerts are local to your device; there is no push server. With this off you'll still see in-app banners while PearList is open.",
-    'Background Sync': "Normally PearList only syncs while it's open. With this on it keeps a lightweight connection alive so changes from other members arrive even when the app is closed. Android requires an ongoing notification for that, which is why one stays in your tray. It uses a little more battery. Leave it off if you only need updates when you open the app.",
-    'Learned Aisles': "When you move an item to a different aisle - by dragging it, or picking one in the item's detail - PearList remembers that choice on this device. Next time you add an item with the same name it goes straight to that aisle instead of being auto-sorted. It is per-device and never leaves your phone. Clear it to forget every remembered aisle and let items sort automatically again.",
-    'Seeder backup': "Run PeerLoom Seeder on a computer that stays on, such as an Umbrel or a spare PC, and pair this phone with it. Every member of your spaces then backs up to it. A new phone still needs a member's phone online to join a space.",
-    'Connect Anywhere': "Your phones normally talk straight to each other. Some mobile networks block that direct link, and until it can be made, changes you make away from home sit unsynced. With this on, PearList falls back to a PeerLoom relay that passes the scrambled data along so your lists keep syncing anywhere. The relay cannot read your lists. It only sees that two devices are talking and how much data went by, and it keeps nothing. Turn it off to stay strictly device to device, accepting that on those networks nothing will sync until a direct link works.",
-    'Tidy finished aisles': "Check off the last item in an aisle and the aisle folds itself away, so what is left to grab is all that stays on screen. It works the same for the sections you make on other lists. Uncheck something and the aisle comes straight back. Aisles you collapse yourself are left alone. This is just how the list looks on this phone, so it changes nothing for anyone else in your space.",
-    'All done pop-up': "When you tick off the last item on a list, PearList offers to delete the checked items or the whole list. Turn this off and the list just stays as it is. You can still delete checked items from the list's menu. This only changes this phone.",
-    'Ask how many': "When you add something to a grocery list, PearList asks how many you need before it goes on the list. Turn this off to skip that step: the item goes straight on as one, and you can still tap it later to change the number. This only changes this phone.",
-    'Checked items last': "Ticked items move to the bottom of the list, so what is still to get stays together at the top. On a list with aisles or sections they go to the bottom of their own aisle. On a plain list they sit under a Checked divider you can tap to fold away. This only changes how the list looks on this phone.",
-    'Clear when checked': "Tick an item off and it leaves the list straight away, instead of staying there with a line through it. A list you shop every week then stays as short as what is still to get, however many times you have used it. Two things worth knowing. This one is not just about your phone: the item goes for everyone in your space and it does not come back, so there is a few seconds to undo it if you tick the wrong thing. And chore lists are left alone, since those are meant to be reset and done again.",
-    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things on them. Shopping lists and notes are never counted: a shopping list is something you take to the shop when you go, not work that is overdue. It says nothing on a day when everything is done. Unlike the other alerts this one is set with your phone in advance, so it arrives even if PearList is closed. It is set per device and nobody else in your space is reminded by yours.",
-    'Replay the tour': 'Shows the short walkthrough you got on your first run again: spaces, filling a list, aisles and sections, the on-device AI, notifications, invites and background sync.',
-    'Photos on this phone': 'Photos added to items in your spaces. Each phone keeps its own copy so the photo is there when you are in the shop, even if the phone that took it is off. When an item or list is deleted, or you leave a space, its photos are removed from this phone within the hour. A photo that was replaced or removed from an item is kept for 7 days first, in case someone else\'s edit brings it back. Photos are not included in "Save a copy".',
-    'Save a copy': "Writes every space you are in - all of them, and everything on their lists - to a single file. You choose where it goes: your phone offers Downloads first, and Documents or a cloud folder are a tap away. Your lists only ever live on your household's phones, so this is the way to have a copy that survives one of them being lost, broken or wiped. The file holds the lists and nothing else: not your name, not the people in your spaces and not the invites, so it cannot let anyone into a space of yours.",
-    'Open a saved copy': 'Reads a file saved by "Save a copy" and puts everything in it back as NEW spaces that you own. It never merges into a space you are already in, so nothing you have now can be overwritten or duplicated. Invite the rest of your household to the new spaces the usual way once they are there.',
-    'Your devices': "Phones and tablets signed in as you. Pair one and it shares your identity and every space you are in, so your lists are the same on both. Pairing hands over your identity, so only ever do it with a device you own and keep - anyone holding that link becomes you.",
-    'Link this phone': 'Use this on the NEW phone: start pairing on a phone you already use, then paste the link it shows here.',
+    Notifications: "Alerts you when someone assigns you an item or list, when someone joins one of your spaces and when items on a list you made are checked off. Alerts come from your phone itself, with no push server. With this off you still see banners while PearList is open.",
+    'Background Sync': "PearList normally syncs only while it is open. With this on, changes from others arrive even when the app is closed. Android shows an ongoing notification while it runs, and it uses a little more battery.",
+    'Learned Aisles': "When you move an item to another aisle, PearList remembers it and puts that item there next time you add it. This stays on this phone. Clear it to forget every remembered aisle and let items sort themselves again.",
+    'Seeder backup': "Run PeerLoom Seeder on a computer that stays on, like an Umbrel or a spare PC, and pair this phone with it. Everyone in your spaces then backs up to it. A new phone still needs a member's phone online to join a space.",
+    'Connect Anywhere': "Your phones normally connect straight to each other. Some mobile networks block that, and then nothing syncs. With this on, PearList sends the scrambled data through a PeerLoom relay instead. The relay cannot read your lists and keeps nothing. It only sees that two devices are talking and how much data passed. With this off your phones only ever connect directly, so on those networks nothing syncs until they can.",
+    'Tidy finished aisles': "When you check off the last item in an aisle or section, it folds away so only what is left stays on screen. Uncheck something and it comes back. Aisles you fold yourself are left alone. Only changes this phone.",
+    'All done pop-up': "When you check off the last item on a list, PearList offers to delete the checked items or the whole list. With this off nothing pops up, and you can still delete checked items from the list's menu. Only changes this phone.",
+    'Ask how many': "When you add something to a grocery list, PearList asks how many you need. With this off it goes on as one, and you can tap it later to change the number. Only changes this phone.",
+    'Checked items last': "Checked items move to the bottom, so what is left stays together at the top. With aisles or sections they go to the bottom of their own aisle. On a plain list they go under a Checked divider you can fold away. Only changes this phone.",
+    'Clear when checked': "Checked items leave the list straight away instead of staying with a line through them. This deletes the item for everyone in your space, with a few seconds to undo. Chore lists are left alone, since they are meant to be reset and done again.",
+    'Daily reminder': "Once a day, at the time you pick, PearList reminds you about lists that still have things left to do. Shopping lists and notes are not counted. It stays quiet on days when everything is done. It arrives even when PearList is closed, and only on this phone.",
+    'Replay the tour': "Shows the walkthrough from your first run again.",
+    'Photos on this phone': "Photos added to items in your spaces. Each phone keeps its own copy, so a photo shows even when the phone that took it is off. Photos of deleted items or lists, or from a space you left, are removed within the hour. A photo that was replaced or removed is kept for 7 days in case someone's edit brings it back. \"Save a copy\" does not include photos.",
+    'Save a copy': "Saves every space you are in, with all their lists, to one file in a place you pick. Your lists only live on your household's phones, so this file is your copy if one is lost or wiped. It holds the lists only, with no names, members or invites, so it cannot let anyone into your spaces.",
+    'Open a saved copy': "Opens a file from \"Save a copy\" and adds everything in it as new spaces you own. It never changes a space you are already in. Invite your household to the new spaces afterwards.",
+    'Your devices': "Pairing signs another phone or tablet in as you, with every space you are in. Only pair a device you own: anyone with the pairing link becomes you.",
+    'Link this phone': "Use this on the new phone. Start pairing on a phone you already use, then paste the link it shows here.",
   }
   async function commitAvatar (value) {
     setBusy(true)
@@ -5108,11 +5108,11 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
       <Collapsible title='Backup &amp; storage' icon={Archive} {...sect('backup')}>
         <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
-            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
+            ? `Saves ${spaceCount === 1 ? 'all your lists' : `your ${spaceCount} spaces`} to one file.`
             : 'Nothing to save yet.'}</span>}
           control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
         <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Adds it back as new spaces you own.</span>}
           control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
         <Setting onAbout={setInfo} title='Photos on this phone' about={ABOUT['Photos on this phone']}
           extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{photoStatsText(photoStats)}</span>} />
@@ -5149,7 +5149,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
             extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Shows a link for the other phone to open.</span>}
             control={<button onClick={pairDevice} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Pair</button>} />
           <Setting onAbout={setInfo} title='Link this phone' about={ABOUT['Link this phone']} alignTop
-            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Use the link shown on a phone you already use.</span>}
+            extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Paste the link from your other phone.</span>}
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
         </Collapsible>
       ) : null}
