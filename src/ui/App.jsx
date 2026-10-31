@@ -23,7 +23,7 @@ import { syncTrouble } from '../syncStatus.js'
 import { itemPresets, dailyPresets, describeWhen, stepDays, stepMinutes, defaultExact } from '../reminderPresets.js'
 import { nextOccurrence } from '../repeatTime.js'
 import { groupByReminder } from '../reminderGroups.js'
-import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Question, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin, Tag } from '@phosphor-icons/react'
+import { ShareNetwork, Trash, Link, CaretRight, CaretLeft, CaretDown, X, Check, Plus, Minus, DotsThree, DotsSixVertical, ShoppingCart, Broom, ListChecks, ListBullets, Note, Lightning, CheckCircle, ArrowSquareOut, Info, GearSix, House, Sparkle, BellRinging, ArrowsClockwise, DeviceMobile, UsersThree, UserMinus, SignOut, PencilSimple, Palette, Broadcast, Archive, Camera, Image as ImageIcon, SquaresFour, Rows, PushPin, Tag } from '@phosphor-icons/react'
 
 // Single-sourced from app.json's expo.version: scripts/build-ui.mjs substitutes
 // __APP_VERSION__ at bundle time, and every release rebuilds the bundle (release.sh
@@ -551,6 +551,19 @@ function Toggle ({ on: isOn, onChange, disabled }) {
   )
 }
 
+// Phone / Light / Dark as one segmented control. 'auto' follows the phone.
+const THEME_CHOICES = [['auto', 'Phone'], ['light', 'Light'], ['dark', 'Dark']]
+function ThemePicker ({ value, onChange }) {
+  return (
+    <div role='radiogroup' aria-label='Theme' style={{ display: 'flex', padding: 2, borderRadius: r.md, background: c.surface.input, border: `1px solid ${c.border}`, flexShrink: 0 }}>
+      {THEME_CHOICES.map(([key, label]) => (
+        <button key={key} role='radio' aria-checked={value === key} onClick={() => onChange(key)}
+          style={{ padding: '6px 12px', borderRadius: r.sm, border: 'none', background: value === key ? c.primary : 'none', color: value === key ? c.text.onPrimary : c.text.secondary, fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{label}</button>
+      ))}
+    </div>
+  )
+}
+
 // Assignee initial chip with a stable color from the suite avatar palette.
 const AVATAR_COLORS = ['#6C9BF5', '#7FB77E', '#E8A87C', '#C38D9E', '#85CDCA', '#E27D60', '#B388EB', '#F0C987']
 function AssigneeChip ({ name }) {
@@ -985,17 +998,24 @@ function saveAskQty (on) { try { localStorage.setItem(ASK_QTY_KEY, on ? '1' : '0
 // Which Settings sections are expanded. Device-local and purely presentational,
 // like the aisle view state above.
 //
-// MULTI-OPEN, unlike the About page's accordion, which keeps exactly one section
-// open. About is a document you read top to bottom; Settings is a workbench, and
-// closing Notifications because you opened Backup is the kind of small rudeness
-// that makes a page feel like it is fighting you.
+// ONE OPEN AT A TIME, like the About page's accordion. It was multi-open until
+// 2026-10-31, when Tim asked for the About behaviour: opening a section closes the
+// one before it, so the page never grows past a screen of headings plus one group.
 //
 // ALL CLOSED BY DEFAULT, which is the point of the change. Eight groups holding
 // eleven rows did not fit on the TCL, so "Your devices" - pairing, the roster,
 // removal - sat below the fold. Collapsed, the whole page is a short list of
 // headings that fits without scrolling, and nothing is buried by position alone.
 const SETTINGS_OPEN_KEY = 'pearlist:settingsOpen'
-function loadSettingsOpen () { try { return JSON.parse(localStorage.getItem(SETTINGS_OPEN_KEY) || '{}') || {} } catch { return {} } }
+// Older builds stored several open keys. Keep only the first so an upgrade opens
+// at most one section.
+function loadSettingsOpen () {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_OPEN_KEY) || '{}') || {}
+    const open = Object.keys(stored).find((k) => stored[k])
+    return open ? { [open]: true } : {}
+  } catch { return {} }
+}
 function saveSettingsOpen (next) { try { localStorage.setItem(SETTINGS_OPEN_KEY, JSON.stringify(next)) } catch {} }
 
 // User-made aisle names remembered per space (device-local), so a custom aisle
@@ -4750,7 +4770,7 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
   const [openSections, setOpenSections] = useState(loadSettingsOpen)
   const toggleSection = useCallback((key) => {
     setOpenSections((cur) => {
-      const next = { ...cur, [key]: !cur[key] }
+      const next = cur[key] ? {} : { [key]: true }
       saveSettingsOpen(next)
       return next
     })
@@ -5041,14 +5061,62 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
         <input ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }} onChange={onPickFile} />
       </div>
 
-      {/* ORDER IS DELIBERATE, and it is the whole point of this section.
-          Before: Appearance (one dark-mode toggle) first, Linked devices SIXTH and
-          below the fold on the TCL - pairing, the roster and removal, i.e. the most
-          consequential things in the app. Now: identity and devices first, directly
-          under the profile block they are conceptually part of; then the settings
-          people actually adjust; then the ones you set once and forget.
-          Two single-row groups merged: "Tidy finished aisles" and "Learned Aisles"
-          are both grocery-aisle behaviour and were four unrelated groups apart. */}
+      {/* ORDER: most used first, set-once last (Tim, 2026-10-31). Notifications and
+          the list rows are the ones people come back to change; theme and the tour
+          now and then; backup, phone linking and the connection rarely. Lists and
+          Aisles were one seven-row group and are split so each reads as one topic.
+          Photo storage is a readout about this phone's disk, so it sits with Backup. */}
+      <Collapsible title='Notifications' icon={BellRinging} {...sect('notifications')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
+        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
+          extra={reminder.enabled
+            // No "Every day at" label: the title already says daily, so the time
+            // on its own is unambiguous (Tim's call).
+            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
+                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
+            : null}
+          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
+        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
+      </Collapsible>
+      <Collapsible title='Lists' icon={ListChecks} {...sect('lists')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Checked items last' about={ABOUT['Checked items last']}
+          control={<Toggle on={sinkChecked !== false} onChange={(v) => onSinkChecked(v)} />} />
+        <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
+          control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
+        <Setting onAbout={setInfo} title='Ask how many' about={ABOUT['Ask how many']}
+          control={<Toggle on={askQty !== false} onChange={(v) => onAskQty(v)} />} />
+        <Setting onAbout={setInfo} title='All done pop-up' about={ABOUT['All done pop-up']}
+          control={<Toggle on={allDonePrompt !== false} onChange={(v) => onAllDonePrompt(v)} />} />
+      </Collapsible>
+      <Collapsible title='Aisles' icon={ShoppingCart} {...sect('aisles')} maxHeight={900}>
+        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
+          control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
+        <Setting onAbout={setInfo} title='Learned aisles' about={ABOUT['Learned Aisles']}
+          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
+          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
+      </Collapsible>
+      <Collapsible title='Appearance &amp; help' icon={Palette} {...sect('appearance')}>
+        {/* One three-way choice. It used to be two switches, Match phone and Dark
+            mode, where the second was greyed out whenever the first was on. */}
+        <Setting first title='Theme' control={<ThemePicker value={theme} onChange={onTheme} />} />
+        <Setting onAbout={setInfo} title='Replay the tour' about={ABOUT['Replay the tour']}
+          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
+      </Collapsible>
+      {/* Everything here lives only on the household's phones, so a file is the
+          only copy that survives all of them. Also the one way out of a space a
+          device cannot sync (see SyncBanner). */}
+      <Collapsible title='Backup &amp; storage' icon={Archive} {...sect('backup')}>
+        <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
+            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
+            : 'Nothing to save yet.'}</span>}
+          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
+        <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
+          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
+        <Setting onAbout={setInfo} title='Photos on this phone' about={ABOUT['Photos on this phone']}
+          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{photoStatsText(photoStats)}</span>} />
+      </Collapsible>
       {/* THE ROSTER IS THE SECTION, rather than a count and a Manage button opening a
           sheet. Tim: "what if we have the devices listed in rows underneath the header,
           and then we have icons for edit/remove instead of under a separate Manage
@@ -5085,61 +5153,11 @@ function ProfileView ({ profile, theme, onTheme, autoCollapse, onAutoCollapse, s
             control={<button onClick={() => setLinking(true)} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Link</button>} />
         </Collapsible>
       ) : null}
-      <Collapsible title='Notifications' icon={BellRinging} {...sect('notifications')} maxHeight={900}>
-        <Setting onAbout={setInfo} first title='Notifications' about={ABOUT.Notifications} control={<Toggle on={notif} onChange={toggleNotif} />} />
-        <Setting onAbout={setInfo} title='Daily reminder' about={ABOUT['Daily reminder']} alignTop
-          extra={reminder.enabled
-            // No "Every day at" label: the title already says daily, so the time
-            // on its own is unambiguous (Tim's call).
-            ? <button onClick={() => setPickTime(true)} aria-label='Daily reminder time'
-                style={{ alignSelf: 'flex-start', background: c.surface.input, color: c.text.primary, border: `1px solid ${c.border}`, borderRadius: r.sm, padding: '7px 14px', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>{reminderTime}</button>
-            : null}
-          control={<Toggle on={reminder.enabled} onChange={(v) => saveReminder({ ...reminder, enabled: v })} />} />
-        {bgSyncSupported ? <Setting onAbout={setInfo} title='Background Sync' about={ABOUT['Background Sync']} control={<Toggle on={bgSync} onChange={toggleBgSync} />} /> : null}
-      </Collapsible>
-      <Collapsible title='Lists &amp; aisles' icon={ListChecks} {...sect('listsAisles')} maxHeight={900}>
-        <Setting onAbout={setInfo} first title='Tidy finished aisles' about={ABOUT['Tidy finished aisles']}
-          control={<Toggle on={!!autoCollapse} onChange={(v) => onAutoCollapse(v)} />} />
-        <Setting onAbout={setInfo} title='Checked items last' about={ABOUT['Checked items last']}
-          control={<Toggle on={sinkChecked !== false} onChange={(v) => onSinkChecked(v)} />} />
-        <Setting onAbout={setInfo} title='Clear when checked' about={ABOUT['Clear when checked']}
-          control={<Toggle on={!!clearOnChecked} onChange={(v) => onClearOnChecked(v)} />} />
-        <Setting onAbout={setInfo} title='All done pop-up' about={ABOUT['All done pop-up']}
-          control={<Toggle on={allDonePrompt !== false} onChange={(v) => onAllDonePrompt(v)} />} />
-        <Setting onAbout={setInfo} title='Ask how many' about={ABOUT['Ask how many']}
-          control={<Toggle on={askQty !== false} onChange={(v) => onAskQty(v)} />} />
-      <Setting onAbout={setInfo} title='Learned Aisles' about={ABOUT['Learned Aisles']}
-          extra={learned ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Remembering {learned} item{learned > 1 ? 's' : ''}.</span> : null}
-          control={<button onClick={clearLearned} disabled={!learned} aria-label='Clear learned aisles' style={{ width: 40, height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: r.md, border: 'none', background: 'none', color: learned ? c.error : c.text.muted, cursor: learned ? 'pointer' : 'default', opacity: learned ? 1 : 0.4 }}><Trash size={20} weight='regular' /></button>} />
-        <Setting onAbout={setInfo} title='Photos on this phone' about={ABOUT['Photos on this phone']}
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{photoStatsText(photoStats)}</span>} />
-      </Collapsible>
-      {/* Everything here lives only on the household's phones, so a file is the
-          only copy that survives all of them. Also the one way out of a space a
-          device cannot sync (see SyncBanner). */}
-      <Collapsible title='Backup' icon={Archive} {...sect('backup')}>
-        <Setting onAbout={setInfo} first title='Save a copy' about={ABOUT['Save a copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{spaceCount
-            ? `Saves all ${spaceCount === 1 ? 'your lists' : `${spaceCount} of your spaces and their lists`} to one file.`
-            : 'Nothing to save yet.'}</span>}
-          control={<button onClick={onExport} disabled={!spaceCount} style={{ ...BACKUP_BTN, border: `1px solid ${spaceCount ? c.text.muted : c.border}`, color: spaceCount ? c.text.primary : c.text.muted, cursor: spaceCount ? 'pointer' : 'default' }}>Save</button>} />
-        <Setting onAbout={setInfo} title='Open a saved copy' about={ABOUT['Open a saved copy']} alignTop
-          extra={<span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>Puts it all back as new spaces you own.</span>}
-          control={<button onClick={onImport} style={{ ...BACKUP_BTN, border: `1px solid ${c.text.muted}`, color: c.text.primary, cursor: 'pointer' }}>Open</button>} />
-      </Collapsible>
       <Collapsible title='Connection' icon={Broadcast} {...sect('connection')}>
         <Setting onAbout={setInfo} first title='Connect Anywhere' about={ABOUT['Connect Anywhere']}
           extra={relayStats ? <span style={{ color: c.text.muted, fontSize: 12, lineHeight: 1.35 }}>{relaySummary(relayStats, relayOn)}</span> : null}
           control={<Toggle on={relayOn} onChange={toggleRelay} />} />
         <SeederBackup onAbout={setInfo} about={ABOUT['Seeder backup']} />
-      </Collapsible>
-      <Collapsible title='Appearance' icon={Palette} {...sect('appearance')}>
-        <Setting first title='Match phone' control={<Toggle on={theme === 'auto'} onChange={(v) => onTheme(v ? 'auto' : (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'))} />} />
-        <Setting title='Dark mode' control={<Toggle disabled={theme === 'auto'} on={theme === 'auto' ? document.documentElement.getAttribute('data-theme') !== 'light' : theme === 'dark'} onChange={(v) => onTheme(v ? 'dark' : 'light')} />} />
-      </Collapsible>
-      <Collapsible title='Help' icon={Question} {...sect('help')}>
-        <Setting onAbout={setInfo} first title='Replay the tour' about={ABOUT['Replay the tour']}
-          control={<button onClick={onReplayTour} style={{ padding: '8px 16px', flexShrink: 0, borderRadius: r.md, border: `1px solid ${c.text.muted}`, background: c.surface.input, color: c.text.primary, fontSize: 14, cursor: 'pointer' }}>Replay</button>} />
       </Collapsible>
       {/* CLOSING THIS DOES NOT CANCEL THE PAIRING, and that is deliberate.
           It used to call device:cancelPairing here, which made "Copy link"
