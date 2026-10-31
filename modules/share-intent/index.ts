@@ -5,7 +5,7 @@ import { requireOptionalNativeModule } from 'expo-modules-core'
 //
 // Android: the app receives the share itself (android/.../ShareIntentModule.kt).
 // iOS: the Share Extension (plugins/ios-share-extension) saves it to the App Group
-// folder and opens pear://pearlist/share; ios/ShareIntentModule.swift reads it.
+// folder and opens pearlist://share (its own scheme: Keet also answers pear://); ios/ShareIntentModule.swift reads it.
 export type Shared = { text: string | null, subject: string | null, images: string[] }
 
 const ShareIntent = requireOptionalNativeModule<{
@@ -28,7 +28,7 @@ export function onShared (cb: () => void): () => void {
   if (!shareIntentSupported) return () => {}
   if (Platform.OS === 'ios') {
     const a = AppState.addEventListener('change', (s) => { if (s === 'active') cb() })
-    const l = Linking.addEventListener('url', ({ url }) => { if (/^pear:\/\/pearlist\/share/.test(url)) cb() })
+    const l = Linking.addEventListener('url', ({ url }) => { if (/^pearlist:\/\/share/.test(url)) cb() })
     return () => { a.remove(); l.remove() }
   }
   const sub = ShareIntent!.addListener('onShare', cb)

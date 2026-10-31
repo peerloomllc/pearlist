@@ -5,7 +5,7 @@
     "version": "1.1.18",
     "newArchEnabled": true,
     "orientation": "portrait",
-    "scheme": "pear",
+    "scheme": ["pear", "pearlist"],
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {

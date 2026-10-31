@@ -41,7 +41,9 @@ test('iOS: the Share Extension is set up and uses the App Group the app reads', 
   // The extension finds the group from its own id minus ".share"; the app from its own id.
   const ext = read('plugins/ios-share-extension/ShareViewController.swift')
   assert.match(ext, /"group\." \+ me\.split\(separator: "\."\)\.dropLast\(\)/)
-  assert.match(ext, /pear:\/\/pearlist\/share/)
+  assert.match(ext, /URL\(string: "pearlist:\/\/share"\)/)
+  assert.ok(require('../app.json').expo.scheme.includes('pearlist'), 'the app answers pearlist:// links')
+  assert.match(read('modules/share-intent/index.ts'), /\^pearlist:\\\/\\\/share/)
   const mod = read('modules/share-intent/ios/ShareIntentModule.swift')
   assert.match(mod, /"group\." \+ \(Bundle\.main\.bundleIdentifier/)
   const plist = read('plugins/ios-share-extension/Info.plist')

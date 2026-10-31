@@ -136,10 +136,11 @@ class ShareViewController: UIViewController {
   // An extension may not open its app directly, and Xcode will not compile a call to
   // UIApplication.open in one. Walking the responder chain to the UIApplication and
   // calling openURL:options:completionHandler: through the Objective-C runtime is the
-  // usual way round it. If iOS refuses, the share still waits in the folder and the
+  // usual way round it. The link is pearlist://, PearList's own scheme: Keet also
+  // answers pear://, and iOS then asks which app to open. If iOS refuses, the share still waits in the folder and the
   // sheet shows the next time PearList comes to the front.
   private func openApp () {
-    guard let url = URL(string: "pear://pearlist/share") else { return }
+    guard let url = URL(string: "pearlist://share") else { return }
     DispatchQueue.main.async {
       let sel = NSSelectorFromString("openURL:options:completionHandler:")
       var r: UIResponder? = self
