@@ -1231,6 +1231,7 @@ else
   CI=1 npx expo prebuild -p ios --no-install
 
   # ── Step 1: Sync repo to Mac Mini ──
+  release_check_mac_space "$MAC_MINI"
   echo "    Syncing repo to $MAC_MINI (including freshly built bundles)..."
   rsync -az --rsync-path=/opt/homebrew/bin/rsync \
     --exclude='.git' --exclude='node_modules' --exclude='android' \
