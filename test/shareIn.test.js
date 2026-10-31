@@ -65,3 +65,11 @@ test('iOS: both build scripts sign each target with its own profile before archi
   assert.doesNotMatch(dev, /CODE_SIGN_STYLE=Automatic/)
   assert.match(read('scripts/ios-signing.rb'), /'PearListShare' => share_profile/)
 })
+
+test('iOS: the router ignores the share link, so it cannot remount the shell', async () => {
+  const src = read('app/+native-intent.tsx')
+  const fn = new Function(src.replace(/export function/, 'return function').replace(/\{ path, initial \}: \{ path: string, initial: boolean \}/, '{ path, initial }'))()
+  assert.equal(fn({ path: 'pearlist://share', initial: false }), null)
+  assert.equal(fn({ path: 'pearlist://share', initial: true }), '/')
+  assert.equal(fn({ path: 'pear://pearlist/join?x=1', initial: false }), 'pear://pearlist/join?x=1')
+})
