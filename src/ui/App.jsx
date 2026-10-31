@@ -8,6 +8,7 @@ import { colors as c, spacing as sp, radius as r, FONT, MONO, setTheme, loadThem
 import { APP_ICON } from './appIcon.js'
 import aisles from '../aisles.js'
 import { sortNoteRows, splitLines, joinLines } from '../noteText.js'
+import { splitLinks, firstLink } from '../links.js'
 import { nextCollapseState } from '../autoCollapse.js'
 import { shouldClear } from '../clearOnChecked.js'
 import { checkedLast } from '../checkedLast.js'
@@ -878,6 +879,8 @@ function UndoToast ({ onUndo }) {
 
 function ItemRow ({ item, groupId, members, onToggle, onOpen, onPhoto, dragHandle }) {
   const checked = !!item.checked
+  // The item's link field, or else the first link typed into its text or note.
+  const link = item.url || firstLink(item.text, item.note)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: sp.md, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}` }}>
       <button onClick={() => onToggle(item)} data-haptic={checked ? 'light' : 'success'} aria-label={checked ? 'uncheck' : 'check'} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', border: `2px solid ${checked ? c.primary : c.text.muted}`, background: checked ? c.primary : 'transparent', color: c.text.onPrimary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 0, animation: checked ? 'pearlist-pop 240ms ease' : 'none' }}>{checked ? <Check size={15} weight='bold' /> : null}</button>
@@ -892,7 +895,7 @@ function ItemRow ({ item, groupId, members, onToggle, onOpen, onPhoto, dragHandl
         {item.note ? <span style={{ color: c.text.muted, fontSize: 13, fontWeight: 300, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{item.note}</span> : null}
       </button>
       {item.photo ? <PhotoThumb groupId={groupId} item={item} onClick={() => onPhoto?.(item)} /> : null}
-      {item.url ? <button onClick={(e) => { e.stopPropagation(); openUrl(item.url) }} aria-label='Open link' style={{ width: 34, height: 34, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
+      {link ? <button onClick={(e) => { e.stopPropagation(); openUrl(link) }} aria-label='Open link' style={{ width: 34, height: 34, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LinkIcon /></button> : null}
       <AssigneeAvatar pubkey={item.assignee} members={members} size={24} />
       {dragHandle ? <span
         onTouchStart={(e) => { e.stopPropagation(); dragHandle.onTouchStart?.(e) }}
@@ -4100,9 +4103,47 @@ function NotePhotos ({ groupId, list, onView, onChanged }) {
   )
 }
 
+// The note's text box and its read view must match exactly, so a tap lands on the
+// same character in both.
+const noteTextStyle = {
+  minHeight: 0, width: '100%', boxSizing: 'border-box', margin: 0,
+  background: c.surface.base, color: c.text.primary, fontFamily: FONT, fontSize: 16,
+  fontWeight: 300, lineHeight: 1.6,
+  padding: `${sp.base}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.xxl}px)`,
+}
+
+// Where in the note's text a tap on the read view landed, as a character offset,
+// so editing starts there. The view holds the same text as the box, split into
+// text nodes around the links, so counting the characters before the tapped node
+// gives the offset. Falls back to the end when the browser cannot say.
+function noteOffsetAt (root, x, y, fallback) {
+  let node = null, off = 0
+  if (document.caretRangeFromPoint) {
+    const rg = document.caretRangeFromPoint(x, y)
+    if (rg) { node = rg.startContainer; off = rg.startOffset }
+  } else if (document.caretPositionFromPoint) {
+    const cp = document.caretPositionFromPoint(x, y)
+    if (cp) { node = cp.offsetNode; off = cp.offset }
+  }
+  if (!node || node.nodeType !== 3 || !root.contains(node)) return fallback
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let n = 0
+  while (walk.nextNode()) {
+    if (walk.currentNode === node) return n + off
+    n += walk.currentNode.length
+  }
+  return fallback
+}
+
 function NoteEditor ({ rows, onSave }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
+  // Links in a text box cannot be tapped, so while the note is not being edited it
+  // shows as text with its links live, laid over the box in the same font and
+  // spacing. A tap anywhere else focuses the box underneath at the same spot.
+  const [editing, setEditing] = useState(false)
+  const boxRef = useRef(null)
+  const viewRef = useRef(null)
   const textRef = useRef('')
   const baseRef = useRef([])
   const dirtyRef = useRef(false)
@@ -4180,18 +4221,36 @@ function NoteEditor ({ rows, onSave }) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <textarea
+        ref={boxRef}
         value={text}
         onChange={(e) => onChange(e.target.value)}
-        onBlur={() => flushRef.current()}
+        onFocus={() => setEditing(true)}
+        onBlur={() => { setEditing(false); flushRef.current() }}
         placeholder='Write anything here. It syncs to everyone in the space.'
         spellCheck
-        style={{
-          flex: 1, minHeight: 0, width: '100%', resize: 'none', border: 'none', outline: 'none',
-          background: c.surface.base, color: c.text.primary, fontFamily: FONT, fontSize: 16,
-          fontWeight: 300, lineHeight: 1.6,
-          padding: `${sp.base}px ${sp.base}px calc(var(--pear-safe-bottom) + ${sp.xxl}px)`,
-        }}
+        style={{ ...noteTextStyle, flex: 1, resize: 'none', border: 'none', outline: 'none' }}
       />
+      {!editing && text.trim() ? (
+        <div
+          ref={viewRef}
+          data-note-view
+          onClick={(e) => {
+            const box = boxRef.current, view = viewRef.current
+            if (!box || !view) return
+            const at = noteOffsetAt(view, e.clientX, e.clientY, text.length)
+            const top = view.scrollTop
+            // Focus now, inside the tap, or iOS will not raise the keyboard.
+            box.focus({ preventScroll: true })
+            box.setSelectionRange(at, at)
+            box.scrollTop = top
+          }}
+          style={{ ...noteTextStyle, position: 'absolute', inset: 0, overflowY: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', cursor: 'text' }}
+        >
+          {splitLinks(text).map((p, i) => p.href
+            ? <a key={i} href={p.href} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openUrl(p.href) }} style={{ color: c.accent, textDecoration: 'underline', textUnderlineOffset: 2 }}>{p.text}</a>
+            : <span key={i}>{p.text}</span>)}
+        </div>
+      ) : null}
       {saving ? (
         <span style={{ position: 'absolute', right: sp.base, bottom: `calc(var(--pear-safe-bottom) + ${sp.sm}px)`, color: c.text.muted, fontSize: 12, fontWeight: 300, pointerEvents: 'none' }}>Saving…</span>
       ) : null}
