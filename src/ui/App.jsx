@@ -1720,9 +1720,16 @@ const BACKUP_BTN = {
 function SyncBanner ({ status, retried = false, busy = false, onAction }) {
   const trouble = syncTrouble(status, retried)
   if (!trouble) return null
+  // Waiting to connect or to be let in is normal, so it gets the app's spinner and
+  // ordinary text. Only a space that will not open (the states with an action)
+  // keeps the warning colour.
+  const waiting = !trouble.action
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: `${sp.md}px ${sp.base}px`, borderBottom: `1px solid ${c.divider}`, background: c.surface.input }}>
-      <span style={{ color: c.warn, fontSize: 14, fontWeight: 400 }}>{trouble.title}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: sp.sm, color: waiting ? c.text.primary : c.warn, fontSize: 14, fontWeight: 400 }}>
+        {waiting ? <Spinner size={14} /> : null}
+        {trouble.title}
+      </span>
       <span style={{ color: c.text.secondary, fontSize: 13, lineHeight: 1.45 }}>{trouble.body}</span>
       {trouble.action && onAction ? (
         <button
