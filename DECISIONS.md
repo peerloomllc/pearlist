@@ -2,6 +2,30 @@
 
 Append-only, newest on top. See Constitution §4.
 
+## 2026-10-31 - A lost phone's offline edits may merge once, and that is accepted
+Tier: record only, moved from TODO.md in the 2026-10-31 audit because it was never
+open work. Measured in PR #133.
+**A LOST PHONE'S OFFLINE EDITS MAY MERGE ONCE (LOW, 2026-07-30).** Measured
+in PR #133. If someone has your lost phone and uses it while it is offline,
+then it reconnects, that burst of edits MAY land in your lists. It is a race
+(4 of 6 runs, then 3 of 6 in the three-peer case), not a rule.
+REFINED SAME DAY, and it is better than the first write-up said: it is
+ALL-OR-NOTHING AND NOBODY EVER SPLITS. A follow-up probe checked the REVOKED
+phone's own view too, which the first pass never did - 5 runs, self-after and
+owner-accepted matched every time (3/3, 0/0, 3/3, 3/3, 0/0). So when the
+batch is discarded the removed phone DISCARDS IT FROM ITS OWN VIEW TOO. Seen
+on hardware: Tim's offline item never reached the TCL and had vanished from
+the iPhone by the time he looked.
+NOT A BUG TO FIX, filed so it is not re-discovered as one: the writes are
+CONCURRENT with the revocation - the phone could not have known - so no
+design short of a synchronous revoke can reject them, and P2P has no such
+thing. The phone can write nothing after it learns, and the items are
+deletable like any other.
+IF IT EVER MATTERS, the shape would be a client-side rule: ignore rows whose
+writer is evicted and whose updatedAt is after the eviction `at`. That is a
+VIEW change, so it is fork-inducing and needs its own capability gate. Not
+worth it on this evidence.
+
 ## 2026-10-30 - iOS share-in goes through a Share Extension and an App Group
 Tier: T2. Proposal: proposals/2026-10-29-keep-style-notes.md part 6, which left iOS to
 follow Android (PR #259).
