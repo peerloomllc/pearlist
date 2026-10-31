@@ -1,6 +1,6 @@
 # 2026-10-31 - More repeat schedules: every N periods and chosen weekdays
 
-**Status:** DRAFT 2026-10-31, awaiting Tim. Builds on
+**Status:** APPROVED by Tim 2026-10-31, calendar-fixed periods confirmed. Builds on
 proposals/2026-07-27-recurring-chores.md (P1 shipped in PR #107).
 
 **Goal**
