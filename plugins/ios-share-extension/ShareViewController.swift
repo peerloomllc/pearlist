@@ -44,6 +44,16 @@ class ShareViewController: UIViewController {
       label.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
       label.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
     ])
+  }
+
+  // Started once the view is on screen, not in viewDidLoad. A fast save used to
+  // reach openApp before the view was in a window, so the responder chain had no
+  // UIApplication in it and a cold PearList never opened (seen on the iPhone SE).
+  private var started = false
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    if started { return }
+    started = true
     Task { await collectAndSave() }
   }
 
@@ -134,24 +144,27 @@ class ShareViewController: UIViewController {
   }
 
   // An extension may not open its app directly, and Xcode will not compile a call to
-  // UIApplication.open in one. Walking the responder chain to the UIApplication and
-  // calling openURL:options:completionHandler: through the Objective-C runtime is the
-  // usual way round it. The link is pearlist://, PearList's own scheme: Keet also
+  // UIApplication.open in one. Reaching the UIApplication through the Objective-C
+  // runtime and calling openURL:options:completionHandler: on it is the usual way
+  // round it. The link is pearlist://, PearList's own scheme: Keet also
   // answers pear://, and iOS then asks which app to open. If iOS refuses, the share still waits in the folder and the
   // sheet shows the next time PearList comes to the front.
   private func openApp () {
     guard let url = URL(string: "pearlist://share") else { return }
     DispatchQueue.main.async {
       let sel = NSSelectorFromString("openURL:options:completionHandler:")
+      // The shared UIApplication first, which does not depend on where this view
+      // sits; the responder chain only if that lookup ever fails.
+      var app: NSObject? = (NSClassFromString("UIApplication") as? NSObject.Type)?.value(forKey: "sharedApplication") as? NSObject
       var r: UIResponder? = self
-      while let cur = r {
-        if cur.isKind(of: NSClassFromString("UIApplication") ?? NSNull.self), cur.responds(to: sel), let imp = cur.method(for: sel) {
-          typealias Open = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, AnyObject?) -> Void
-          unsafeBitCast(imp, to: Open.self)(cur, sel, url as NSURL, NSDictionary(), nil)
-          return
-        }
+      while app == nil, let cur = r {
+        if cur.isKind(of: NSClassFromString("UIApplication") ?? NSNull.self) { app = cur }
         r = cur.next
       }
+      guard let a = app, a.responds(to: sel), let imp = a.method(for: sel) else { return }
+      typealias Open = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, AnyObject?) -> Void
+      unsafeBitCast(imp, to: Open.self)(a, sel, url as NSURL, NSDictionary(), nil)
     }
   }
+
 }
