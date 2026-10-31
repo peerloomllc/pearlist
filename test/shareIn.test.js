@@ -54,3 +54,12 @@ test('iOS: the App Store export signs the extension with its own profile', () =>
   assert.match(conf, /^IOS_SHARE_PROVISIONING_PROFILE=/m)
   assert.match(read('scripts/ios-appstore.sh'), /<key>\$\{BUNDLE_ID\}\.share<\/key>\s*<string>\$\{IOS_SHARE_PROVISIONING_PROFILE\}/)
 })
+
+test('iOS: both build scripts sign each target with its own profile before archiving', () => {
+  const store = read('scripts/ios-appstore.sh')
+  assert.ok(store.indexOf('scripts/ios-signing.rb') !== -1 && store.indexOf('scripts/ios-signing.rb') < store.indexOf('archive 2>&1'))
+  const dev = read('scripts/ios-dev-install.sh')
+  assert.match(dev, /ios-signing\.rb PearList\.xcodeproj \\"Apple Development\\" \\"PearList Development\\" \\"PearList Share Development\\"/)
+  assert.doesNotMatch(dev, /CODE_SIGN_STYLE=Automatic/)
+  assert.match(read('scripts/ios-signing.rb'), /'PearListShare' => share_profile/)
+})

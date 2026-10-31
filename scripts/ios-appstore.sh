@@ -258,6 +258,12 @@ if ! /usr/libexec/PlistBuddy -c "Print :UIApplicationSceneManifest" "$INFO_PLIST
   exit 1
 fi
 
+# ── Signing ─────────────────────────────────────────────────────────────────
+# The app and its share extension both ask for the App Group, so each target
+# is signed by hand with its own distribution profile. See scripts/ios-signing.rb.
+ruby "$REPO_ROOT/scripts/ios-signing.rb" "$(dirname "$PBXPROJ")" "Apple Distribution" \
+  "$IOS_PROVISIONING_PROFILE" "$IOS_SHARE_PROVISIONING_PROFILE"
+
 # ── Archive ─────────────────────────────────────────────────────────────────
 # $HOME, not ~: inside the quotes ~ is never expanded, and codesign then fails with
 # "no identity found" (it did on Xcode 27, 2026-09-28).
